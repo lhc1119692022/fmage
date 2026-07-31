@@ -40,17 +40,17 @@ const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG_PATH =
   process.env.FMAGE_CONFIG ||
   join(process.env.CODEX_HOME || join(homedir(), ".codex"), "fmage", "providers.json");
-const TRANSPORT_RELAY808_ASYNC = "relay808-openai-images-async";
-const RELAY808_DEFAULT_TIMEOUT_SECONDS = 600;
-const RELAY808_DEFAULT_RESPONSE_FORMAT = "url";
-const RELAY808_SUPPORTED_MODELS = new Set(["gpt-image-2", "gpt-image-2-token"]);
+const TRANSPORT_808_OPENAI_IMAGES = "808-openai-images";
+const OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS = 600;
+const OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT = "url";
+const OPENAI_IMAGES_808_SUPPORTED_MODELS = new Set(["gpt-image-2", "gpt-image-2-token"]);
 
 const TRANSPORTS = {
   "openai-images": join(PLUGIN_ROOT, "scripts", "openai_images_transport.py"),
-  [TRANSPORT_RELAY808_ASYNC]: join(
+  [TRANSPORT_808_OPENAI_IMAGES]: join(
     PLUGIN_ROOT,
     "scripts",
-    "relay808_openai_images_async_transport.py",
+    "openai_images_808_transport.py",
   ),
   "json-images": join(PLUGIN_ROOT, "scripts", "json_images_transport.py"),
   "zenmux-vertex": join(PLUGIN_ROOT, "scripts", "zenmux_vertex_transport.py"),
@@ -852,15 +852,15 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   if (!baseUrl || !model) {
     throw new Error(`Provider "${providerName}" must define base_url and model in ${CONFIG_PATH}.`);
   }
-  let relay808 = null;
-  if (transport === TRANSPORT_RELAY808_ASYNC) {
-    if (!RELAY808_SUPPORTED_MODELS.has(model)) {
+  let openaiImages808 = null;
+  if (transport === TRANSPORT_808_OPENAI_IMAGES) {
+    if (!OPENAI_IMAGES_808_SUPPORTED_MODELS.has(model)) {
       throw new Error(
-        `Provider "${providerName}" model "${model}" is not supported by ${TRANSPORT_RELAY808_ASYNC}. ` +
+        `Provider "${providerName}" model "${model}" is not supported by ${TRANSPORT_808_OPENAI_IMAGES}. ` +
           `Use gpt-image-2 or gpt-image-2-token.`,
       );
     }
-    const responseFormat = nonEmptyString(raw.response_format) || RELAY808_DEFAULT_RESPONSE_FORMAT;
+    const responseFormat = nonEmptyString(raw.response_format) || OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT;
     if (!["url", "b64_json"].includes(responseFormat)) {
       throw new Error(
         `Provider "${providerName}" has unsupported response_format "${responseFormat}". ` +
@@ -871,9 +871,9 @@ async function resolveProvider(requestedProvider, requireKey = true) {
     if (configuredTimeout !== undefined && positiveInteger(configuredTimeout, 0) === 0) {
       throw new Error(`Provider "${providerName}" timeout must be a positive integer.`);
     }
-    relay808 = {
+    openaiImages808 = {
       responseFormat,
-      timeoutSeconds: positiveInteger(configuredTimeout, RELAY808_DEFAULT_TIMEOUT_SECONDS),
+      timeoutSeconds: positiveInteger(configuredTimeout, OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS),
     };
   }
   if (requireKey && !apiKey) {
@@ -894,7 +894,7 @@ async function resolveProvider(requestedProvider, requireKey = true) {
     apiKeyConfigured: Boolean(apiKey),
     apiKeySource: nonEmptyString(raw.api_key) ? "external_config" : apiKey ? `environment:${apiKeyEnv}` : "missing",
     promptPolicy,
-    relay808,
+    openaiImages808,
     config,
     raw,
   };
@@ -1025,18 +1025,21 @@ function commonArguments(args, promptFile, provider) {
   return argv;
 }
 
-function relay808RequestTimeoutSeconds(args, provider) {
-  return positiveInteger(args.timeout, provider.relay808?.timeoutSeconds ?? RELAY808_DEFAULT_TIMEOUT_SECONDS);
+function openaiImages808RequestTimeoutSeconds(args, provider) {
+  return positiveInteger(
+    args.timeout,
+    provider.openaiImages808?.timeoutSeconds ?? OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS,
+  );
 }
 
-function relay808PendingTimeoutSeconds(args, provider) {
+function openaiImages808PendingTimeoutSeconds(args, provider) {
   return Math.max(
-    relay808RequestTimeoutSeconds(args, provider),
+    openaiImages808RequestTimeoutSeconds(args, provider),
     positiveInteger(args._pending_total_timeout, 0),
   );
 }
 
-function relay808Arguments(args, promptFile, provider) {
+function openaiImages808Arguments(args, promptFile, provider) {
   const outputDir = transportOutputRoot(args, provider);
   const argv = ["--prompt-file", promptFile];
 
@@ -1054,11 +1057,13 @@ function relay808Arguments(args, promptFile, provider) {
   appendOption(
     argv,
     "--response-format",
-    nonEmptyString(args.response_format) || provider.relay808?.responseFormat || RELAY808_DEFAULT_RESPONSE_FORMAT,
+    nonEmptyString(args.response_format) ||
+      provider.openaiImages808?.responseFormat ||
+      OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT,
   );
   appendOption(argv, "--output-dir", outputDir);
-  appendOption(argv, "--timeout", relay808RequestTimeoutSeconds(args, provider));
-  appendOption(argv, "--pending-total-timeout", relay808PendingTimeoutSeconds(args, provider));
+  appendOption(argv, "--timeout", openaiImages808RequestTimeoutSeconds(args, provider));
+  appendOption(argv, "--pending-total-timeout", openaiImages808PendingTimeoutSeconds(args, provider));
   appendFlag(argv, "--dry-run", args.dry_run);
   return argv;
 }
@@ -2309,8 +2314,8 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
 
   try {
     const transportArguments =
-      provider.transport === TRANSPORT_RELAY808_ASYNC
-        ? relay808Arguments(args, promptFile, provider)
+      provider.transport === TRANSPORT_808_OPENAI_IMAGES
+        ? openaiImages808Arguments(args, promptFile, provider)
         : commonArguments(args, promptFile, provider);
     const argv = [scriptPath, command, ...transportArguments];
     if (command === "edit") {
@@ -2328,8 +2333,8 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     }
 
     const helperTimeoutSeconds =
-      provider.transport === TRANSPORT_RELAY808_ASYNC
-        ? relay808PendingTimeoutSeconds(args, provider)
+      provider.transport === TRANSPORT_808_OPENAI_IMAGES
+        ? openaiImages808PendingTimeoutSeconds(args, provider)
         : ["json-images", "chat-completions-image"].includes(provider.transport)
           ? Math.max(positiveInteger(args.timeout, 0), positiveInteger(args._pending_total_timeout, 0))
           : args.timeout;
@@ -3120,10 +3125,10 @@ async function providerStatus(requestedProvider) {
     output_dir: finalOutputRoot({}, provider),
     cache_dir: transportOutputRoot({}, provider),
     task_dir: taskStoreRoot(),
-    ...(provider.relay808
+    ...(provider.openaiImages808
       ? {
-          response_format: provider.relay808.responseFormat,
-          timeout_seconds: provider.relay808.timeoutSeconds,
+          response_format: provider.openaiImages808.responseFormat,
+          timeout_seconds: provider.openaiImages808.timeoutSeconds,
           remote_async: {
             enabled: true,
             submission_query: { async: "true" },

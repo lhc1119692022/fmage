@@ -11,7 +11,7 @@ import urllib.parse
 import openai_images_transport as openai
 
 
-TRANSPORT_NAME = "relay808-openai-images-async"
+TRANSPORT_NAME = "808-openai-images"
 DEFAULT_RESPONSE_FORMAT = "url"
 DEFAULT_PENDING_TOTAL_TIMEOUT = 600
 DEFAULT_POLL_INTERVAL = 5
@@ -27,7 +27,7 @@ class RemoteTaskError(RuntimeError):
     def __init__(self, task_id: str, status: str, detail: str):
         normalized_status = status or "unknown"
         super().__init__(
-            f'808Relay remote task "{task_id}" {detail} (last status: {normalized_status}).'
+            f'808 OpenAI Images remote task "{task_id}" {detail} (last status: {normalized_status}).'
         )
         self.task_id = task_id
         self.status = normalized_status
@@ -108,7 +108,7 @@ def initial_remote_task(response: dict[str, Any]) -> tuple[str, str] | None:
     status = response_status(response)
     if not task_id:
         raise RuntimeError(
-            "808Relay submission response contained neither image data nor id/task_id."
+            "808 OpenAI Images submission response contained neither image data nor id/task_id."
         )
     if status in FAILURE_STATUSES:
         raise RemoteTaskError(task_id, status, response_error_detail(response))
@@ -318,7 +318,7 @@ def write_manifest(
     return manifest_path
 
 
-def validate_relay_arguments(args: argparse.Namespace) -> None:
+def validate_808_arguments(args: argparse.Namespace) -> None:
     openai.validate_common(args)
     if args.model not in SUPPORTED_MODELS:
         supported = ", ".join(sorted(SUPPORTED_MODELS))
@@ -344,7 +344,7 @@ def remote_result_fields(remote_metadata: dict[str, Any] | None) -> dict[str, An
 
 def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     timing: dict[str, Any] = {"transport_started_at": openai.iso_now()}
-    validate_relay_arguments(args)
+    validate_808_arguments(args)
     prompt = openai.read_prompt(args)
     size, size_notes = openai.resolve_size(args, [])
     payload = common_payload(args, prompt, size)
@@ -416,7 +416,7 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
 
 def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     timing: dict[str, Any] = {"transport_started_at": openai.iso_now()}
-    validate_relay_arguments(args)
+    validate_808_arguments(args)
     prompt = openai.read_prompt(args)
     root = openai.output_root(args)
 
@@ -513,7 +513,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def add_relay_arguments(parser: argparse.ArgumentParser) -> None:
+def add_808_arguments(parser: argparse.ArgumentParser) -> None:
     openai.add_common_arguments(parser)
     parser.set_defaults(pending_total_timeout=DEFAULT_PENDING_TOTAL_TIMEOUT)
     parser.add_argument(
@@ -526,15 +526,15 @@ def add_relay_arguments(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="808Relay asynchronous OpenAI Images-compatible generator/editor."
+        description="808 OpenAI Images asynchronous generator/editor."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     generate = subparsers.add_parser("generate", help="Generate images from text.")
-    add_relay_arguments(generate)
+    add_808_arguments(generate)
 
     edit = subparsers.add_parser("edit", help="Edit local images using one or more references.")
-    add_relay_arguments(edit)
+    add_808_arguments(edit)
     edit.add_argument("--image", action="append", help="Reference image path. Repeat for multiple images.")
     edit.add_argument("--use-latest", action="store_true", help="Use latest image saved by this skill.")
 

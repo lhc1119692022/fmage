@@ -21,7 +21,7 @@ SERVER_PATH = PLUGIN_ROOT / "mcp" / "server.mjs"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import openai_images_transport as openai
-import relay808_openai_images_async_transport as transport
+import openai_images_808_transport as transport
 
 
 PNG_BYTES = base64.b64decode(
@@ -55,13 +55,13 @@ class PngHandler(BaseHTTPRequestHandler):
         return
 
 
-def relay_args(command: str, output_dir: Path, *extra: str) -> argparse.Namespace:
+def image808_args(command: str, output_dir: Path, *extra: str) -> argparse.Namespace:
     argv = [
         command,
         "--prompt",
         "test image",
         "--base-url",
-        "https://relay.example/v1",
+        "https://images808.example/v1",
         "--model",
         "gpt-image-2",
         "--api-key-env",
@@ -131,14 +131,14 @@ class EndpointAndPayloadTests(unittest.TestCase):
 
     def test_business_payload_reuses_openai_images_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            args = relay_args("generate", Path(temp_dir), "--response-format", "url")
+            args = image808_args("generate", Path(temp_dir), "--response-format", "url")
         base_payload = openai.common_payload(args, "prompt", "1536x1024")
-        relay_payload = transport.common_payload(args, "prompt", "1536x1024")
+        image808_payload = transport.common_payload(args, "prompt", "1536x1024")
         self.assertEqual(
-            {key: value for key, value in relay_payload.items() if key != "response_format"},
+            {key: value for key, value in image808_payload.items() if key != "response_format"},
             base_payload,
         )
-        self.assertEqual(relay_payload["response_format"], "url")
+        self.assertEqual(image808_payload["response_format"], "url")
 
     def test_submission_accepts_id_and_task_id(self) -> None:
         self.assertEqual(
@@ -159,18 +159,18 @@ class EndpointAndPayloadTests(unittest.TestCase):
 
     def test_transport_rejects_unrelated_models_but_accepts_token_variant(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            args = relay_args("generate", Path(temp_dir))
+            args = image808_args("generate", Path(temp_dir))
             args.model = "gemini-3-pro-image"
             with self.assertRaisesRegex(ValueError, "supports only"):
-                transport.validate_relay_arguments(args)
+                transport.validate_808_arguments(args)
             args.model = "gpt-image-2-token"
-            transport.validate_relay_arguments(args)
+            transport.validate_808_arguments(args)
 
 
 class PollingTests(unittest.TestCase):
     def args(self, timeout: int = 30, interval: int = 1) -> argparse.Namespace:
         return argparse.Namespace(
-            base_url="https://relay.example/v1",
+            base_url="https://images808.example/v1",
             response_format="url",
             timeout=10,
             pending_total_timeout=timeout,
@@ -270,7 +270,7 @@ class PollingTests(unittest.TestCase):
 class TransportExecutionTests(unittest.TestCase):
     def test_async_base64_result_writes_remote_task_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            args = relay_args("generate", Path(temp_dir))
+            args = image808_args("generate", Path(temp_dir))
             clock = FakeClock()
             responses = iter(
                 [
@@ -317,7 +317,7 @@ class TransportExecutionTests(unittest.TestCase):
         self.addCleanup(server.shutdown)
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            args = relay_args("generate", Path(temp_dir))
+            args = image808_args("generate", Path(temp_dir))
             image_url = f"http://127.0.0.1:{server.server_port}/image.png"
             with (
                 mock.patch.dict(os.environ, {"FMAGE_TEST_API_KEY": "secret"}),
@@ -346,7 +346,7 @@ class TransportExecutionTests(unittest.TestCase):
                     extra: list[str] = []
                     for reference in references[:count]:
                         extra.extend(["--image", str(reference)])
-                    args = relay_args("edit", root / f"output-{count}", *extra)
+                    args = image808_args("edit", root / f"output-{count}", *extra)
                     captured_fields: list[tuple[str, Path]] = []
 
                     def multipart(
@@ -376,19 +376,19 @@ class TransportExecutionTests(unittest.TestCase):
 class ServerRoutingTests(unittest.TestCase):
     def config(self) -> dict[str, object]:
         return {
-            "active_providers": ["ordinary-relay", "relay808-lookalike"],
+            "active_providers": ["image-808", "openai-images-lookalike"],
             "output_dir": "outputs",
             "cache_dir": "cache",
             "providers": {
-                "ordinary-relay": {
-                    "transport": "relay808-openai-images-async",
+                "image-808": {
+                    "transport": "808-openai-images",
                     "base_url": "https://neutral.example/v1",
                     "model": "gpt-image-2",
                     "response_format": "url",
                     "timeout": 321,
                     "api_key": "",
                 },
-                "relay808-lookalike": {
+                "openai-images-lookalike": {
                     "transport": "openai-images",
                     "base_url": "https://api.808relay.com/v1",
                     "model": "gpt-image-2",
@@ -399,11 +399,11 @@ class ServerRoutingTests(unittest.TestCase):
 
     def test_transport_name_is_the_only_async_routing_switch(self) -> None:
         config = self.config()
-        relay = call_server(
+        image808 = call_server(
             config,
             "generate_image",
             {
-                "provider": "ordinary-relay",
+                "provider": "image-808",
                 "prompt": "test",
                 "dry_run": True,
                 "verbose": True,
@@ -413,20 +413,20 @@ class ServerRoutingTests(unittest.TestCase):
             config,
             "generate_image",
             {
-                "provider": "relay808-lookalike",
+                "provider": "openai-images-lookalike",
                 "prompt": "test",
                 "dry_run": True,
                 "verbose": True,
             },
         )
 
-        self.assertEqual(relay["provider_transport"], "relay808-openai-images-async")
+        self.assertEqual(image808["provider_transport"], "808-openai-images")
         self.assertEqual(
-            urllib.parse.parse_qs(urllib.parse.urlsplit(relay["endpoint"]).query)["async"],
+            urllib.parse.parse_qs(urllib.parse.urlsplit(image808["endpoint"]).query)["async"],
             ["true"],
         )
-        self.assertEqual(relay["request"]["response_format"], "url")
-        self.assertEqual(relay["remote_async"]["total_timeout_seconds"], 321)
+        self.assertEqual(image808["request"]["response_format"], "url")
+        self.assertEqual(image808["remote_async"]["total_timeout_seconds"], 321)
 
         self.assertEqual(lookalike["provider_transport"], "openai-images")
         self.assertNotIn("async", urllib.parse.parse_qs(urllib.parse.urlsplit(lookalike["endpoint"]).query))
@@ -436,7 +436,7 @@ class ServerRoutingTests(unittest.TestCase):
         status = call_server(
             self.config(),
             "get_provider_status",
-            {"provider": "ordinary-relay"},
+            {"provider": "image-808"},
         )
         self.assertEqual(status["response_format"], "url")
         self.assertEqual(status["timeout_seconds"], 321)
