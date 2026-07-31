@@ -1,0 +1,31 @@
+{
+  "name": "fmage",
+  "version": "0.1.0+codex.20260727120155",
+  "description": "Generate and edit images through configurable OpenAI-compatible providers with Codex-revised prompts and explicit separation of delivery quality parameters from visual style.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Fmage",
+    "shortDescription": "Provider-neutral GPT Image generation and editing.",
+    "longDescription": "Adds first-class image generation and editing tools with prompts revised by the active Codex model, switchable local provider configuration, and guardrails that keep quality tiers such as low/1K separate from sketch or wireframe styling. API keys remain outside the shareable plugin directory.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "brandColor": "#665CE8",
+    "composerIcon": "./assets/fmage-icon.svg",
+    "logo": "./assets/fmage-icon.svg",
+    "capabilities": [
+      "Image generation",
+      "Image editing",
+      "Multiple providers",
+      "Revised prompt tool calls"
+    ],
+    "defaultPrompt": [
+      "Generate this image with Fmage.",
+      "Edit this reference image with Fmage.",
+      "Show the active Fmage provider."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

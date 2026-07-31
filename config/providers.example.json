@@ -1,0 +1,46 @@
+{
+  "active_providers": [
+    "openai-image-2",
+    "right-banana-2"
+  ],
+  "output_dir": "",
+  "cache_dir": "",
+  "providers": {
+    "openai-image-2": {
+      "transport": "openai-images",
+      "base_url": "https://api.openai.com/v1",
+      "model": "gpt-image-2",
+      "api_key": ""
+    },
+    "ezai-image-2": {
+      "prompt_policy": {
+        "max_chars": 4000,
+        "target_chars": 3900,
+        "overflow_strategy": "language_aware_compact",
+        "preferred_compact_language": "zh-CN"
+      },
+      "transport": "openai-images",
+      "base_url": "https://api-direct.ezaiclub.com",
+      "model": "gpt-image-2",
+      "api_key": ""
+    },
+    "right-image-2": {
+      "transport": "json-images",
+      "base_url": "https://www.rightapi.ai/draw",
+      "model": "gpt-image-2-vip",
+      "api_key": ""
+    },
+    "yunwu-image-2": {
+      "transport": "openai-images",
+      "base_url": "https://yunwu.ai/v1",
+      "model": "gpt-image-2",
+      "api_key": ""
+    },
+    "right-banana-2": {
+      "transport": "chat-completions-image",
+      "base_url": "https://www.rightapi.ai/draw",
+      "model": "nano-banana-2",
+      "api_key": ""
+    }
+  }
+}

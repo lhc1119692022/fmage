@@ -1,0 +1,8 @@
+# Delivery And Visual Language
+
+- Phrases such as `quality low`, `low quality`, `draft quality`, `preview quality`, `草图质量`, or `低质量输出` select `quality: low` and `quality_user_requested: true`. For `草图质量` or `draft quality`, also pass `resolution: 1k` unless the user explicitly selects another resolution.
+- An explicit `1k` request sets only `resolution: 1k`; do not infer `quality` from resolution alone.
+- Phrases such as `sketch style`, `hand-drawn sketch`, `wireframe`, `low-fidelity`, or `线框/手绘草图风格` affect only the prompt when that aesthetic is explicitly requested. Do not turn `草图` into a sketch aesthetic when it modifies quality, resolution, cost, or speed.
+- Treat ambiguous `草图` conservatively. Preserve the user's other visual direction and do not inject sketch, wireframe, low-fidelity, placeholder, or gray-placeholder terms. Ask only when the ambiguity would materially change the image and context cannot resolve it.
+- Treat `占位素材`, `临时封面`, `示意内容`, and similar wording as content substitution, not an empty wireframe. Use complete fictional but plausible imagery, labels, links, and QR-code-like components in the requested finished style. Add empty boxes, gray blocks, wireframe labels, or design annotations only when explicitly requested.
+- For `效果图`, `成品效果图`, or a design intended to judge visual fit, describe a coherent finished composition with restrained, purposeful text and elements. Do not add decorative headings, arrows, grids, crop marks, annotations, or invented copy unless requested or necessary.

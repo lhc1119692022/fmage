@@ -1,0 +1,47 @@
+# Local secrets and provider configuration
+.env
+.env.*
+!.env.example
+providers.json
+config/providers.json
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Python caches and environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Node dependencies and logs
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Generated output and temporary files
+output/
+outputs/
+generated/
+tmp/
+temp/
+*.log
+
+# Editor and operating-system state
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local Codex working state (keep .codex-plugin tracked)
+.codex/
