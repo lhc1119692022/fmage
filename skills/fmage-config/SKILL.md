@@ -30,5 +30,6 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
 
 - Before editing, inspect the file and preserve existing providers.
 - If missing and creation is requested, copy from plugin `config/providers.example.json`.
-- Edit non-secret fields normally: `active_providers`, legacy `active_provider`, `base_url`, `model`, and provider names.
+- Edit non-secret fields normally: `active_providers`, legacy `active_provider`, `transport`, `base_url`,
+  `model`, `response_format`, `timeout`, and provider names.
 - Never print existing API keys or ask the user to paste keys into chat; tell them to edit keys directly in `providers.json`.

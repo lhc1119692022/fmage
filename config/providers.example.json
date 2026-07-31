@@ -12,6 +12,14 @@
       "model": "gpt-image-2",
       "api_key": ""
     },
+    "relay808-gpt-image-2": {
+      "transport": "relay808-openai-images-async",
+      "base_url": "https://api.808relay.com/v1",
+      "model": "gpt-image-2",
+      "response_format": "url",
+      "timeout": 600,
+      "api_key": ""
+    },
     "ezai-image-2": {
       "prompt_policy": {
         "max_chars": 4000,
