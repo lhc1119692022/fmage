@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import struct
+import time
 from typing import Any
 import urllib.request
 
@@ -172,7 +173,26 @@ def save_response_images_from_data(
             continue
 
         ext = sniff_extension(image_bytes, preferred_format)
-        path = run_dir / f"image_{index}.{ext}"
+        direct_output_dir = os.environ.get("FMAGE_DIRECT_OUTPUT_DIR", "").strip()
+        if direct_output_dir:
+            output_dir = Path(direct_output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = os.environ.get("FMAGE_OUTPUT_TIMESTAMP", "").strip() or time.strftime(
+                "%Y%m%d-%H%M%S"
+            )
+            try:
+                first_sequence = max(1, int(os.environ.get("FMAGE_OUTPUT_SEQUENCE", "1")))
+            except ValueError:
+                first_sequence = 1
+            sequence = first_sequence + index - 1
+            base_name = f"{timestamp}-{sequence:03d}"
+            path = output_dir / f"{base_name}.{ext}"
+            attempt = 0
+            while path.exists():
+                attempt += 1
+                path = output_dir / f"{base_name}-{attempt}.{ext}"
+        else:
+            path = run_dir / f"image_{index}.{ext}"
         path.write_bytes(image_bytes)
         saved.append(path)
 

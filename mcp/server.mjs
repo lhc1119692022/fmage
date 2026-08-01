@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { access, copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import readline from "node:readline";
@@ -24,6 +24,7 @@ const TOOL_EDIT_BATCH_EZAI = "edit_image_batch_ezai_image_2";
 const TOOL_TRACE_PLAN = "trace_image_job_plan";
 const TOOL_STATUS = "get_provider_status";
 const TOOL_TASK_STATUS = "get_image_task_status";
+const TOOL_REGRESS = "regress_image";
 const BASE_INITIALIZE_INSTRUCTIONS =
   "Use Fmage image tools. Complete the unrestricted prompt with the active model before provider adaptation. " +
   "For edits, identify reference-image roles and preserve required text, layout, and other locked details. " +
@@ -66,6 +67,13 @@ const TRANSPORTS = {
   "zenmux-vertex": join(PLUGIN_ROOT, "scripts", "zenmux_vertex_transport.py"),
   "chat-completions-image": join(PLUGIN_ROOT, "scripts", "chat_completions_image_transport.py"),
 };
+const REGRESSION_SCRIPT = join(
+  PLUGIN_ROOT,
+  "skills",
+  "fmage-image-regression",
+  "scripts",
+  "degrade_image.py",
+);
 
 const JsonRpcError = {
   METHOD_NOT_FOUND: -32601,
@@ -1026,6 +1034,36 @@ function runProcess(command, argv, extraEnv = {}, options = {}) {
   });
 }
 
+async function runImageRegression(args) {
+  const image = nonEmptyString(args.image);
+  if (!image) throw new Error("regress_image requires a local image path.");
+  const result = await runProcess(
+    pythonCommand(),
+    [REGRESSION_SCRIPT, "--input", image],
+    { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+    { timeoutSeconds: 120 },
+  );
+  const output = normalizeDisplayPath(result.output);
+  return {
+    ...result,
+    output,
+    display_images: output ? [output] : [],
+  };
+}
+
+function regressionResultText(result) {
+  const output = nonEmptyString(result.output);
+  const original = Array.isArray(result.original_size) ? result.original_size : [];
+  const finalSize = Array.isArray(result.output_size) ? result.output_size : [];
+  const lines = ["处理完成。"];
+  if (output) lines.push(`- 输出：[${output.split("/").pop()}](${output})`);
+  if (finalSize.length === 2) {
+    const originalText = original.length === 2 ? `（原图 ${original[0]} × ${original[1]}）` : "";
+    lines.push(`- 尺寸：${finalSize[0]} × ${finalSize[1]}${originalText}`);
+  }
+  return lines.join("\n\n");
+}
+
 function commonArguments(args, promptFile, provider) {
   const outputDir = transportOutputRoot(args, provider);
   const argv = ["--prompt-file", promptFile];
@@ -1332,6 +1370,19 @@ function isPathInside(childPath, parentPath) {
   return relation === "" || (!!relation && !relation.startsWith("..") && !isAbsolute(relation));
 }
 
+async function removeEmptyAncestors(startDir, boundaryDir) {
+  const boundary = resolve(boundaryDir);
+  let current = resolve(startDir);
+  while (current !== boundary && isPathInside(current, boundary)) {
+    try {
+      await rmdir(current);
+    } catch {
+      return;
+    }
+    current = dirname(current);
+  }
+}
+
 async function validateLatestImagePaths(images, allowedRoots) {
   const roots = [];
   for (const root of allowedRoots) {
@@ -1493,9 +1544,14 @@ async function publishResultImages(result, args, provider) {
 
   const outputDir = finalOutputRoot(args, provider);
   const cacheDir = transportOutputRoot({}, provider);
+  const requestCacheDir = transportOutputRoot(args, provider);
+  const cleanupBoundary = nonEmptyString(args._transport_output_dir)
+    ? dirname(requestCacheDir)
+    : requestCacheDir;
   const timestamp = nonEmptyString(args.output_timestamp) || timestampForPath();
   const firstSequence = positiveInteger(args.output_sequence, 1);
   const publishedImages = [];
+  const cleanupDirectories = new Set();
 
   await mkdir(outputDir, { recursive: true });
 
@@ -1503,7 +1559,12 @@ async function publishResultImages(result, args, provider) {
     const source = nonEmptyString(image);
     if (!source) continue;
     const extension = extname(source) || `.${nonEmptyString(args.output_format) || "png"}`;
-    const destination = await uniqueFlatOutputPath(outputDir, timestamp, firstSequence + index, extension);
+    const resolvedSource = resolve(source);
+    const destination =
+      dirname(resolvedSource) === resolve(outputDir)
+        ? resolvedSource
+        : await uniqueFlatOutputPath(outputDir, timestamp, firstSequence + index, extension);
+    cleanupDirectories.add(dirname(resolvedSource));
     await moveFile(source, destination);
     publishedImages.push(destination);
   }
@@ -1531,10 +1592,14 @@ async function publishResultImages(result, args, provider) {
     result.display_manifest = normalizeDisplayPath(sidecarManifests[0]);
     if (originalManifest && !sidecarManifests.some((item) => resolve(item) === resolve(originalManifest))) {
       await rm(originalManifest, { force: true });
+      cleanupDirectories.add(dirname(originalManifest));
     }
   }
   await writeGlobalLatestState(result);
   await removeProviderLatestState(cacheDir);
+  for (const directory of Array.from(cleanupDirectories).sort((left, right) => right.length - left.length)) {
+    await removeEmptyAncestors(directory, cleanupBoundary);
+  }
   return result;
 }
 
@@ -2355,6 +2420,11 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
 
   const singleStartedAt = isoNow();
   const provider = resolvedProvider ?? (await resolveProvider(args.provider, !args.dry_run));
+  args = {
+    ...args,
+    output_timestamp: nonEmptyString(args.output_timestamp) || timestampForPath(),
+    output_sequence: positiveInteger(args.output_sequence, 1),
+  };
   if (isEzaiImagePromptPolicyProvider(provider) && !args._ezai_prompt_policy) {
     args = { ...args, provider: EZAI_PROVIDER_NAME, _ezai_prompt_policy: true };
   }
@@ -2398,6 +2468,13 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
           ? Math.max(positiveInteger(args.timeout, 0), positiveInteger(args._pending_total_timeout, 0))
           : args.timeout;
     const helperEnvironment = provider.apiKey ? { FMAGE_ACTIVE_API_KEY: provider.apiKey } : {};
+    if (!args.dry_run) {
+      Object.assign(helperEnvironment, {
+        FMAGE_DIRECT_OUTPUT_DIR: finalOutputRoot(args, provider),
+        FMAGE_OUTPUT_TIMESTAMP: args.output_timestamp,
+        FMAGE_OUTPUT_SEQUENCE: String(args.output_sequence),
+      });
+    }
     if (args._ezai_prompt_policy) {
       helperEnvironment.PYTHONUTF8 = "1";
       helperEnvironment.PYTHONIOENCODING = "utf-8";
@@ -2724,6 +2801,31 @@ function toolDefinitions() {
     );
   }
   const tools = [
+    {
+      name: TOOL_REGRESS,
+      title: "Fmage 图片退步",
+      description:
+        "Immediately apply the fixed local Fmage image-regression pipeline to one local image. " +
+        "No provider request, prompt, shell command, preview, or preflight is needed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          image: {
+            type: "string",
+            minLength: 1,
+            description: "Absolute path of the local input image.",
+          },
+        },
+        required: ["image"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
     {
       name: TOOL_TRACE_PLAN,
       title: "Trace Fmage Image Plan",
@@ -3211,6 +3313,15 @@ async function providerStatus(requestedProvider) {
 }
 
 async function handleToolCall(id, params) {
+  if (params?.name === TOOL_REGRESS) {
+    const result = await runImageRegression(params.arguments ?? {});
+    sendResult(id, {
+      content: [{ type: "text", text: regressionResultText(result) }],
+      structuredContent: result,
+    });
+    return;
+  }
+
   if (params?.name === TOOL_TRACE_PLAN) {
     const trace = {
       trace_type: "image_job_plan",

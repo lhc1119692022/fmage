@@ -47,6 +47,14 @@ MAX_PIXELS = 4096 * 4096
 MAX_RATIO = 3.0
 
 
+def is_image_2_model(model: str | None) -> bool:
+    return (model or "").strip().lower().startswith("gpt-image-2")
+
+
+def default_resolution_for_model(model: str | None) -> str:
+    return "1k" if is_image_2_model(model) else DEFAULT_RESOLUTION
+
+
 def iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -225,12 +233,13 @@ def infer_aspect_from_prompt(prompt: str) -> tuple[float | None, str | None]:
     return None, None
 
 
-def infer_resolution_from_quality(quality: str | None) -> tuple[str, str]:
+def infer_resolution_from_quality(quality: str | None, model: str | None = None) -> tuple[str, str]:
     if quality == "low":
         return "1k", "resolution_inferred_from_low_quality"
     if quality == "high":
         return "4k", "resolution_inferred_from_high_quality"
-    return DEFAULT_RESOLUTION, "resolution_inferred_from_default_quality"
+    resolution = default_resolution_for_model(model)
+    return resolution, f"resolution_{resolution}_inferred_from_model_default"
 
 
 def read_prompt(args: argparse.Namespace) -> str:
@@ -277,7 +286,7 @@ def resolve_size(args: argparse.Namespace, references: list[str]) -> tuple[str |
     if aspect is not None:
         resolution = args.resolution
         if not resolution or resolution.lower() == "auto":
-            resolution, resolution_note = infer_resolution_from_quality(args.quality)
+            resolution, resolution_note = infer_resolution_from_quality(args.quality, args.model)
             notes.append(resolution_note)
         size, size_notes = size_from_aspect(aspect, resolution)
         return size, notes + size_notes
@@ -286,7 +295,9 @@ def resolve_size(args: argparse.Namespace, references: list[str]) -> tuple[str |
         size, size_notes = size_from_aspect(1.0, args.resolution)
         return size, ["square_size_from_resolution_without_aspect"] + size_notes
 
-    return FALLBACK_SIZE, ["fallback_2k_square"]
+    default_resolution = default_resolution_for_model(args.model)
+    size, size_notes = size_from_aspect(1.0, default_resolution)
+    return size, [f"fallback_{default_resolution}_square"] + size_notes
 
 
 def output_root(args: argparse.Namespace) -> Path:

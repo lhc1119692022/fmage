@@ -29,6 +29,7 @@ EZAI_IMAGE_TOOLS = {
 }
 EZAI_TOOLS = EZAI_IMAGE_TOOLS | {EZAI_PREPARE_TOOL}
 BASELINE_TOOL_NAMES = STANDARD_IMAGE_TOOLS | {
+    "regress_image",
     "trace_image_job_plan",
     "get_image_task_status",
     "get_provider_status",
@@ -362,7 +363,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
                 EZAI_PREPARE_TOOL,
             ],
         )
-        self.assertEqual(len(listed_tools), 8)
+        self.assertEqual(len(listed_tools), 9)
         self.assertTrue(STANDARD_IMAGE_TOOLS.isdisjoint(tools))
         self.assertLess(
             len(json.dumps(listed_tools, ensure_ascii=False, separators=(",", ":"))),

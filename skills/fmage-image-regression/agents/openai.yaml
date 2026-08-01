@@ -1,0 +1,7 @@
+interface:
+  display_name: "Fmage 图片退步"
+  short_description: "使用本地 Pillow 固定流程缩图、模糊并添加单色亮度噪点"
+  default_prompt: "Use $fmage-image-regression to locally degrade this image with the fixed 1K, blur, and monochrome-noise pipeline."
+
+policy:
+  allow_implicit_invocation: true
