@@ -13,6 +13,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 SERVER_PATH = PLUGIN_ROOT / "mcp" / "server.mjs"
 SKILL_PATH = PLUGIN_ROOT / "skills" / "fmage" / "SKILL.md"
 EZAI = "ezai-image-2"
+EZAI_BANANA = "ezai-banana"
 EZAI_PREPARE_TOOL = "prepare_prompt_ezai_image_2"
 STANDARD_IMAGE_TOOLS = {
     "generate_image",
@@ -49,6 +50,16 @@ def provider(name: str, prompt_policy: dict[str, object] | None = None) -> dict[
     if prompt_policy is not None:
         value["prompt_policy"] = prompt_policy
     return value
+
+
+def banana_provider() -> dict[str, object]:
+    return {
+        "transport": "ezai-banana-images",
+        "base_url": "https://api-direct.ezaiclub.com",
+        "model": "nano-banana-2",
+        "response_format": "url",
+        "api_key": "",
+    }
 
 
 def provider_config(
@@ -186,6 +197,15 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             {
                 EZAI: provider(EZAI, self.policy),
                 "ordinary-image": provider("ordinary-image"),
+            },
+        )
+
+    def ezai_and_banana_config(self) -> dict[str, object]:
+        return provider_config(
+            [EZAI, EZAI_BANANA],
+            {
+                EZAI: provider(EZAI, self.policy),
+                EZAI_BANANA: banana_provider(),
             },
         )
 
@@ -484,6 +504,51 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         for name in STANDARD_IMAGE_TOOLS:
             self.assertNotIn("provider_prompt", all_property_names(tools[name]))
             self.assertIn("Prefer the matching ezai-image-2 tool", tools[name]["description"])
+
+    def test_banana_standard_route_never_enters_image_prompt_policy(self) -> None:
+        response = self.call_image_tool(
+            self.ezai_and_banana_config(),
+            "generate_image",
+            provider=EZAI_BANANA,
+            prompt="complete Nano prompt",
+            resolution="2k",
+            aspect="1:1",
+        )
+        self.assertNotIn("error", response)
+        result = response["result"]["structuredContent"]
+        self.assertEqual(result["provider"], EZAI_BANANA)
+        self.assertEqual(result["provider_transport"], "ezai-banana-images")
+        self.assertEqual(result["request"]["model"], "nano-banana-2")
+        self.assertEqual(result["request"]["prompt"], "complete Nano prompt")
+        forbidden = {
+            "revised_prompt_source",
+            "source_prompt_chars",
+            "submitted_prompt_chars",
+            "prompt_policy",
+            "prompt_policy_applied",
+            "prompt_preparation",
+        }
+        self.assertTrue(forbidden.isdisjoint(result))
+
+    def test_image_prompt_policy_rejects_non_image_transport(self) -> None:
+        wrong_transport = banana_provider()
+        wrong_transport["prompt_policy"] = self.policy
+        config = provider_config([EZAI], {EZAI: wrong_transport})
+
+        tools = tool_map(call_server(config, "tools/list", {}))
+        self.assertTrue(EZAI_TOOLS.isdisjoint(tools))
+
+        response = self.call_image_tool(
+            config,
+            "generate_image",
+            provider=EZAI,
+            prompt="complete prompt",
+        )
+        self.assertIn("error", response)
+        self.assertIn(
+            'prompt_policy is valid only with transport "openai-images"',
+            response["error"]["message"],
+        )
 
     def test_ezai_under_limit_keeps_complete_prompt(self) -> None:
         response = self.call_image_tool(

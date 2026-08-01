@@ -32,10 +32,23 @@
       "model": "gpt-image-2",
       "api_key": ""
     },
+    "ezai-banana": {
+      "transport": "ezai-banana-images",
+      "base_url": "https://api-direct.ezaiclub.com",
+      "model": "nano-banana-2",
+      "response_format": "url",
+      "api_key": ""
+    },
     "right-image-2": {
       "transport": "json-images",
       "base_url": "https://www.rightapi.ai/draw",
       "model": "gpt-image-2-vip",
+      "api_key": ""
+    },
+    "right-banana-2": {
+      "transport": "chat-completions-image",
+      "base_url": "https://www.rightapi.ai/draw",
+      "model": "gemini-3.1-flash-image-preview",
       "api_key": ""
     },
     "yunwu-image-2": {
@@ -44,10 +57,10 @@
       "model": "gpt-image-2",
       "api_key": ""
     },
-    "right-banana-2": {
-      "transport": "chat-completions-image",
-      "base_url": "https://www.rightapi.ai/draw",
-      "model": "nano-banana-2",
+    "zenmux-vertex-image": {
+      "transport": "zenmux-vertex",
+      "base_url": "https://zenmux.ai/api/vertex-ai",
+      "model": "google/gemini-3.1-flash-image",
       "api_key": ""
     }
   }

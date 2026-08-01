@@ -14,6 +14,8 @@ const TOOL_EDIT = "edit_image";
 const TOOL_GENERATE_BATCH = "generate_image_batch";
 const TOOL_EDIT_BATCH = "edit_image_batch";
 const EZAI_PROVIDER_NAME = "ezai-image-2";
+// Prompt compaction belongs to this exact Image-series contract, never to a vendor prefix or base URL.
+const EZAI_IMAGE_POLICY_TRANSPORT = "openai-images";
 const TOOL_PREPARE_PROMPT_EZAI = "prepare_prompt_ezai_image_2";
 const TOOL_GENERATE_EZAI = "generate_image_ezai_image_2";
 const TOOL_EDIT_EZAI = "edit_image_ezai_image_2";
@@ -41,9 +43,12 @@ const CONFIG_PATH =
   process.env.FMAGE_CONFIG ||
   join(process.env.CODEX_HOME || join(homedir(), ".codex"), "fmage", "providers.json");
 const TRANSPORT_808_OPENAI_IMAGES = "808-openai-images";
+const TRANSPORT_EZAI_BANANA_IMAGES = "ezai-banana-images";
 const OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS = 600;
 const OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT = "url";
 const OPENAI_IMAGES_808_SUPPORTED_MODELS = new Set(["gpt-image-2", "gpt-image-2-token"]);
+const EZAI_BANANA_DEFAULT_RESPONSE_FORMAT = "url";
+const EZAI_BANANA_SUPPORTED_RESPONSE_FORMATS = new Set(["url", "b64_json"]);
 
 const TRANSPORTS = {
   "openai-images": join(PLUGIN_ROOT, "scripts", "openai_images_transport.py"),
@@ -51,6 +56,11 @@ const TRANSPORTS = {
     PLUGIN_ROOT,
     "scripts",
     "openai_images_808_transport.py",
+  ),
+  [TRANSPORT_EZAI_BANANA_IMAGES]: join(
+    PLUGIN_ROOT,
+    "scripts",
+    "ezai_banana_transport.py",
   ),
   "json-images": join(PLUGIN_ROOT, "scripts", "json_images_transport.py"),
   "zenmux-vertex": join(PLUGIN_ROOT, "scripts", "zenmux_vertex_transport.py"),
@@ -203,8 +213,16 @@ function normalizePromptPolicy(rawPolicy, context = "prompt_policy") {
   };
 }
 
+function isEzaiImagePromptPolicyProvider(provider) {
+  return (
+    provider?.name === EZAI_PROVIDER_NAME &&
+    provider?.transport === EZAI_IMAGE_POLICY_TRANSPORT &&
+    Boolean(provider?.promptPolicy)
+  );
+}
+
 function resolveProviderPrompt(args, provider) {
-  if (provider.name !== EZAI_PROVIDER_NAME || !provider.promptPolicy) {
+  if (!isEzaiImagePromptPolicyProvider(provider)) {
     throw new Error(`Provider prompt compaction is only available for ${EZAI_PROVIDER_NAME}.`);
   }
   if (args._prompt_resolution) return args._prompt_resolution;
@@ -838,8 +856,19 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   const model = nonEmptyString(raw.model);
   const apiKeyEnv = nonEmptyString(raw.api_key_env);
   const apiKey = nonEmptyString(raw.api_key) || (apiKeyEnv ? nonEmptyString(process.env[apiKeyEnv]) : null);
+  if (
+    providerName === EZAI_PROVIDER_NAME &&
+    raw.prompt_policy !== undefined &&
+    raw.prompt_policy !== null &&
+    transport !== EZAI_IMAGE_POLICY_TRANSPORT
+  ) {
+    throw new Error(
+      `providers.${EZAI_PROVIDER_NAME}.prompt_policy is valid only with transport ` +
+        `"${EZAI_IMAGE_POLICY_TRANSPORT}".`,
+    );
+  }
   const promptPolicy =
-    providerName === EZAI_PROVIDER_NAME
+    providerName === EZAI_PROVIDER_NAME && transport === EZAI_IMAGE_POLICY_TRANSPORT
       ? normalizePromptPolicy(raw.prompt_policy, `providers.${providerName}.prompt_policy`)
       : null;
 
@@ -876,6 +905,20 @@ async function resolveProvider(requestedProvider, requireKey = true) {
       timeoutSeconds: positiveInteger(configuredTimeout, OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS),
     };
   }
+  let ezaiBanana = null;
+  if (transport === TRANSPORT_EZAI_BANANA_IMAGES) {
+    const responseFormat = nonEmptyString(raw.response_format) || EZAI_BANANA_DEFAULT_RESPONSE_FORMAT;
+    if (!EZAI_BANANA_SUPPORTED_RESPONSE_FORMATS.has(responseFormat)) {
+      throw new Error(
+        `Provider "${providerName}" has unsupported response_format "${responseFormat}". ` +
+          `Use ${Array.from(EZAI_BANANA_SUPPORTED_RESPONSE_FORMATS).map((item) => `"${item}"`).join(" or ")}.`,
+      );
+    }
+    ezaiBanana = {
+      responseFormat,
+      editInputModes: ["json_image_urls", "multipart_local_files"],
+    };
+  }
   if (requireKey && !apiKey) {
     throw new Error(
       `Provider "${providerName}" has no API key. Open ${normalizeDisplayPath(CONFIG_PATH)}, ` +
@@ -895,6 +938,7 @@ async function resolveProvider(requestedProvider, requireKey = true) {
     apiKeySource: nonEmptyString(raw.api_key) ? "external_config" : apiKey ? `environment:${apiKeyEnv}` : "missing",
     promptPolicy,
     openaiImages808,
+    ezaiBanana,
     config,
     raw,
   };
@@ -1005,6 +1049,16 @@ function commonArguments(args, promptFile, provider) {
     appendOption(argv, "--background", args.background ?? "auto");
     appendOption(argv, "--output-format", args.output_format ?? "png");
     appendOption(argv, "--output-compression", args.output_compression);
+  } else if (provider.transport === TRANSPORT_EZAI_BANANA_IMAGES) {
+    appendOption(argv, "--output-format", args.output_format ?? "png");
+    appendOption(argv, "--thinking-level", args.thinking_level);
+    appendOption(
+      argv,
+      "--response-format",
+      nonEmptyString(args.response_format) ||
+        provider.ezaiBanana?.responseFormat ||
+        EZAI_BANANA_DEFAULT_RESPONSE_FORMAT,
+    );
   } else if (provider.transport === "json-images") {
     appendOption(argv, "--response-format", args.response_format ?? "url");
   } else if (provider.transport === "zenmux-vertex") {
@@ -1131,8 +1185,12 @@ function sanitizeRequest(request) {
     prompt: requestPrompt(request),
     size: request.size,
     aspect: request.aspect,
+    aspect_ratio: request.aspect_ratio,
     resolution: request.resolution,
     image_size: request.image_size,
+    thinking_level: request.thinking_level,
+    n: request.n,
+    image_urls: request.image_urls,
     quality: request.quality,
     moderation: request.moderation,
     background: request.background,
@@ -1937,6 +1995,7 @@ function routeEzaiImageArgs(args, { consume = true } = {}) {
     const transportReadyAt = isoNow();
     const promptResolution = resolveProviderPrompt(args, {
       name: EZAI_PROVIDER_NAME,
+      transport: EZAI_IMAGE_POLICY_TRANSPORT,
       promptPolicy: context.policy,
     });
     promptResolution.promptPreparation = {
@@ -2047,7 +2106,7 @@ async function submitBatchImageTask(command, args, count) {
 async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
   const returnWhen = args.dry_run ? "completed" : batchReturnWhen(args);
   const provider = await resolveProvider(args.provider, !args.dry_run);
-  if (provider.name === EZAI_PROVIDER_NAME && provider.promptPolicy && !args._ezai_prompt_policy) {
+  if (isEzaiImagePromptPolicyProvider(provider) && !args._ezai_prompt_policy) {
     args = { ...args, provider: EZAI_PROVIDER_NAME, _ezai_prompt_policy: true };
   }
   const root = transportOutputRoot(args, provider);
@@ -2296,7 +2355,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
 
   const singleStartedAt = isoNow();
   const provider = resolvedProvider ?? (await resolveProvider(args.provider, !args.dry_run));
-  if (provider.name === EZAI_PROVIDER_NAME && provider.promptPolicy && !args._ezai_prompt_policy) {
+  if (isEzaiImagePromptPolicyProvider(provider) && !args._ezai_prompt_policy) {
     args = { ...args, provider: EZAI_PROVIDER_NAME, _ezai_prompt_policy: true };
   }
   const promptResolution = args._ezai_prompt_policy ? resolveProviderPrompt(args, provider) : null;
@@ -2384,6 +2443,7 @@ function configuredEzaiPolicyContext() {
     if (!activeProviders.includes(EZAI_PROVIDER_NAME)) return null;
     const raw = config.providers[EZAI_PROVIDER_NAME];
     if (!raw || typeof raw !== "object") return null;
+    if (nonEmptyString(raw.transport) !== EZAI_IMAGE_POLICY_TRANSPORT) return null;
     const policy = normalizePromptPolicy(
       raw.prompt_policy,
       `providers.${EZAI_PROVIDER_NAME}.prompt_policy`,
@@ -2466,7 +2526,14 @@ function commonProperties(editing = false) {
     },
     resolution: {
       type: "string",
-      description: "Target tier: 1k, 2k, 3k, or 4k.",
+      description:
+        "Provider-supported resolution tier, such as 512px, 1k, 2k, 3k, or 4k. Banana models are validated against their model-specific capability list.",
+    },
+    thinking_level: {
+      type: "string",
+      enum: ["minimal", "high"],
+      description:
+        "Optional EzAI Nano Banana 2 thinking level. Nano Banana Pro does not support this parameter.",
     },
     quality: {
       type: "string",
@@ -3134,6 +3201,12 @@ async function providerStatus(requestedProvider) {
             submission_query: { async: "true" },
             status_path: "/images/tasks/{task_id}",
           },
+        }
+      : {}),
+    ...(provider.ezaiBanana
+      ? {
+          response_format: provider.ezaiBanana.responseFormat,
+          edit_input_modes: provider.ezaiBanana.editInputModes,
         }
       : {}),
   };

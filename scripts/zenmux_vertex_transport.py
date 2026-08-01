@@ -19,6 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import banana_models
 from transport_common import (
     collect_image_metadata,
     image_dimensions,
@@ -33,6 +34,7 @@ DEFAULT_BASE_URL = ""
 DEFAULT_MODEL = ""
 DEFAULT_RESOLUTION = "2K"
 DEFAULT_ASPECT = "1:1"
+TRANSPORT_NAME = "zenmux-vertex"
 
 # Credentials are injected by the Fmage MCP server from the external
 # provider configuration. Never store a real key in this shareable plugin file.
@@ -266,6 +268,30 @@ def resolve_shape(args: argparse.Namespace, references: list[str]) -> tuple[str,
     return aspect, resolution, notes
 
 
+def validate_banana_shape(args: argparse.Namespace, aspect: str, resolution: str) -> tuple[str, str]:
+    if banana_models.resolve_model(TRANSPORT_NAME, args.model, required=False) is None:
+        return aspect, resolution
+    explicit_dimensions = parse_size(args.size)
+    if explicit_dimensions:
+        aspect = banana_models.aspect_from_dimensions(TRANSPORT_NAME, args.model, *explicit_dimensions)
+    elif args.aspect:
+        aspect = banana_models.validate_aspect(TRANSPORT_NAME, args.model, args.aspect)
+    else:
+        aspect = banana_models.match_aspect_ratio(TRANSPORT_NAME, args.model, aspect)
+    return (
+        aspect,
+        banana_models.validate_resolution(TRANSPORT_NAME, args.model, resolution),
+    )
+
+
+def zenmux_resolution_value(model: str, resolution: str) -> str:
+    if resolution != "512px":
+        return resolution
+    if banana_models.resolve_model(TRANSPORT_NAME, model, required=False) is None:
+        return resolution
+    return "512"
+
+
 def is_url(value: str) -> bool:
     parsed = urllib.parse.urlparse(value)
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
@@ -334,8 +360,9 @@ def build_parameters(args: argparse.Namespace, aspect: str, resolution: str) -> 
             parameters["imageSize"] = size
         parameters["quality"] = args.quality
     else:
+        wire_resolution = zenmux_resolution_value(args.model, resolution)
         parameters["aspectRatio"] = aspect
-        parameters["sampleImageSize"] = resolution
+        parameters["sampleImageSize"] = wire_resolution
 
     if mime_type:
         parameters["outputOptions"] = {"mimeType": mime_type}
@@ -507,6 +534,7 @@ def run_request(args: argparse.Namespace, references: list[str]) -> dict[str, An
     timing: dict[str, Any] = {"transport_started_at": iso_now()}
     prompt = read_prompt(args)
     aspect, resolution, shape_notes = resolve_shape(args, references)
+    aspect, resolution = validate_banana_shape(args, aspect, resolution)
     requested_shape = args.size if args.size and args.size.lower() != "auto" else f"{aspect}@{resolution}"
     variants = build_payload_variants(args, prompt, references, aspect, resolution)
     url = predict_endpoint(args.base_url, args.model)

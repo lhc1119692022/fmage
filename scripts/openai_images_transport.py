@@ -440,16 +440,25 @@ def task_status_endpoints(base_url: str, task_id: str, command: str) -> list[str
     return [item for item in candidates if not (item in seen or seen.add(item))]
 
 
-def json_request(url: str, body: dict[str, Any], api_key: str, timeout: int) -> dict[str, Any]:
+def json_request(
+    url: str,
+    body: dict[str, Any],
+    api_key: str,
+    timeout: int,
+    extra_headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    if extra_headers:
+        headers.update(extra_headers)
     request = urllib.request.Request(
         url,
         data=data,
         method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
     )
     return perform_request(request, timeout)
 
@@ -472,6 +481,7 @@ def multipart_request(
     files: list[tuple[str, Path]],
     api_key: str,
     timeout: int,
+    extra_headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     boundary = f"----provider-{uuid.uuid4().hex}"
     chunks: list[bytes] = []
@@ -500,14 +510,17 @@ def multipart_request(
     chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
     data = b"".join(chunks)
 
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+    }
+    if extra_headers:
+        headers.update(extra_headers)
     request = urllib.request.Request(
         url,
         data=data,
         method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-        },
+        headers=headers,
     )
     return perform_request(request, timeout)
 

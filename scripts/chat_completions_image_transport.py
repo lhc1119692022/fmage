@@ -19,6 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import banana_models
 from transport_common import (
     collect_image_metadata,
     image_dimensions,
@@ -33,6 +34,7 @@ DEFAULT_BASE_URL = ""
 DEFAULT_MODEL = ""
 DEFAULT_RESOLUTION = "2K"
 DEFAULT_ASPECT = "1:1"
+TRANSPORT_NAME = "chat-completions-image"
 
 # Credentials are injected by the Fmage MCP server from the external
 # provider configuration. Never store a real key in this shareable plugin file.
@@ -250,6 +252,30 @@ def resolve_shape(args: argparse.Namespace, references: list[str]) -> tuple[str,
     return aspect, resolution, requested_size, notes
 
 
+def validate_banana_shape(args: argparse.Namespace, aspect: str, resolution: str) -> tuple[str, str]:
+    if banana_models.resolve_model(TRANSPORT_NAME, args.model, required=False) is None:
+        return aspect, resolution
+    explicit_dimensions = parse_size(args.size)
+    if explicit_dimensions:
+        aspect = banana_models.aspect_from_dimensions(TRANSPORT_NAME, args.model, *explicit_dimensions)
+    elif args.aspect:
+        aspect = banana_models.validate_aspect(TRANSPORT_NAME, args.model, args.aspect)
+    else:
+        aspect = banana_models.match_aspect_ratio(TRANSPORT_NAME, args.model, aspect)
+    return (
+        aspect,
+        banana_models.validate_resolution(TRANSPORT_NAME, args.model, resolution),
+    )
+
+
+def chat_resolution_value(model: str, resolution: str) -> str:
+    if resolution != "512px":
+        return resolution
+    if banana_models.resolve_model(TRANSPORT_NAME, model, required=False) is None:
+        return resolution
+    return "512"
+
+
 def augment_prompt(prompt: str, aspect: str, resolution: str, mime_type: str, editing: bool) -> str:
     task = "Edit the provided reference image(s)" if editing else "Generate one image"
     requirements = (
@@ -352,12 +378,13 @@ def build_payload(
     }
     if rich:
         mime_type = output_mime_type(args.output_format)
+        wire_resolution = chat_resolution_value(args.model, resolution)
         payload["aspect_ratio"] = aspect
-        payload["image_size"] = resolution
+        payload["image_size"] = wire_resolution
         payload["output_mime_type"] = mime_type
         payload["image_config"] = {
             "aspect_ratio": aspect,
-            "image_size": resolution,
+            "image_size": wire_resolution,
             "mime_type": mime_type,
         }
         if requested_size:
@@ -571,6 +598,7 @@ def run_request(args: argparse.Namespace, references: list[str]) -> dict[str, An
     timing: dict[str, Any] = {"transport_started_at": iso_now()}
     prompt = read_prompt(args)
     aspect, resolution, requested_size, shape_notes = resolve_shape(args, references)
+    aspect, resolution = validate_banana_shape(args, aspect, resolution)
     requested_shape = requested_size or f"{aspect}@{resolution}"
     mime_type = output_mime_type(args.output_format)
     prompt = augment_prompt(prompt, aspect, resolution, mime_type, bool(references))
