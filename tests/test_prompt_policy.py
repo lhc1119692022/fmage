@@ -200,6 +200,15 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             },
         )
 
+    def ezai_nondefault_config(self) -> dict[str, object]:
+        return provider_config(
+            ["ordinary-image", EZAI],
+            {
+                "ordinary-image": provider("ordinary-image"),
+                EZAI: provider(EZAI, self.policy),
+            },
+        )
+
     def ezai_and_banana_config(self) -> dict[str, object]:
         return provider_config(
             [EZAI, EZAI_BANANA],
@@ -443,12 +452,17 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             "initialize",
             {"protocolVersion": "2025-11-25"},
         )["result"]["instructions"]
-        self.assertIn("ezai-image-2 is the default provider", initialize)
-        self.assertIn(EZAI_PREPARE_TOOL, initialize)
+        self.assertIn(
+            "When the selected provider exposes matching provider-specific image tools",
+            initialize,
+        )
         self.assertIn("Keep the complete source prompt unchanged", initialize)
         self.assertIn("ready=false with provider_request_sent=false", initialize)
         self.assertIn("prompt_check_id only", initialize)
-        self.assertIn("edit_image_ezai_image_2", initialize)
+        self.assertNotIn(EZAI, initialize)
+        self.assertNotIn("gpt-image-2", initialize)
+        self.assertNotIn(EZAI_PREPARE_TOOL, initialize)
+        self.assertNotIn("edit_image_ezai_image_2", initialize)
         self.assertLess(len(initialize), 1000)
         self.assertNotIn("English-dominant", initialize)
         self.assertNotIn("translate", initialize)
@@ -503,7 +517,30 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertTrue(STANDARD_IMAGE_TOOLS.issubset(tools))
         for name in STANDARD_IMAGE_TOOLS:
             self.assertNotIn("provider_prompt", all_property_names(tools[name]))
-            self.assertIn("Prefer the matching ezai-image-2 tool", tools[name]["description"])
+            self.assertIn(
+                "When the selected provider exposes a dedicated image tool",
+                tools[name]["description"],
+            )
+            self.assertNotIn(EZAI, tools[name]["description"])
+            self.assertNotIn("gpt-image-2", tools[name]["description"])
+
+    def test_nondefault_policy_provider_is_not_named_in_shared_guidance(self) -> None:
+        config = self.ezai_nondefault_config()
+        initialize = call_server(
+            config,
+            "initialize",
+            {"protocolVersion": "2025-11-25"},
+        )["result"]["instructions"]
+        tools = tool_map(call_server(config, "tools/list", {}))
+
+        self.assertIn("selected provider", initialize)
+        self.assertNotIn(EZAI, initialize)
+        self.assertNotIn("gpt-image-2", initialize)
+        self.assertTrue(EZAI_TOOLS.issubset(tools))
+        for name in STANDARD_IMAGE_TOOLS:
+            self.assertIn("selected provider", tools[name]["description"])
+            self.assertNotIn(EZAI, tools[name]["description"])
+            self.assertNotIn("gpt-image-2", tools[name]["description"])
 
     def test_banana_standard_route_never_enters_image_prompt_policy(self) -> None:
         response = self.call_image_tool(

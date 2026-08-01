@@ -214,6 +214,28 @@ def match_aspect_ratio(contract: str, model: str, value: str | float) -> str:
     )
 
 
+def nearest_aspect_ratio(contract: str, model: str, value: str | float) -> str:
+    capability = resolve_model(contract, model)
+    text = str(value).strip().lower()
+    pair = re.fullmatch(r"(\d+(?:\.\d+)?)\s*[:x/]\s*(\d+(?:\.\d+)?)", text)
+    if pair:
+        left = float(pair.group(1))
+        right = float(pair.group(2))
+        if left <= 0 or right <= 0:
+            raise ValueError(f"Invalid derived aspect ratio '{value}'.")
+        ratio = left / right
+    else:
+        ratio = float(text)
+        if ratio <= 0:
+            raise ValueError(f"Invalid derived aspect ratio '{value}'.")
+
+    def distance(label: str) -> float:
+        left, right = (float(item) for item in label.split(":"))
+        return abs(math.log((left / right) / ratio))
+
+    return min(capability["aspect_ratios"], key=distance)
+
+
 def aspect_from_dimensions(contract: str, model: str, width: int, height: int) -> str:
     if width <= 0 or height <= 0:
         raise ValueError(f"Invalid dimensions '{width}x{height}'.")

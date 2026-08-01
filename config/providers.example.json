@@ -12,14 +12,6 @@
       "model": "gpt-image-2",
       "api_key": ""
     },
-    "808-image-2": {
-      "transport": "808-openai-images",
-      "base_url": "https://api.808relay.com/v1",
-      "model": "gpt-image-2",
-      "response_format": "url",
-      "timeout": 600,
-      "api_key": ""
-    },
     "ezai-image-2": {
       "prompt_policy": {
         "max_chars": 4000,
@@ -37,6 +29,14 @@
       "base_url": "https://api-direct.ezaiclub.com",
       "model": "nano-banana-2",
       "response_format": "url",
+      "api_key": ""
+    },
+    "808-image-2": {
+      "transport": "808-openai-images",
+      "base_url": "https://api.808relay.com/v1",
+      "model": "gpt-image-2",
+      "response_format": "url",
+      "timeout": 600,
       "api_key": ""
     },
     "right-image-2": {

@@ -27,6 +27,10 @@ PNG_BYTES = base64.b64decode(
 )
 
 
+def png_bytes_with_dimensions(width: int, height: int) -> bytes:
+    return PNG_BYTES[:16] + width.to_bytes(4, "big") + height.to_bytes(4, "big") + PNG_BYTES[24:]
+
+
 def banana_args(
     command: str,
     output_dir: Path,
@@ -243,6 +247,16 @@ class EndpointAndPayloadTests(unittest.TestCase):
         self.assertEqual(requested_size, "3072x2048")
         self.assertIn("explicit_size_mapped_to_4k_tier", notes)
 
+    def test_nearest_supported_aspect_maps_1_08_to_square(self) -> None:
+        self.assertEqual(
+            banana_models.nearest_aspect_ratio(
+                "ezai-banana-images",
+                "nano-banana-pro",
+                1296 / 1200,
+            ),
+            "1:1",
+        )
+
     def test_explicit_three_k_tier_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             args = banana_args("generate", Path(temp_dir), "--resolution", "3k")
@@ -439,6 +453,33 @@ class EditInputModeTests(unittest.TestCase):
         self.assertEqual(captured["extra_headers"], {"Idempotency-Key": "stable-edit-key"})
         self.assertEqual(result["request_mode"], "multipart")
         self.assertEqual(len(result["images"]), 1)
+
+    def test_unsupported_reference_aspect_uses_nearest_ratio_and_outpainting(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "input.png"
+            reference.write_bytes(png_bytes_with_dimensions(1296, 1200))
+            args = banana_args(
+                "edit",
+                Path(temp_dir) / "outputs",
+                "--image",
+                str(reference),
+                "--resolution",
+                "4k",
+                "--dry-run",
+                model="nano-banana-pro",
+            )
+            result = transport.run_edit(args)
+
+        self.assertEqual(result["requested_aspect_ratio"], "1:1")
+        self.assertEqual(result["requested_size"], "4K@1:1")
+        self.assertIn(transport.REFERENCE_ASPECT_REMAPPED_NOTE, result["notes"])
+        self.assertIn(transport.REFERENCE_OUTPAINT_NOTE, result["notes"])
+        self.assertIn("reference_dimensions_1296x1200", result["notes"])
+        prompt = result["request"]["prompt"]
+        self.assertTrue(prompt.startswith("test image"))
+        self.assertIn("by outpainting only", prompt)
+        self.assertIn("Preserve all existing visible content", prompt)
+        self.assertIn("Do not crop, stretch, squeeze", prompt)
 
     def test_mixed_url_and_local_edit_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

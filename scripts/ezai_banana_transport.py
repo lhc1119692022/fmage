@@ -30,6 +30,8 @@ SUPPORTED_RESPONSE_FORMATS = {"url", "b64_json"}
 DEFAULT_RESPONSE_FORMAT = "url"
 DEFAULT_RESOLUTION = "2K"
 DEFAULT_ASPECT_RATIO = "1:1"
+REFERENCE_ASPECT_REMAPPED_NOTE = "reference_aspect_mapped_to_nearest_supported"
+REFERENCE_OUTPAINT_NOTE = "reference_aspect_fit_outpaint_preserve_content"
 
 
 def iso_now() -> str:
@@ -57,6 +59,27 @@ def normalize_aspect(value: str) -> str:
 
 def aspect_from_dimensions(model: str, width: int, height: int) -> str:
     return banana_models.aspect_from_dimensions(TRANSPORT_NAME, model, width, height)
+
+
+def closest_reference_aspect(model: str, width: int, height: int) -> tuple[str, bool]:
+    try:
+        return aspect_from_dimensions(model, width, height), False
+    except ValueError:
+        return banana_models.nearest_aspect_ratio(TRANSPORT_NAME, model, width / height), True
+
+
+def apply_reference_aspect_fit(prompt: str, aspect: str, notes: list[str]) -> str:
+    if REFERENCE_ASPECT_REMAPPED_NOTE not in notes:
+        return prompt
+    return (
+        f"{prompt}\n\n"
+        f"Automatic canvas-fit requirement: adapt the output canvas to the supported {aspect} "
+        "aspect ratio by outpainting only. Preserve all existing visible content, subjects, "
+        "objects, composition, framing, relative geometry, and original image area. Do not crop, "
+        "stretch, squeeze, remove, or cover any original content. Extend only the necessary canvas "
+        "edges with visually coherent continuation that matches the source perspective, lighting, "
+        "colors, texture, and depth."
+    )
 
 
 def normalize_resolution(value: str) -> tuple[str, list[str]]:
@@ -102,8 +125,17 @@ def resolve_shape(
             if not is_url(first):
                 dimensions = image_dimensions(Path(first))
                 if dimensions:
-                    aspect = aspect_from_dimensions(args.model, *dimensions)
+                    aspect, remapped = closest_reference_aspect(args.model, *dimensions)
                     notes.append("aspect_from_first_reference_image")
+                    if remapped:
+                        notes.extend(
+                            [
+                                REFERENCE_ASPECT_REMAPPED_NOTE,
+                                REFERENCE_OUTPAINT_NOTE,
+                                f"reference_dimensions_{dimensions[0]}x{dimensions[1]}",
+                                f"reference_aspect_target_{aspect}",
+                            ]
+                        )
         if not aspect:
             inferred_aspect, inferred_note = support.infer_aspect_from_prompt(support.read_prompt(args))
             if inferred_aspect is not None:
@@ -348,6 +380,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
         raise FileNotFoundError(f"Reference image not found: {missing}")
 
     resolution, aspect, requested_size, shape_notes = resolve_shape(args, references)
+    prompt = apply_reference_aspect_fit(prompt, aspect, shape_notes)
     payload = build_payload(args, prompt, resolution, aspect)
     if url_references:
         payload["image_urls"] = url_references

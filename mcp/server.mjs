@@ -2459,17 +2459,14 @@ function configuredEzaiPolicyContext() {
   }
 }
 
-function configuredEzaiRoutingGuidance() {
+function configuredProviderRoutingGuidance() {
   const context = configuredEzaiPolicyContext();
   if (!context) return "";
-  const position = context.isDefault ? "the default provider" : "an active provider";
-  const priority = context.isDefault
-    ? ` Prefer ${TOOL_GENERATE_EZAI}, ${TOOL_GENERATE_BATCH_EZAI}, ${TOOL_EDIT_EZAI}, and ${TOOL_EDIT_BATCH_EZAI}.`
-    : ` Use the ${EZAI_PROVIDER_NAME} tools when selecting this provider explicitly.`;
   return (
-    ` ${EZAI_PROVIDER_NAME} is ${position}.${priority} Keep the complete source prompt unchanged. ` +
-    `If an image call returns ready=false with provider_request_sent=false, follow the next_action through ` +
-    `${TOOL_PREPARE_PROMPT_EZAI} and then call the same image tool with prompt_check_id only.`
+    " When the selected provider exposes matching provider-specific image tools, use those tools. " +
+    "Keep the complete source prompt unchanged before provider adaptation. " +
+    "If a provider-specific image tool returns ready=false with provider_request_sent=false, " +
+    "follow its next_action and then call the same image tool with prompt_check_id only."
   );
 }
 
@@ -2713,8 +2710,8 @@ function ezaiBatchProperties(editing) {
 
 function toolDefinitions() {
   const ezaiContext = configuredEzaiPolicyContext();
-  const standardEzaiExclusion = ezaiContext
-    ? ` Prefer the matching ${EZAI_PROVIDER_NAME} tool when using that provider.`
+  const standardProviderRoutingHint = ezaiContext
+    ? " When the selected provider exposes a dedicated image tool, use the matching dedicated tool."
     : "";
   const standardImageToolNames = [TOOL_GENERATE, TOOL_GENERATE_BATCH, TOOL_EDIT, TOOL_EDIT_BATCH];
   const imageToolNames = [...standardImageToolNames];
@@ -2778,7 +2775,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE,
       title: "Generate Image with Fmage",
-      description: `Generate one image from a complete revised prompt.${standardEzaiExclusion}`,
+      description: `Generate one image from a complete revised prompt.${standardProviderRoutingHint}`,
       inputSchema: {
         type: "object",
         properties: commonProperties(false),
@@ -2795,7 +2792,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_BATCH,
       title: "Generate Image Batch with Fmage",
-      description: `Generate multiple independent images in one batch call.${standardEzaiExclusion}`,
+      description: `Generate multiple independent images in one batch call.${standardProviderRoutingHint}`,
       inputSchema: {
         type: "object",
         properties: batchProperties(false),
@@ -2812,7 +2809,7 @@ function toolDefinitions() {
     {
       name: TOOL_EDIT,
       title: "Edit Image with Fmage",
-      description: `Edit reference images with one complete revised prompt.${standardEzaiExclusion}`,
+      description: `Edit reference images with one complete revised prompt.${standardProviderRoutingHint}`,
       inputSchema: {
         type: "object",
         properties: {
@@ -2840,7 +2837,7 @@ function toolDefinitions() {
     {
       name: TOOL_EDIT_BATCH,
       title: "Edit Image Batch with Fmage",
-      description: `Edit multiple independent image jobs in one batch call.${standardEzaiExclusion}`,
+      description: `Edit multiple independent image jobs in one batch call.${standardProviderRoutingHint}`,
       inputSchema: {
         type: "object",
         properties: batchProperties(true),
@@ -3418,7 +3415,7 @@ async function handleRequest(message) {
         name: SERVER_NAME,
         version: SERVER_VERSION,
       },
-      instructions: BASE_INITIALIZE_INSTRUCTIONS + configuredEzaiRoutingGuidance(),
+      instructions: BASE_INITIALIZE_INSTRUCTIONS + configuredProviderRoutingGuidance(),
     });
     return;
   }

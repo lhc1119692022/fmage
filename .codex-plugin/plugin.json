@@ -1,6 +1,6 @@
 {
   "name": "fmage",
-  "version": "0.1.0+codex.20260801102617",
+  "version": "0.1.0+codex.20260801131416",
   "description": "Generate and edit images through configurable OpenAI-compatible providers with Codex-revised prompts and explicit separation of delivery quality parameters from visual style.",
   "author": {
     "name": "Local developer"
