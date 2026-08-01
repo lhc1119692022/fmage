@@ -52,7 +52,7 @@ def is_image_2_model(model: str | None) -> bool:
 
 
 def default_resolution_for_model(model: str | None) -> str:
-    return "1k" if is_image_2_model(model) else DEFAULT_RESOLUTION
+    return "2k" if is_image_2_model(model) else DEFAULT_RESOLUTION
 
 
 def iso_now() -> str:
@@ -295,9 +295,9 @@ def resolve_size(args: argparse.Namespace, references: list[str]) -> tuple[str |
         size, size_notes = size_from_aspect(1.0, args.resolution)
         return size, ["square_size_from_resolution_without_aspect"] + size_notes
 
-    default_resolution = default_resolution_for_model(args.model)
-    size, size_notes = size_from_aspect(1.0, default_resolution)
-    return size, [f"fallback_{default_resolution}_square"] + size_notes
+    resolution, resolution_note = infer_resolution_from_quality(args.quality, args.model)
+    size, size_notes = size_from_aspect(1.0, resolution)
+    return size, [f"fallback_{resolution}_square", resolution_note] + size_notes
 
 
 def output_root(args: argparse.Namespace) -> Path:
@@ -432,6 +432,7 @@ def build_payload(
     payload: dict[str, Any] = {
         "model": args.model,
         "prompt": prompt,
+        "quality": args.quality,
     }
     if image_values or include_empty_image:
         payload["image"] = image_values
@@ -763,7 +764,12 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--size", help="Explicit WIDTHxHEIGHT or auto.")
     parser.add_argument("--aspect", help="Aspect ratio such as 1:1, 16:9, 3:4.")
     parser.add_argument("--resolution", help="Resolution tier such as 1k, 2k, 4k, or a long edge in px.")
-    parser.add_argument("--quality", choices=["low", "medium", "high"], default="medium", help="Only used to infer size; not sent to provider.")
+    parser.add_argument(
+        "--quality",
+        choices=["low", "medium", "high"],
+        default="medium",
+        help="Sent to the provider and used to infer size when resolution is omitted.",
+    )
     parser.add_argument("--response-format", default="url", help="provider response_format field. Use an empty string to omit.")
     parser.add_argument("--base-url", default=configured_value(PROVIDER_BASE_URL, "PROVIDER_BASE_URL", DEFAULT_BASE_URL))
     parser.add_argument("--model", default=configured_value(PROVIDER_IMAGE_MODEL, "PROVIDER_IMAGE_MODEL", DEFAULT_MODEL))

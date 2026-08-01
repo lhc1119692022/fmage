@@ -64,7 +64,7 @@ def is_image_2_model(model: str | None) -> bool:
 
 
 def default_resolution_for_model(model: str | None) -> str:
-    return "1k" if is_image_2_model(model) else DEFAULT_RESOLUTION
+    return "2k" if is_image_2_model(model) else DEFAULT_RESOLUTION
 
 
 def iso_now() -> str:
@@ -393,9 +393,13 @@ def resolve_size(args: argparse.Namespace, image_paths: list[Path]) -> tuple[str
         size, size_notes = size_from_aspect(1.0, args.resolution)
         return size, ["square_size_from_resolution_without_aspect"] + size_notes
 
-    default_resolution = default_resolution_for_model(args.model)
-    size, size_notes = size_from_aspect(1.0, default_resolution)
-    return size, [f"fallback_{default_resolution}_square"] + size_notes
+    resolution, resolution_note = infer_resolution_from_quality(args.quality, args.model)
+    effective_resolution = resolution or default_resolution_for_model(args.model)
+    size, size_notes = size_from_aspect(1.0, effective_resolution)
+    notes = [f"fallback_{effective_resolution}_square"]
+    if resolution_note:
+        notes.append(resolution_note)
+    return size, notes + size_notes
 
 
 def read_prompt(args: argparse.Namespace) -> str:

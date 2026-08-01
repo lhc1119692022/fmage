@@ -30,17 +30,17 @@ def shape_args(model: str, command: str = "generate") -> argparse.Namespace:
 
 
 class Image2DefaultResolutionTests(unittest.TestCase):
-    def test_openai_image_2_generation_defaults_to_1k(self) -> None:
+    def test_openai_image_2_generation_defaults_to_2k(self) -> None:
         size, notes = transport.resolve_size(shape_args("gpt-image-2"), [])
-        self.assertEqual(size, "1024x1024")
-        self.assertIn("fallback_1k_square", notes)
+        self.assertEqual(size, "2048x2048")
+        self.assertIn("fallback_2k_square", notes)
 
-    def test_json_image_2_variants_default_to_1k(self) -> None:
+    def test_json_image_2_variants_default_to_2k(self) -> None:
         size, notes = json_transport.resolve_size(shape_args("gpt-image-2-vip"), [])
-        self.assertEqual(size, "1024x1024")
-        self.assertIn("fallback_1k_square", notes)
+        self.assertEqual(size, "2048x2048")
+        self.assertIn("fallback_2k_square", notes)
 
-    def test_image_2_edit_uses_1k_with_reference_aspect(self) -> None:
+    def test_image_2_edit_uses_2k_with_reference_aspect(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             image_path = Path(temp_dir) / "reference.png"
             Image.new("RGB", (2048, 1024), (1, 2, 3)).save(image_path)
@@ -52,20 +52,45 @@ class Image2DefaultResolutionTests(unittest.TestCase):
                 shape_args("gpt-image-2-vip", "edit"),
                 [str(image_path)],
             )
-            self.assertLessEqual(
+            self.assertGreater(
                 transport.parse_size(openai_size)[0] * transport.parse_size(openai_size)[1],
                 1_048_576,
             )
-            self.assertLessEqual(
+            self.assertGreater(
                 json_transport.parse_size(json_size)[0] * json_transport.parse_size(json_size)[1],
                 1_048_576,
             )
 
     def test_explicit_resolution_still_overrides_image_2_default(self) -> None:
         args = shape_args("gpt-image-2")
-        args.resolution = "2k"
+        args.resolution = "1k"
         size, _ = transport.resolve_size(args, [])
-        self.assertGreater(transport.parse_size(size)[0] * transport.parse_size(size)[1], 1_048_576)
+        self.assertLessEqual(transport.parse_size(size)[0] * transport.parse_size(size)[1], 1_048_576)
+
+    def test_quality_maps_resolution_without_explicit_aspect(self) -> None:
+        openai_args = shape_args("gpt-image-2")
+        openai_args.quality = "high"
+        openai_size, openai_notes = transport.resolve_size(openai_args, [])
+        self.assertGreater(
+            transport.parse_size(openai_size)[0] * transport.parse_size(openai_size)[1],
+            2048 * 2048,
+        )
+        self.assertIn("resolution_inferred_from_high_quality", openai_notes)
+
+        json_args = shape_args("gpt-image-2-vip")
+        json_args.quality = "high"
+        json_size, json_notes = json_transport.resolve_size(json_args, [])
+        self.assertEqual(json_size, "4096x4096")
+        self.assertIn("resolution_inferred_from_high_quality", json_notes)
+
+
+class JsonQualityPayloadTests(unittest.TestCase):
+    def test_quality_is_sent_to_json_images_provider(self) -> None:
+        args = json_transport.build_parser().parse_args(
+            ["generate", "--prompt", "test image", "--quality", "high"]
+        )
+        payload = json_transport.build_payload(args, "test image", "4096x4096", [], True)
+        self.assertEqual(payload["quality"], "high")
 
 
 class ImageFieldSelectionTests(unittest.TestCase):
