@@ -1,7 +1,7 @@
 {
   "active_providers": [
     "openai-image-2",
-    "right-banana-2"
+    "ezai-nano"
   ],
   "output_dir": "",
   "cache_dir": "",
@@ -24,10 +24,10 @@
       "model": "gpt-image-2",
       "api_key": ""
     },
-    "ezai-banana": {
+    "ezai-nano": {
       "transport": "ezai-banana-images",
       "base_url": "https://api-direct.ezaiclub.com",
-      "model": "nano-banana-2",
+      "model": "nano-banana-pro",
       "response_format": "url",
       "api_key": ""
     },
