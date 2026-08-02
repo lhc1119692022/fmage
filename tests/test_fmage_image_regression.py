@@ -29,15 +29,18 @@ def load_module():
 
 
 class FmageImageRegressionTests(unittest.TestCase):
-    def test_skill_requires_the_single_tool_fast_path(self) -> None:
+    def test_skill_requires_the_single_script_fast_path(self) -> None:
         skill = (
             PLUGIN_ROOT / "skills" / "fmage-image-regression" / "SKILL.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("mcp__Fmage.regress_image", skill)
+        self.assertIn("scripts/degrade_image.py", skill)
+        self.assertIn("exactly once", skill)
         self.assertIn("处理中。", skill)
-        self.assertIn("return the tool text verbatim", skill)
-        self.assertIn("Do nothing else", skill)
-        self.assertLessEqual(len(skill.split()), 75)
+        self.assertIn("return the script's stdout verbatim", skill)
+        self.assertIn("Do not load the main `fmage` skill", skill)
+        self.assertIn("call an MCP image tool", skill)
+        self.assertNotIn("mcp__Fmage.regress_image", skill)
+        self.assertLessEqual(len(skill.split()), 100)
 
     def test_target_size_never_enlarges_and_caps_total_pixels(self) -> None:
         module = load_module()
