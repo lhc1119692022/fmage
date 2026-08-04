@@ -1,6 +1,6 @@
 ---
 name: fmage-config
-description: Locate, show, open, create, or edit the local Fmage providers.json. Use when explicitly invoked alone, when the user asks where the config is, or when updating active_provider, base_url, model, provider names, DALL-E 3 compatibility, or provider keys.
+description: Locate, show, open, create, or edit the local Fmage providers.json. Use when explicitly invoked alone, when the user asks where the config is, or when updating active providers, transports, transport/prompt profiles, models, provider names, or provider keys.
 ---
 
 # Fmage Config
@@ -30,11 +30,16 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
 
 - Before editing, inspect the file and preserve existing providers.
 - If missing and creation is requested, copy from plugin `config/providers.example.json`.
-- Edit non-secret fields normally: `active_providers`, legacy `active_provider`, `transport`, `base_url`,
-  `model`, `response_format`, `timeout`, `compatibility`, `compatibility_profile`, `prompt_policy`, and
-  provider names.
-- A provider named `DALLE3` automatically uses DALL-E 3 compatibility. Any other provider name may opt
-  in with `"compatibility": "dalle3"`; this profile is independent of `transport`, `base_url`, and `model`.
-  When `prompt_policy` is omitted, the profile defaults to a 4000-character limit with a 3900-character
-  target. Providers without this profile, including `ezai-image-2`, always use the normal prompt path.
+- Edit non-secret fields normally: `active_providers`, legacy `active_provider`, `transport`,
+  `transport_profile`, `prompt_profile`, `base_url`, `model`, `response_format`, `timeout`,
+  `prompt_policy`, and provider names. `transport: "808-openai-images"`, `compatibility`, and
+  `compatibility_profile` are unsupported; migrate them to the explicit profile fields before use.
+- The primary transports are `openai-images`, `ezai-banana-images`, and `zenmux-vertex`.
+  `transport_profile: "808"` may be attached only to `openai-images` and supplies the relay-specific
+  asynchronous submission and polling contract.
+- Every provider, including one named `DALLE3`, must explicitly set `prompt_profile: "dalle3"` to opt in.
+  This prompt profile currently requires `openai-images` and is independent of the
+  optional `808` transport profile. When `prompt_policy` is omitted, it defaults to a 4000-character
+  limit with a 3900-character target. Providers without this prompt profile, including
+  `ezai-image-2`, always use the normal prompt path.
 - Never print existing API keys or ask the user to paste keys into chat; tell them to edit keys directly in `providers.json`.

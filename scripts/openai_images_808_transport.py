@@ -11,7 +11,8 @@ import urllib.parse
 import openai_images_transport as openai
 
 
-TRANSPORT_NAME = "808-openai-images"
+TRANSPORT_NAME = "openai-images"
+TRANSPORT_PROFILE = "808"
 DEFAULT_RESPONSE_FORMAT = "url"
 DEFAULT_PENDING_TOTAL_TIMEOUT = 600
 DEFAULT_POLL_INTERVAL = 5
@@ -291,6 +292,7 @@ def write_manifest(
     manifest: dict[str, Any] = {
         "command": command,
         "transport": TRANSPORT_NAME,
+        "transport_profile": TRANSPORT_PROFILE,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "request": openai.request_metadata_without_prompts(request_payload),
         "requested_size": request_payload.get("size"),

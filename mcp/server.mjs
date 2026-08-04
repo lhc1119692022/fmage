@@ -13,8 +13,7 @@ const TOOL_GENERATE = "generate_image";
 const TOOL_EDIT = "edit_image";
 const TOOL_GENERATE_BATCH = "generate_image_batch";
 const TOOL_EDIT_BATCH = "edit_image_batch";
-const DALLE3_PROVIDER_NAME = "DALLE3";
-const DALLE3_COMPATIBILITY = "dalle3";
+const PROMPT_PROFILE_DALLE3 = "dalle3";
 const DALLE3_DEFAULT_PROMPT_POLICY = Object.freeze({
   max_chars: 4000,
   target_chars: 3900,
@@ -22,18 +21,13 @@ const DALLE3_DEFAULT_PROMPT_POLICY = Object.freeze({
   preferred_compact_language: "zh-CN",
 });
 const TOOL_PREPARE_PROMPT_DALLE3 = "prepare_prompt_dalle3";
-const TOOL_GENERATE_DALLE3 = "generate_image_dalle3";
-const TOOL_EDIT_DALLE3 = "edit_image_dalle3";
-const TOOL_GENERATE_BATCH_DALLE3 = "generate_image_batch_dalle3";
-const TOOL_EDIT_BATCH_DALLE3 = "edit_image_batch_dalle3";
 const TOOL_TRACE_PLAN = "trace_image_job_plan";
 const TOOL_STATUS = "get_provider_status";
 const TOOL_TASK_STATUS = "get_image_task_status";
 const TOOL_REGRESS = "regress_image";
 const BASE_INITIALIZE_INSTRUCTIONS =
   "Use Fmage image tools. Complete the unrestricted prompt with the active model before provider adaptation. " +
-  "For edits, identify reference-image roles and preserve required text, layout, and other locked details. " +
-  "Use a provider-specific tool when one is available.";
+  "For edits, identify reference-image roles and preserve required text, layout, and other locked details.";
 const MAX_EMBEDDED_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_CHILD_OUTPUT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_HELPER_TIMEOUT_SECONDS = 360;
@@ -48,7 +42,8 @@ const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG_PATH =
   process.env.FMAGE_CONFIG ||
   join(process.env.CODEX_HOME || join(homedir(), ".codex"), "fmage", "providers.json");
-const TRANSPORT_808_OPENAI_IMAGES = "808-openai-images";
+const TRANSPORT_OPENAI_IMAGES = "openai-images";
+const TRANSPORT_PROFILE_808 = "808";
 const TRANSPORT_EZAI_BANANA_IMAGES = "ezai-banana-images";
 const OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS = 600;
 const OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT = "url";
@@ -57,18 +52,16 @@ const EZAI_BANANA_DEFAULT_RESPONSE_FORMAT = "url";
 const EZAI_BANANA_SUPPORTED_RESPONSE_FORMATS = new Set(["url", "b64_json"]);
 
 const TRANSPORTS = {
-  "openai-images": join(PLUGIN_ROOT, "scripts", "openai_images_transport.py"),
-  [TRANSPORT_808_OPENAI_IMAGES]: join(
-    PLUGIN_ROOT,
-    "scripts",
-    "openai_images_808_transport.py",
-  ),
+  [TRANSPORT_OPENAI_IMAGES]: join(PLUGIN_ROOT, "scripts", "openai_images_transport.py"),
   [TRANSPORT_EZAI_BANANA_IMAGES]: join(
     PLUGIN_ROOT,
     "scripts",
     "ezai_banana_transport.py",
   ),
   "zenmux-vertex": join(PLUGIN_ROOT, "scripts", "zenmux_vertex_transport.py"),
+};
+const TRANSPORT_PROFILE_SCRIPTS = {
+  [TRANSPORT_PROFILE_808]: join(PLUGIN_ROOT, "scripts", "openai_images_808_transport.py"),
 };
 const REGRESSION_SCRIPT = join(
   PLUGIN_ROOT,
@@ -136,13 +129,20 @@ function getDalle3PromptStage(id, expectedKind = null) {
   if (!stage || (expectedKind && stage.kind !== expectedKind)) {
     throw new Error(
       `The ${expectedKind === "pending" ? "prompt_session_id" : "prompt_check_id"} is invalid or expired. ` +
-        `No ${DALLE3_PROVIDER_NAME} provider request has been sent; prepare the prompt again.`,
+        `No provider request has been sent; prepare the prompt again.`,
     );
   }
   return { id: supplied, stage };
 }
 
-function stagePendingDalle3Prompt(sourcePrompt, sourcePromptChars, sourceLanguage, policy, previous = null) {
+function stagePendingDalle3Prompt(
+  sourcePrompt,
+  sourcePromptChars,
+  sourceLanguage,
+  policy,
+  provider,
+  previous = null,
+) {
   cleanupDalle3PromptStages();
   const now = Date.now();
   const id = previous?.id ?? newDalle3PromptStageId();
@@ -154,6 +154,10 @@ function stagePendingDalle3Prompt(sourcePrompt, sourcePromptChars, sourceLanguag
     sourcePromptChars,
     sourceLanguage,
     promptPolicy: policy,
+    providerName: provider.name,
+    transport: provider.transport,
+    transportProfile: provider.transportProfile ?? null,
+    promptProfile: provider.promptProfile ?? PROMPT_PROFILE_DALLE3,
     sourcePreparedAt,
     preparationCallCount,
     expiresAtMs: now + DALLE3_PROMPT_STAGE_TTL_MS,
@@ -161,7 +165,7 @@ function stagePendingDalle3Prompt(sourcePrompt, sourcePromptChars, sourceLanguag
   return { id, sourcePreparedAt, preparationCallCount };
 }
 
-function stageReadyDalle3Prompt(promptResolution, previous = null) {
+function stageReadyDalle3Prompt(promptResolution, provider, previous = null) {
   cleanupDalle3PromptStages();
   const now = Date.now();
   const id = newDalle3PromptStageId();
@@ -170,6 +174,10 @@ function stageReadyDalle3Prompt(promptResolution, previous = null) {
   const transportReadyAt = isoNow();
   const stagedResolution = {
     ...promptResolution,
+    providerName: provider.name,
+    transport: provider.transport,
+    transportProfile: provider.transportProfile ?? null,
+    promptProfile: provider.promptProfile ?? PROMPT_PROFILE_DALLE3,
     promptPreparation: {
       mode: "staged_transport",
       source_prepared_at: sourcePreparedAt,
@@ -224,23 +232,29 @@ function normalizePromptPolicy(rawPolicy, context = "prompt_policy") {
   };
 }
 
-function isDalle3ProviderName(providerName) {
-  const normalized = normalizeProviderLookup(providerName);
-  return normalized === "dalle3" || normalized === "dalle-3" || normalized === "dall-e-3";
+function normalizeTransportProfile(value) {
+  const configured = nonEmptyString(value);
+  if (!configured) return null;
+  if (configured === TRANSPORT_PROFILE_808) return TRANSPORT_PROFILE_808;
+  throw new Error(`Unsupported transport_profile "${value}". Use "${TRANSPORT_PROFILE_808}".`);
 }
 
-function isDalle3CompatibilityValue(value) {
-  const normalized = normalizeProviderLookup(value);
-  return normalized === DALLE3_COMPATIBILITY || normalized === "dalle-3" || normalized === "dall-e-3";
+function normalizePromptProfile(value) {
+  const configured = nonEmptyString(value);
+  if (!configured) return null;
+  if (configured === PROMPT_PROFILE_DALLE3) return PROMPT_PROFILE_DALLE3;
+  throw new Error(`Unsupported prompt_profile "${value}". Use "${PROMPT_PROFILE_DALLE3}".`);
 }
 
 function isDalle3PromptPolicyProvider(provider) {
-  return Boolean(provider?.dalle3Compatibility && provider?.promptPolicy);
+  return Boolean(provider?.dalle3PromptProfile && provider?.promptPolicy);
 }
 
 function resolveProviderPrompt(args, provider) {
   if (!isDalle3PromptPolicyProvider(provider)) {
-    throw new Error(`Provider prompt compaction is only available for ${DALLE3_PROVIDER_NAME} compatibility.`);
+    throw new Error(
+      `Provider prompt preparation is only available when prompt_profile is "${PROMPT_PROFILE_DALLE3}".`,
+    );
   }
   if (args._prompt_resolution) return args._prompt_resolution;
   if (args._dalle3_prompt_check_required && nonEmptyString(args.prompt_check_id)) {
@@ -249,7 +263,7 @@ function resolveProviderPrompt(args, provider) {
   const sourcePrompt = nonEmptyString(args.prompt);
   if (!sourcePrompt) {
     throw new Error(
-      `Provide either the complete unrestricted prompt for the initial ${DALLE3_PROVIDER_NAME} compatibility call ` +
+      `Provide either the complete unrestricted prompt for the initial prompt-profile call ` +
         `or a valid prompt_check_id returned by ${TOOL_PREPARE_PROMPT_DALLE3}.`,
     );
   }
@@ -316,15 +330,15 @@ function resolveProviderPrompt(args, provider) {
   };
 }
 
-function prepareDalle3ProviderPrompt(args) {
-  const context = configuredDalle3PolicyContext();
-  if (!context) {
-    throw new Error(`${DALLE3_PROVIDER_NAME} is not active with a prompt policy.`);
-  }
+function prepareDalle3ProviderPrompt(args, providerContext = null) {
   const suppliedSessionId = nonEmptyString(args.prompt_session_id);
   const pending = suppliedSessionId
     ? getDalle3PromptStage(suppliedSessionId, "pending")
     : null;
+  const context = providerContext ?? configuredDalle3PolicyContext(pending?.stage.providerName);
+  if (!context) {
+    throw new Error(`No active provider uses prompt_profile "${PROMPT_PROFILE_DALLE3}".`);
+  }
   if (pending && nonEmptyString(args.prompt)) {
     throw new Error(
       "Do not resend prompt when continuing with prompt_session_id; send only provider_prompt.",
@@ -337,7 +351,7 @@ function prepareDalle3ProviderPrompt(args) {
     );
   }
 
-  const policy = context.policy;
+  const policy = context.policy ?? context.promptPolicy;
   if (
     pending &&
     JSON.stringify(pending.stage.promptPolicy) !== JSON.stringify(policy)
@@ -451,12 +465,13 @@ function prepareDalle3ProviderPrompt(args) {
   }
 
   const staged = promptResolution
-    ? stageReadyDalle3Prompt(promptResolution, pending)
+    ? stageReadyDalle3Prompt(promptResolution, context, pending)
     : stagePendingDalle3Prompt(
         sourcePrompt,
         sourcePromptChars,
         sourceLanguage,
         policy,
+        context,
         pending,
       );
 
@@ -877,15 +892,24 @@ async function resolveProvider(requestedProvider, requireKey = true) {
     throw new Error(`Provider "${providerName}" does not exist in ${CONFIG_PATH}.`);
   }
 
-  const transport = nonEmptyString(raw.transport);
+  for (const legacyField of ["compatibility", "compatibility_profile"]) {
+    if (Object.prototype.hasOwnProperty.call(raw, legacyField)) {
+      throw new Error(
+        `Provider "${providerName}" uses unsupported legacy field "${legacyField}". ` +
+          `Use prompt_profile: "${PROMPT_PROFILE_DALLE3}" instead.`,
+      );
+    }
+  }
+  const configuredTransport = nonEmptyString(raw.transport);
+  const transport = configuredTransport;
+  const transportProfile = normalizeTransportProfile(raw.transport_profile);
   const baseUrl = nonEmptyString(raw.base_url);
   const model = nonEmptyString(raw.model);
   const apiKeyEnv = nonEmptyString(raw.api_key_env);
   const apiKey = nonEmptyString(raw.api_key) || (apiKeyEnv ? nonEmptyString(process.env[apiKeyEnv]) : null);
-  const dalle3Compatibility = isDalle3ProviderName(providerName) ||
-    isDalle3CompatibilityValue(raw.compatibility) ||
-    isDalle3CompatibilityValue(raw.compatibility_profile);
-  const promptPolicy = dalle3Compatibility
+  const promptProfile = normalizePromptProfile(raw.prompt_profile);
+  const dalle3PromptProfile = promptProfile === PROMPT_PROFILE_DALLE3;
+  const promptPolicy = dalle3PromptProfile
     ? normalizePromptPolicy(
         raw.prompt_policy == null ? DALLE3_DEFAULT_PROMPT_POLICY : raw.prompt_policy,
         `providers.${providerName}.prompt_policy`,
@@ -894,18 +918,31 @@ async function resolveProvider(requestedProvider, requireKey = true) {
 
   if (!transport || !TRANSPORTS[transport]) {
     throw new Error(
-      `Provider "${providerName}" has unsupported transport "${transport ?? ""}". ` +
+      `Provider "${providerName}" has unsupported transport "${configuredTransport ?? ""}". ` +
         `Use one of: ${Object.keys(TRANSPORTS).join(", ")}.`,
+    );
+  }
+  if (transportProfile && transport !== TRANSPORT_OPENAI_IMAGES) {
+    throw new Error(
+      `Provider "${providerName}" transport_profile "${transportProfile}" requires transport ` +
+        `"${TRANSPORT_OPENAI_IMAGES}".`,
+    );
+  }
+  if (promptProfile === PROMPT_PROFILE_DALLE3 && transport !== TRANSPORT_OPENAI_IMAGES) {
+    throw new Error(
+      `Provider "${providerName}" prompt_profile "${PROMPT_PROFILE_DALLE3}" currently requires transport ` +
+        `"${TRANSPORT_OPENAI_IMAGES}".`,
     );
   }
   if (!baseUrl || !model) {
     throw new Error(`Provider "${providerName}" must define base_url and model in ${CONFIG_PATH}.`);
   }
   let openaiImages808 = null;
-  if (transport === TRANSPORT_808_OPENAI_IMAGES) {
+  if (transportProfile === TRANSPORT_PROFILE_808) {
     if (!OPENAI_IMAGES_808_SUPPORTED_MODELS.has(model)) {
       throw new Error(
-        `Provider "${providerName}" model "${model}" is not supported by ${TRANSPORT_808_OPENAI_IMAGES}. ` +
+        `Provider "${providerName}" model "${model}" is not supported by transport_profile ` +
+          `"${TRANSPORT_PROFILE_808}". ` +
           `Use gpt-image-2 or gpt-image-2-token.`,
       );
     }
@@ -951,12 +988,14 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   return {
     name: providerName,
     transport,
+    transportProfile,
+    promptProfile,
     baseUrl,
     model,
     apiKey,
     apiKeyConfigured: Boolean(apiKey),
     apiKeySource: nonEmptyString(raw.api_key) ? "external_config" : apiKey ? `environment:${apiKeyEnv}` : "missing",
-    dalle3Compatibility,
+    dalle3PromptProfile,
     promptPolicy,
     openaiImages808,
     ezaiBanana,
@@ -1133,6 +1172,19 @@ function openaiImages808PendingTimeoutSeconds(args, provider) {
     openaiImages808RequestTimeoutSeconds(args, provider),
     positiveInteger(args._pending_total_timeout, 0),
   );
+}
+
+function providerTransportScript(provider) {
+  if (provider.transportProfile) {
+    const script = TRANSPORT_PROFILE_SCRIPTS[provider.transportProfile];
+    if (!script) {
+      throw new Error(
+        `Provider "${provider.name}" has unsupported transport_profile "${provider.transportProfile}".`,
+      );
+    }
+    return script;
+  }
+  return TRANSPORTS[provider.transport];
 }
 
 function openaiImages808Arguments(args, promptFile, provider) {
@@ -1365,6 +1417,8 @@ async function enrichResult(result, revisedPrompt, provider, promptResolution = 
     request: sanitizeRequest(result.request),
     provider: provider.name,
     provider_transport: provider.transport,
+    ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
+    ...(provider.promptProfile ? { prompt_profile: provider.promptProfile } : {}),
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
     revised_prompt_submitted: revisedPrompt,
@@ -2083,6 +2137,8 @@ async function combineBatchResults({
     request,
     provider: provider.name,
     provider_transport: provider.transport,
+    ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
+    ...(provider.promptProfile ? { prompt_profile: provider.promptProfile } : {}),
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
     revised_prompt_submitted: prompt,
@@ -2143,22 +2199,71 @@ async function combineBatchResults({
 
 async function runImageCommand(command, args) {
   args = enforceQualityPolicy(args);
+  const provider = await resolveProvider(args.provider, !args.dry_run);
+  if (isDalle3PromptPolicyProvider(provider)) {
+    const routed = routeDalle3ImageArgs(args, provider);
+    if (!routed.ready) return routed.result;
+    args = {
+      ...routed.args,
+      provider: provider.name,
+      _dalle3_prompt_policy: true,
+      _dalle3_prompt_check_required: true,
+    };
+  } else if (nonEmptyString(args.prompt_check_id)) {
+    throw new Error(
+      `prompt_check_id can be used only with a provider configured with prompt_profile ` +
+        `"${PROMPT_PROFILE_DALLE3}".`,
+    );
+  }
   const count = requestedImageCount(args);
   if (count > 1) {
     return submitBatchImageTask(command, args, count);
   }
-  return runSingleImageCommand(command, args);
+  return runSingleImageCommand(command, args, provider);
 }
 
 async function runBatchImageCommand(command, args) {
-  const jobs = batchJobs(args);
-  return submitBatchJobs(command, args, jobs);
+  const provider = await resolveProvider(args.provider, !args.dry_run);
+  const jobs = isDalle3PromptPolicyProvider(provider) ? dalle3BatchJobs(args) : batchJobs(args);
+  if (!isDalle3PromptPolicyProvider(provider)) {
+    if (jobs.some((job) => nonEmptyString(job.prompt_check_id))) {
+      throw new Error(
+        `prompt_check_id can be used only with a provider configured with prompt_profile ` +
+          `"${PROMPT_PROFILE_DALLE3}".`,
+      );
+    }
+    return submitBatchJobs(command, { ...args, provider: provider.name }, jobs);
+  }
+
+  const routedJobs = jobs.map((job) => routeDalle3ImageArgs(job, provider, { consume: false }));
+  if (routedJobs.some((item) => !item.ready)) {
+    return dalle3BatchPreparationResult(routedJobs, provider.name);
+  }
+  for (const item of routedJobs) {
+    if (item.stagedId) dalle3PromptStages.delete(item.stagedId);
+  }
+  return submitBatchJobs(
+    command,
+    {
+      ...args,
+      provider: provider.name,
+      _dalle3_prompt_policy: true,
+      _dalle3_prompt_check_required: true,
+    },
+    routedJobs.map((item) => item.args),
+  );
 }
 
-function routeDalle3ImageArgs(args, { consume = true } = {}) {
-  const context = configuredDalle3PolicyContext();
-  if (!context) {
-    throw new Error(`${DALLE3_PROVIDER_NAME} is not active with a prompt policy.`);
+function routeDalle3ImageArgs(args, provider, { consume = true } = {}) {
+  if (!isDalle3PromptPolicyProvider(provider)) {
+    throw new Error(`Provider "${provider?.name ?? ""}" does not use prompt_profile "${PROMPT_PROFILE_DALLE3}".`);
+  }
+  if (nonEmptyString(args.provider_prompt)) {
+    throw new Error(
+      `Provider "${provider.name}" uses prompt_profile "${PROMPT_PROFILE_DALLE3}"; do not provide ` +
+        `provider_prompt to the base image tool. Submit the complete source prompt first, then ` +
+        `continue through ${TOOL_PREPARE_PROMPT_DALLE3} only if preparation is required.`,
+    );
   }
 
   const promptCheckId = nonEmptyString(args.prompt_check_id);
@@ -2169,10 +2274,16 @@ function routeDalle3ImageArgs(args, { consume = true } = {}) {
       );
     }
     const { id, stage } = getDalle3PromptStage(promptCheckId, "ready");
-    if (JSON.stringify(stage.promptResolution.promptPolicy) !== JSON.stringify(context.policy)) {
+    if (stage.promptResolution.providerName !== provider.name) {
+      throw new Error(
+        `This prompt_check_id belongs to provider "${stage.promptResolution.providerName}", not ` +
+          `"${provider.name}". No provider request has been sent.`,
+      );
+    }
+    if (JSON.stringify(stage.promptResolution.promptPolicy) !== JSON.stringify(provider.promptPolicy)) {
       dalle3PromptStages.delete(id);
       throw new Error(
-        `The ${context.providerName} prompt policy changed after preparation. ` +
+        `The ${provider.name} prompt policy changed after preparation. ` +
           "No provider request has been sent; prepare the prompt again.",
       );
     }
@@ -2191,38 +2302,16 @@ function routeDalle3ImageArgs(args, { consume = true } = {}) {
   const prompt = nonEmptyString(args.prompt);
   if (!prompt) {
     throw new Error(
-      `Provide the complete unrestricted prompt for the initial ${context.providerName} call, ` +
+      `Provide the complete unrestricted prompt for the initial ${provider.name} call, ` +
         `or provide prompt_check_id after an over-limit preparation.`,
     );
   }
-  if (unicodeCharacterCount(prompt) <= context.policy.max_chars) {
+  if (unicodeCharacterCount(prompt) <= provider.promptPolicy.max_chars) {
     return { ready: true, args };
-  }
-  if (nonEmptyString(args.provider_prompt)) {
-    const transportReadyAt = isoNow();
-    const promptResolution = resolveProviderPrompt(args, {
-      name: context.providerName,
-      transport: context.transport,
-      dalle3Compatibility: true,
-      promptPolicy: context.policy,
-    });
-    promptResolution.promptPreparation = {
-      mode: "single_call_transport",
-      source_prepared_at: transportReadyAt,
-      transport_ready_at: transportReadyAt,
-      preparation_call_count: 0,
-    };
-    return {
-      ready: true,
-      args: {
-        ...args,
-        _prompt_resolution: promptResolution,
-      },
-    };
   }
   return {
     ready: false,
-    result: prepareDalle3ProviderPrompt({ prompt }),
+    result: prepareDalle3ProviderPrompt({ prompt }, provider),
   };
 }
 
@@ -2241,7 +2330,7 @@ function dalle3BatchPreparationResult(routedJobs, providerName) {
     })),
     next_action:
       `No provider requests were sent. Continue only the jobs with ready=false through ` +
-      `${TOOL_PREPARE_PROMPT_DALLE3}, then call the same batch tool with prompt_check_id for those jobs.`,
+      `${TOOL_PREPARE_PROMPT_DALLE3}, then call the same base batch tool with prompt_check_id for those jobs.`,
   };
 }
 
@@ -2261,41 +2350,6 @@ function dalle3PreparationText(result) {
     `Source characters: ${result.source_prompt_chars}. Provider candidate characters: ` +
     `${result.provider_prompt_chars ?? "not supplied"}. Provider request sent: false. ` +
     result.next_action
-  );
-}
-
-async function runDalle3ImageCommand(command, args) {
-  const context = configuredDalle3PolicyContext();
-  const routed = routeDalle3ImageArgs(args);
-  if (!routed.ready) return routed.result;
-  return runImageCommand(command, {
-    ...routed.args,
-    provider: context.providerName,
-    _dalle3_prompt_policy: true,
-    _dalle3_prompt_check_required: true,
-  });
-}
-
-async function runDalle3BatchImageCommand(command, args) {
-  const context = configuredDalle3PolicyContext();
-  const jobs = dalle3BatchJobs(args);
-  const routedJobs = jobs.map((job) => routeDalle3ImageArgs(job, { consume: false }));
-  if (routedJobs.some((item) => !item.ready)) {
-    return dalle3BatchPreparationResult(routedJobs, context.providerName);
-  }
-  for (const item of routedJobs) {
-    if (item.stagedId) dalle3PromptStages.delete(item.stagedId);
-  }
-  const materializedJobs = routedJobs.map((item) => item.args);
-  return submitBatchJobs(
-    command,
-    {
-      ...args,
-      provider: context.providerName,
-      _dalle3_prompt_policy: true,
-      _dalle3_prompt_check_required: true,
-    },
-    materializedJobs,
   );
 }
 
@@ -2379,6 +2433,8 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     updated_at: submittedAt,
     provider: provider.name,
     provider_transport: provider.transport,
+    ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
+    ...(provider.promptProfile ? { prompt_profile: provider.promptProfile } : {}),
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
     requested_count: normalizedJobs.length,
@@ -2590,14 +2646,14 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     };
   }
   const submittedPrompt = promptResolution?.submittedPrompt ?? prompt;
-  const scriptPath = TRANSPORTS[provider.transport];
+  const scriptPath = providerTransportScript(provider);
   const tempDir = await mkdtemp(join(tmpdir(), "fmage-"));
   const promptFile = join(tempDir, "revised-prompt.txt");
   await writeFile(promptFile, submittedPrompt, "utf8");
 
   try {
     const transportArguments =
-      provider.transport === TRANSPORT_808_OPENAI_IMAGES
+      provider.transportProfile === TRANSPORT_PROFILE_808
         ? openaiImages808Arguments(args, promptFile, provider)
         : commonArguments(args, promptFile, provider);
     const argv = [scriptPath, command, ...transportArguments];
@@ -2616,7 +2672,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     }
 
     const helperTimeoutSeconds =
-      provider.transport === TRANSPORT_808_OPENAI_IMAGES
+      provider.transportProfile === TRANSPORT_PROFILE_808
         ? openaiImages808PendingTimeoutSeconds(args, provider)
         : args.timeout;
     const helperEnvironment = {
@@ -2664,25 +2720,27 @@ function revisedPromptProperty(editing = false) {
   };
 }
 
-function configuredDalle3PolicyContext() {
+function configuredDalle3PolicyContext(requestedProvider = null) {
   try {
     const config = readConfigForPaths();
     if (!config?.providers || typeof config.providers !== "object") return null;
     const activeProviders = configuredActiveProviders(config);
-    const providerName = activeProviders.find((name) => {
+    const requested = nonEmptyString(requestedProvider);
+    const candidates = requested ? activeProviders.filter((name) => name === requested) : activeProviders;
+    const providerName = candidates.find((name) => {
       const raw = config.providers[name];
       return (
         raw &&
         typeof raw === "object" &&
-        (isDalle3ProviderName(name) ||
-          isDalle3CompatibilityValue(raw.compatibility) ||
-          isDalle3CompatibilityValue(raw.compatibility_profile))
+        nonEmptyString(raw.prompt_profile) === PROMPT_PROFILE_DALLE3
       );
     });
     if (!providerName) return null;
     const raw = config.providers[providerName];
     if (!raw || typeof raw !== "object") return null;
-    const transport = nonEmptyString(raw.transport);
+    const configuredTransport = nonEmptyString(raw.transport);
+    const transport = configuredTransport;
+    const transportProfile = normalizeTransportProfile(raw.transport_profile);
     const policy = normalizePromptPolicy(
       raw.prompt_policy == null ? DALLE3_DEFAULT_PROMPT_POLICY : raw.prompt_policy,
       `providers.${providerName}.prompt_policy`,
@@ -2690,7 +2748,10 @@ function configuredDalle3PolicyContext() {
     if (!policy) return null;
     return {
       providerName,
+      name: providerName,
       transport,
+      transportProfile,
+      promptProfile: PROMPT_PROFILE_DALLE3,
       policy,
       isDefault: activeProviders[0] === providerName,
       hasOtherActiveProviders: activeProviders.some((name) => name !== providerName),
@@ -2704,25 +2765,11 @@ function configuredProviderRoutingGuidance() {
   const context = configuredDalle3PolicyContext();
   if (!context) return "";
   return (
-    " When the selected provider exposes matching provider-specific image tools, use those tools. " +
-    "Keep the complete source prompt unchanged before provider adaptation. " +
-    "If a provider-specific image tool returns ready=false with provider_request_sent=false, " +
-    "follow its next_action and then call the same image tool with prompt_check_id only."
+    " The selected provider may apply a prompt profile automatically. Keep the complete source prompt " +
+    "unchanged before provider adaptation. If this tool returns ready=false with " +
+    "provider_request_sent=false, follow its next_action through prepare_prompt_dalle3, then call this " +
+    "same image tool with prompt_check_id only."
   );
-}
-
-function dalle3PromptProperty(editing = false) {
-  const standardPrompt = revisedPromptProperty(editing);
-  return {
-    ...standardPrompt,
-    description:
-      `${standardPrompt.description} This initial value must be completed exactly as it would be for ` +
-      `the corresponding standard Fmage tool, before inspecting or applying any ${DALLE3_PROVIDER_NAME} ` +
-      "provider policy. Do not make any policy-driven change to its language, detail, or length. " +
-      "Any transport adaptation begins only after this complete value is finalized. " +
-      "It is archived unchanged as revised_prompt_source. Omit it only when submitting " +
-      "a staged prompt_check_id.",
-  };
 }
 
 function dalle3ProviderPromptProperty() {
@@ -2730,25 +2777,13 @@ function dalle3ProviderPromptProperty() {
     type: "string",
     minLength: 1,
     description:
-      `Stage 2 transport candidate for ${DALLE3_PROVIDER_NAME} compatibility, used only with prompt_session_id after the initial image tool reports an over-limit source. ` +
+      `Stage 2 transport candidate for prompt_profile "${PROMPT_PROFILE_DALLE3}", used only with prompt_session_id after the initial image tool reports an over-limit source. ` +
       "Follow the latest preparation result's next_action exactly. Never replace or rewrite the staged source value, and never truncate or reduce the transport candidate to a summary. Preserve exact required text, names, counts, identities, spatial relationships, composition, edit invariants, camera, materials, lighting, style, and key avoid constraints.",
   };
 }
 
-function dalle3ImageProviderPromptProperty() {
-  return {
-    type: "string",
-    minLength: 1,
-    description:
-      "Optional transport candidate derived only after the complete source prompt is finalized. It is used only when " +
-      "the source exceeds the configured policy limit; otherwise the source is submitted unchanged. " +
-      "Never shorten the source to avoid this adaptation. Preserve all source meaning and exact required text. " +
-      "Policy validation occurs before any provider request.",
-  };
-}
-
 function commonProperties(editing = false) {
-  return {
+  const properties = {
     prompt: revisedPromptProperty(editing),
     provider: {
       type: "string",
@@ -2835,6 +2870,18 @@ function commonProperties(editing = false) {
       description: "Embed image bytes when auto; default is never.",
     },
   };
+  if (configuredDalle3PolicyContext()) {
+    properties.prompt_check_id = {
+      type: "string",
+      minLength: 64,
+      maxLength: 64,
+      pattern: "^[0-9a-f]{64}$",
+      description:
+        `Short-lived one-time readiness ID returned by ${TOOL_PREPARE_PROMPT_DALLE3}. ` +
+        "Use it instead of prompt after an over-limit prompt-profile preparation.",
+    };
+  }
+  return properties;
 }
 
 function jobProperties(editing = false) {
@@ -2863,6 +2910,8 @@ function jobProperties(editing = false) {
 function batchProperties(editing = false) {
   const properties = { ...commonProperties(editing) };
   delete properties.prompt;
+  delete properties.prompt_check_id;
+  const supportsPromptProfile = Boolean(configuredDalle3PolicyContext());
   properties.jobs = {
     type: "array",
     minItems: 1,
@@ -2871,80 +2920,9 @@ function batchProperties(editing = false) {
     items: {
       type: "object",
       properties: jobProperties(editing),
-      required: ["prompt"],
-      additionalProperties: false,
-    },
-  };
-  properties.return_when = {
-    type: "string",
-    enum: ["submitted", "completed"],
-    description: "completed waits; submitted returns task_id.",
-  };
-  properties.verbose = {
-    type: "boolean",
-    description: "Return full task state.",
-  };
-  properties.include_provider_metadata = {
-    type: "boolean",
-    description: "Return sanitized provider response metadata and prompt provenance.",
-  };
-  return properties;
-}
-
-function dalle3CommonProperties(editing) {
-  const properties = {
-    ...commonProperties(editing),
-    prompt: dalle3PromptProperty(editing),
-    provider_prompt: dalle3ImageProviderPromptProperty(),
-    prompt_check_id: {
-      type: "string",
-      minLength: 64,
-      maxLength: 64,
-      pattern: "^[0-9a-f]{64}$",
-      description:
-        `Short-lived one-time readiness ID returned by ${TOOL_PREPARE_PROMPT_DALLE3}. ` +
-        "Use it instead of resending prompt or provider_prompt after over-limit preparation.",
-    },
-  };
-  delete properties.provider;
-  return properties;
-}
-
-function dalle3JobProperties(editing) {
-  const properties = dalle3CommonProperties(editing);
-  delete properties.output_dir;
-  delete properties.timeout;
-  delete properties.dry_run;
-  delete properties.verbose;
-  delete properties.include_provider_metadata;
-  delete properties.embed_images;
-  if (editing) {
-    properties.images = {
-      type: "array",
-      items: { type: "string" },
-      description: "Input image paths or URLs; identify each image by index and role in the prompt.",
-    };
-    properties.use_latest = {
-      type: "boolean",
-      description: "Use latest output when no reference is supplied.",
-    };
-  }
-  return properties;
-}
-
-function dalle3BatchProperties(editing) {
-  const properties = dalle3CommonProperties(editing);
-  delete properties.prompt;
-  delete properties.prompt_check_id;
-  properties.jobs = {
-    type: "array",
-    minItems: 1,
-    maxItems: 10,
-    description: `Independent ${DALLE3_PROVIDER_NAME} compatibility image jobs.`,
-    items: {
-      type: "object",
-      properties: dalle3JobProperties(editing),
-      anyOf: [{ required: ["prompt"] }, { required: ["prompt_check_id"] }],
+      ...(supportsPromptProfile
+        ? { anyOf: [{ required: ["prompt"] }, { required: ["prompt_check_id"] }] }
+        : { required: ["prompt"] }),
       additionalProperties: false,
     },
   };
@@ -2966,19 +2944,9 @@ function dalle3BatchProperties(editing) {
 
 function toolDefinitions() {
   const dalle3Context = configuredDalle3PolicyContext();
-  const standardProviderRoutingHint = dalle3Context
-    ? " When the selected provider exposes a dedicated image tool, use the matching dedicated tool."
-    : "";
   const standardImageToolNames = [TOOL_GENERATE, TOOL_GENERATE_BATCH, TOOL_EDIT, TOOL_EDIT_BATCH];
   const imageToolNames = [...standardImageToolNames];
-  if (dalle3Context) {
-    imageToolNames.push(
-      TOOL_GENERATE_DALLE3,
-      TOOL_GENERATE_BATCH_DALLE3,
-      TOOL_EDIT_DALLE3,
-      TOOL_EDIT_BATCH_DALLE3,
-    );
-  }
+  const promptProfileHint = dalle3Context ? configuredProviderRoutingGuidance() : "";
   const tools = [
     {
       name: TOOL_REGRESS,
@@ -3056,11 +3024,13 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE,
       title: "Generate Image with Fmage",
-      description: `Generate one image from a complete revised prompt.${standardProviderRoutingHint}`,
+      description: `Generate one image from a complete revised prompt.${promptProfileHint}`,
       inputSchema: {
         type: "object",
         properties: commonProperties(false),
-        required: ["prompt"],
+        ...(dalle3Context
+          ? { anyOf: [{ required: ["prompt"] }, { required: ["prompt_check_id"] }] }
+          : { required: ["prompt"] }),
         additionalProperties: false,
       },
       annotations: {
@@ -3073,7 +3043,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_BATCH,
       title: "Generate Image Batch with Fmage",
-      description: `Generate multiple independent images in one batch call.${standardProviderRoutingHint}`,
+      description: `Generate multiple independent images in one batch call.${promptProfileHint}`,
       inputSchema: {
         type: "object",
         properties: batchProperties(false),
@@ -3090,7 +3060,7 @@ function toolDefinitions() {
     {
       name: TOOL_EDIT,
       title: "Edit Image with Fmage",
-      description: `Edit reference images with one complete revised prompt.${standardProviderRoutingHint}`,
+      description: `Edit reference images with one complete revised prompt.${promptProfileHint}`,
       inputSchema: {
         type: "object",
         properties: {
@@ -3105,7 +3075,9 @@ function toolDefinitions() {
             description: "Use latest output when no reference is supplied.",
           },
         },
-        required: ["prompt"],
+        ...(dalle3Context
+          ? { anyOf: [{ required: ["prompt"] }, { required: ["prompt_check_id"] }] }
+          : { required: ["prompt"] }),
         additionalProperties: false,
       },
       annotations: {
@@ -3118,7 +3090,7 @@ function toolDefinitions() {
     {
       name: TOOL_EDIT_BATCH,
       title: "Edit Image Batch with Fmage",
-      description: `Edit multiple independent image jobs in one batch call.${standardProviderRoutingHint}`,
+      description: `Edit multiple independent image jobs in one batch call.${promptProfileHint}`,
       inputSchema: {
         type: "object",
         properties: batchProperties(true),
@@ -3191,128 +3163,37 @@ function toolDefinitions() {
   ];
 
   if (dalle3Context) {
-    const { policy, providerName } = dalle3Context;
-    const annotations = {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: true,
-    };
-    const dalle3Tools = [
-      {
-        name: TOOL_PREPARE_PROMPT_DALLE3,
-        title: `Prepare Prompt for Fmage (${providerName})`,
-        description:
-          `After a ${providerName} compatibility image tool returns ready=false, validate its Stage 2 ` +
-          "provider_prompt with prompt_session_id; it sends no provider request. When ready=true, call " +
-          "the same image tool with prompt_check_id only.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            prompt: {
-              type: "string",
-              minLength: 1,
-              description:
-                "Compatibility input containing the already-finalized Stage 1 source. Normal initial calls should pass that value to the matching provider-specific image tool instead.",
-            },
-            prompt_session_id: {
-              type: "string",
-              minLength: 64,
-              maxLength: 64,
-              pattern: "^[0-9a-f]{64}$",
-              description:
-                "Short-lived session ID returned when the initial image tool or this preparation tool reports ready=false. Use it instead of resending prompt.",
-            },
-            provider_prompt: dalle3ProviderPromptProperty(),
+    const { providerName } = dalle3Context;
+    tools.push({
+      name: TOOL_PREPARE_PROMPT_DALLE3,
+      title: `Prepare Prompt for Fmage (${providerName})`,
+      description:
+        `After an image tool using the ${providerName} prompt profile returns ready=false, validate its Stage 2 ` +
+        "provider_prompt with prompt_session_id; it sends no provider request. When ready=true, call " +
+        "the same base image tool with prompt_check_id only.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          prompt_session_id: {
+            type: "string",
+            minLength: 64,
+            maxLength: 64,
+            pattern: "^[0-9a-f]{64}$",
+            description:
+              "Short-lived session ID returned when an initial image tool or this preparation tool reports ready=false.",
           },
-          anyOf: [{ required: ["prompt"] }, { required: ["prompt_session_id"] }],
-          additionalProperties: false,
+          provider_prompt: dalle3ProviderPromptProperty(),
         },
-        annotations: {
-          readOnlyHint: false,
-          destructiveHint: false,
-          idempotentHint: false,
-          openWorldHint: false,
-        },
+        required: ["prompt_session_id", "provider_prompt"],
+        additionalProperties: false,
       },
-      {
-        name: TOOL_GENERATE_DALLE3,
-        title: `Generate Image with Fmage (${providerName})`,
-        description:
-          `Generate one image with ${providerName} DALL-E 3 compatibility. Initial call: complete source prompt. ` +
-          `After ready=false preparation: prompt_check_id only.`,
-        inputSchema: {
-          type: "object",
-          properties: dalle3CommonProperties(false),
-          anyOf: [{ required: ["prompt"] }, { required: ["prompt_check_id"] }],
-          additionalProperties: false,
-        },
-        annotations,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
       },
-      {
-        name: TOOL_GENERATE_BATCH_DALLE3,
-        title: `Generate Image Batch with Fmage (${providerName})`,
-        description:
-          `Generate a ${providerName} DALL-E 3 compatibility batch. Each job uses a complete source prompt or a staged ` +
-          "prompt_check_id.",
-        inputSchema: {
-          type: "object",
-          properties: dalle3BatchProperties(false),
-          required: ["jobs"],
-          additionalProperties: false,
-        },
-        annotations,
-      },
-      {
-        name: TOOL_EDIT_DALLE3,
-        title: `Edit Image with Fmage (${providerName})`,
-        description:
-          `Edit reference images with ${providerName} DALL-E 3 compatibility. Initial call: complete source prompt. ` +
-          `After ready=false preparation: prompt_check_id only.`,
-        inputSchema: {
-          type: "object",
-          properties: {
-            ...dalle3CommonProperties(true),
-            images: {
-              type: "array",
-              items: { type: "string" },
-              description: "Input image paths or URLs; identify each image by index and role in the prompt.",
-            },
-            use_latest: {
-              type: "boolean",
-              description: "Use latest output when no reference is supplied.",
-            },
-          },
-          anyOf: [{ required: ["prompt"] }, { required: ["prompt_check_id"] }],
-          additionalProperties: false,
-        },
-        annotations,
-      },
-      {
-        name: TOOL_EDIT_BATCH_DALLE3,
-        title: `Edit Image Batch with Fmage (${providerName})`,
-        description:
-          `Edit a ${providerName} DALL-E 3 compatibility batch. Each job uses a complete source prompt or a staged ` +
-          "prompt_check_id.",
-        inputSchema: {
-          type: "object",
-          properties: dalle3BatchProperties(true),
-          required: ["jobs"],
-          additionalProperties: false,
-        },
-        annotations,
-      },
-    ];
-    if (dalle3Context.isDefault) {
-      const preparationTool = dalle3Tools.find((tool) => tool.name === TOOL_PREPARE_PROMPT_DALLE3);
-      const imageTools = dalle3Tools.filter((tool) => tool.name !== TOOL_PREPARE_PROMPT_DALLE3);
-      const fallbackTools = dalle3Context.hasOtherActiveProviders
-        ? tools
-        : tools.filter((tool) => !standardImageToolNames.includes(tool.name));
-      return [...imageTools, preparationTool, ...fallbackTools];
-    } else {
-      tools.push(...dalle3Tools);
-    }
+    });
   }
 
   return tools;
@@ -3496,11 +3377,12 @@ async function providerStatus(requestedProvider) {
     default_provider: activeProviders[0],
     selected_provider: provider.name,
     transport: provider.transport,
+    ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
+    ...(provider.promptProfile ? { prompt_profile: provider.promptProfile } : {}),
     base_url: provider.baseUrl,
     model: provider.model,
-    ...(provider.dalle3Compatibility
+    ...(provider.dalle3PromptProfile
       ? {
-          compatibility: DALLE3_COMPATIBILITY,
           prompt_policy: provider.promptPolicy,
         }
       : {}),
@@ -3556,7 +3438,14 @@ async function handleToolCall(id, params) {
 
   if (params?.name === TOOL_GENERATE) {
     const result = await runImageCommand("generate", params.arguments ?? {});
-    const responseResult = compactImageResultForResponse(result, params.arguments ?? {});
+    if (isDalle3PreparationResult(result)) {
+      sendResult(id, {
+        content: [{ type: "text", text: dalle3PreparationText(result) }],
+        structuredContent: result,
+      });
+      return;
+    }
+    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
     sendResult(id, {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
@@ -3570,7 +3459,14 @@ async function handleToolCall(id, params) {
 
   if (params?.name === TOOL_GENERATE_BATCH) {
     const result = await runBatchImageCommand("generate", params.arguments ?? {});
-    const responseResult = compactImageResultForResponse(result, params.arguments ?? {});
+    if (isDalle3PreparationResult(result)) {
+      sendResult(id, {
+        content: [{ type: "text", text: dalle3PreparationText(result) }],
+        structuredContent: result,
+      });
+      return;
+    }
+    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
     sendResult(id, {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
@@ -3591,51 +3487,16 @@ async function handleToolCall(id, params) {
     return;
   }
 
-  if (params?.name === TOOL_GENERATE_DALLE3) {
-    const result = await runDalle3ImageCommand("generate", params.arguments ?? {});
-    if (isDalle3PreparationResult(result)) {
-      sendResult(id, {
-        content: [{ type: "text", text: dalle3PreparationText(result) }],
-        structuredContent: result,
-      });
-      return;
-    }
-    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
-    sendResult(id, {
-      content: await imageContent(responseResult, {
-        embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
-        verbose: Boolean(params.arguments?.verbose),
-        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
-      }),
-      structuredContent: responseResult,
-    });
-    return;
-  }
-
-  if (params?.name === TOOL_GENERATE_BATCH_DALLE3) {
-    const result = await runDalle3BatchImageCommand("generate", params.arguments ?? {});
-    if (isDalle3PreparationResult(result)) {
-      sendResult(id, {
-        content: [{ type: "text", text: dalle3PreparationText(result) }],
-        structuredContent: result,
-      });
-      return;
-    }
-    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
-    sendResult(id, {
-      content: await imageContent(responseResult, {
-        embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
-        verbose: Boolean(params.arguments?.verbose),
-        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
-      }),
-      structuredContent: responseResult,
-    });
-    return;
-  }
-
   if (params?.name === TOOL_EDIT) {
     const result = await runImageCommand("edit", params.arguments ?? {});
-    const responseResult = compactImageResultForResponse(result, params.arguments ?? {});
+    if (isDalle3PreparationResult(result)) {
+      sendResult(id, {
+        content: [{ type: "text", text: dalle3PreparationText(result) }],
+        structuredContent: result,
+      });
+      return;
+    }
+    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
     sendResult(id, {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
@@ -3649,41 +3510,6 @@ async function handleToolCall(id, params) {
 
   if (params?.name === TOOL_EDIT_BATCH) {
     const result = await runBatchImageCommand("edit", params.arguments ?? {});
-    const responseResult = compactImageResultForResponse(result, params.arguments ?? {});
-    sendResult(id, {
-      content: await imageContent(responseResult, {
-        embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
-        verbose: Boolean(params.arguments?.verbose),
-        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
-      }),
-      structuredContent: responseResult,
-    });
-    return;
-  }
-
-  if (params?.name === TOOL_EDIT_DALLE3) {
-    const result = await runDalle3ImageCommand("edit", params.arguments ?? {});
-    if (isDalle3PreparationResult(result)) {
-      sendResult(id, {
-        content: [{ type: "text", text: dalle3PreparationText(result) }],
-        structuredContent: result,
-      });
-      return;
-    }
-    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
-    sendResult(id, {
-      content: await imageContent(responseResult, {
-        embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
-        verbose: Boolean(params.arguments?.verbose),
-        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
-      }),
-      structuredContent: responseResult,
-    });
-    return;
-  }
-
-  if (params?.name === TOOL_EDIT_BATCH_DALLE3) {
-    const result = await runDalle3BatchImageCommand("edit", params.arguments ?? {});
     if (isDalle3PreparationResult(result)) {
       sendResult(id, {
         content: [{ type: "text", text: dalle3PreparationText(result) }],

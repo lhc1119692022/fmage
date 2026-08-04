@@ -381,7 +381,8 @@ class ServerRoutingTests(unittest.TestCase):
             "cache_dir": "cache",
             "providers": {
                 "image-808": {
-                    "transport": "808-openai-images",
+                    "transport": "openai-images",
+                    "transport_profile": "808",
                     "base_url": "https://neutral.example/v1",
                     "model": "gpt-image-2",
                     "response_format": "url",
@@ -397,7 +398,7 @@ class ServerRoutingTests(unittest.TestCase):
             },
         }
 
-    def test_transport_name_is_the_only_async_routing_switch(self) -> None:
+    def test_transport_profile_is_the_async_routing_switch(self) -> None:
         config = self.config()
         image808 = call_server(
             config,
@@ -419,8 +420,8 @@ class ServerRoutingTests(unittest.TestCase):
                 "verbose": True,
             },
         )
-
-        self.assertEqual(image808["provider_transport"], "808-openai-images")
+        self.assertEqual(image808["provider_transport"], "openai-images")
+        self.assertEqual(image808["transport_profile"], "808")
         self.assertEqual(
             urllib.parse.parse_qs(urllib.parse.urlsplit(image808["endpoint"]).query)["async"],
             ["true"],
@@ -433,6 +434,29 @@ class ServerRoutingTests(unittest.TestCase):
         self.assertNotIn("async", urllib.parse.parse_qs(urllib.parse.urlsplit(lookalike["endpoint"]).query))
         self.assertNotIn("response_format", lookalike["request"])
         self.assertEqual(lookalike["request"]["size"], "2048x2048")
+
+    def test_legacy_transport_name_is_rejected(self) -> None:
+        config = self.config()
+        config["active_providers"] = ["legacy-808"]
+        config["providers"] = {
+            "legacy-808": {
+                "transport": "808-openai-images",
+                "base_url": "https://neutral.example/v1",
+                "model": "gpt-image-2",
+                "api_key": "",
+            }
+        }
+
+        with self.assertRaisesRegex(AssertionError, "unsupported transport"):
+            call_server(
+                config,
+                "generate_image",
+                {
+                    "provider": "legacy-808",
+                    "prompt": "test",
+                    "dry_run": True,
+                },
+            )
 
     def test_provider_status_reports_non_secret_async_configuration(self) -> None:
         status = call_server(

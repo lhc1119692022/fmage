@@ -23,13 +23,7 @@ STANDARD_IMAGE_TOOLS = {
     "edit_image",
     "edit_image_batch",
 }
-EZAI_IMAGE_TOOLS = {
-    "generate_image_dalle3",
-    "generate_image_batch_dalle3",
-    "edit_image_dalle3",
-    "edit_image_batch_dalle3",
-}
-EZAI_TOOLS = EZAI_IMAGE_TOOLS | {EZAI_PREPARE_TOOL}
+EZAI_TOOLS = {EZAI_PREPARE_TOOL}
 BASELINE_TOOL_NAMES = STANDARD_IMAGE_TOOLS | {
     "regress_image",
     "trace_image_job_plan",
@@ -39,7 +33,7 @@ BASELINE_TOOL_NAMES = STANDARD_IMAGE_TOOLS | {
 BASELINE_INSTRUCTIONS = (
     "Use Fmage image tools. Complete the unrestricted prompt with the active model before provider "
     "adaptation. For edits, identify reference-image roles and preserve required text, layout, and "
-    "other locked details. Use a provider-specific tool when one is available."
+    "other locked details."
 )
 
 
@@ -63,6 +57,12 @@ def banana_provider() -> dict[str, object]:
         "response_format": "url",
         "api_key": "",
     }
+
+
+def dalle3_provider(prompt_policy: dict[str, object] | None = None) -> dict[str, object]:
+    value = provider(EZAI, prompt_policy)
+    value["prompt_profile"] = "dalle3"
+    return value
 
 
 def provider_config(
@@ -184,21 +184,21 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             ["ordinary-image"],
             {
                 "ordinary-image": provider("ordinary-image", self.policy),
-                EZAI: provider(EZAI, self.policy),
+                EZAI: dalle3_provider(self.policy),
             },
         )
 
     def ezai_config(self) -> dict[str, object]:
         return provider_config(
             [EZAI],
-            {EZAI: provider(EZAI, self.policy)},
+            {EZAI: dalle3_provider(self.policy)},
         )
 
     def ezai_multi_provider_config(self) -> dict[str, object]:
         return provider_config(
             [EZAI, "ordinary-image"],
             {
-                EZAI: provider(EZAI, self.policy),
+                EZAI: dalle3_provider(self.policy),
                 "ordinary-image": provider("ordinary-image"),
             },
         )
@@ -208,7 +208,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             ["ordinary-image", EZAI],
             {
                 "ordinary-image": provider("ordinary-image"),
-                EZAI: provider(EZAI, self.policy),
+                EZAI: dalle3_provider(self.policy),
             },
         )
 
@@ -216,7 +216,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         return provider_config(
             [EZAI, EZAI_BANANA],
             {
-                EZAI: provider(EZAI, self.policy),
+                EZAI: dalle3_provider(self.policy),
                 EZAI_BANANA: banana_provider(),
             },
         )
@@ -244,34 +244,36 @@ class PromptPolicyIsolationTests(unittest.TestCase):
 
     def prepare_ezai_prompt(
         self,
-        prompt: str | None = None,
-        provider_prompt: str | None = None,
-        prompt_session_id: str | None = None,
+        provider_prompt: str,
+        prompt_session_id: str,
     ) -> dict[str, object]:
-        arguments: dict[str, object] = {}
-        if prompt is not None:
-            arguments["prompt"] = prompt
-        if provider_prompt is not None:
-            arguments["provider_prompt"] = provider_prompt
-        if prompt_session_id is not None:
-            arguments["prompt_session_id"] = prompt_session_id
         response = call_server(
             self.ezai_config(),
             "tools/call",
-            {"name": EZAI_PREPARE_TOOL, "arguments": arguments},
+            {
+                "name": EZAI_PREPARE_TOOL,
+                "arguments": {
+                    "provider_prompt": provider_prompt,
+                    "prompt_session_id": prompt_session_id,
+                },
+            },
         )
         self.assertNotIn("error", response)
         return response["result"]["structuredContent"]
 
-    def ready_prompt_check_id(self, prompt: str, provider_prompt: str | None = None) -> str:
-        result = self.prepare_ezai_prompt(prompt, provider_prompt)
+    def ready_prompt_check_id(self, prompt: str, provider_prompt: str) -> str:
+        initial = self.start_over_limit_image_prompt(prompt)
+        result = self.prepare_ezai_prompt(
+            provider_prompt,
+            str(initial["prompt_session_id"]),
+        )
         self.assertTrue(result["ready"])
         return str(result["prompt_check_id"])
 
     def start_over_limit_image_prompt(self, prompt: str) -> dict[str, object]:
         response = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_dalle3",
+            "generate_image",
             prompt=prompt,
         )
         self.assertNotIn("error", response)
@@ -361,80 +363,23 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         listed_tools = response["result"]["tools"]
         tools = tool_map(response)
         self.assertTrue(EZAI_TOOLS.issubset(tools))
-        self.assertEqual(
-            [tool["name"] for tool in listed_tools[:5]],
-            [
-                "generate_image_dalle3",
-                "generate_image_batch_dalle3",
-                "edit_image_dalle3",
-                "edit_image_batch_dalle3",
-                EZAI_PREPARE_TOOL,
-            ],
-        )
+        self.assertTrue(STANDARD_IMAGE_TOOLS.issubset(tools))
         self.assertEqual(len(listed_tools), 9)
-        self.assertTrue(STANDARD_IMAGE_TOOLS.isdisjoint(tools))
         self.assertLess(
             len(json.dumps(listed_tools, ensure_ascii=False, separators=(",", ":"))),
             25000,
         )
-        self.assertLess(sum(len(tool["description"]) for tool in listed_tools), 1500)
-        for name in EZAI_IMAGE_TOOLS:
-            self.assertIn("provider_prompt", all_property_names(tools[name]))
-            schema = tools[name]["inputSchema"]
-            if name in {
-                "generate_image_batch_dalle3",
-                "edit_image_batch_dalle3",
-            }:
-                job_schema = schema["properties"]["jobs"]["items"]
-                self.assertEqual(
-                    job_schema["anyOf"],
-                    [{"required": ["prompt"]}, {"required": ["prompt_check_id"]}],
-                )
-            else:
-                self.assertEqual(
-                    schema["anyOf"],
-                    [{"required": ["prompt"]}, {"required": ["prompt_check_id"]}],
-                )
+        self.assertIn("prompt_check_id", all_property_names(tools["generate_image"]))
+        self.assertIn("prompt_check_id", all_property_names(tools["generate_image_batch"]))
 
         prepare_schema = tools[EZAI_PREPARE_TOOL]["inputSchema"]
         self.assertEqual(
-            prepare_schema["anyOf"],
-            [{"required": ["prompt"]}, {"required": ["prompt_session_id"]}],
+            prepare_schema["required"],
+            ["prompt_session_id", "provider_prompt"],
         )
-        self.assertIn("prompt_session_id", prepare_schema["properties"])
         self.assertNotIn("maxLength", prepare_schema["properties"]["provider_prompt"])
         self.assertIn("ready=false", tools[EZAI_PREPARE_TOOL]["description"])
         self.assertIn("sends no provider request", tools[EZAI_PREPARE_TOOL]["description"])
-
-        generate_properties = tools["generate_image_dalle3"]["inputSchema"]["properties"]
-        source_description = generate_properties["prompt"]["description"]
-        for expected in (
-            "corresponding standard Fmage tool",
-            "before inspecting or applying any DALLE3 provider policy",
-            "Do not make any policy-driven change to its language, detail, or length",
-            "transport adaptation begins only after this complete value is finalized",
-            "archived unchanged as revised_prompt_source",
-            "Omit it only when submitting a staged prompt_check_id",
-        ):
-            self.assertIn(expected, source_description)
-        for forbidden in (
-            "English",
-            "Chinese",
-            "mirror the user's language",
-            "translate",
-            "compact",
-            "4,000",
-        ):
-            self.assertNotIn(forbidden, source_description)
-        check_description = generate_properties["prompt_check_id"]["description"]
-        self.assertIn("one-time readiness ID", check_description)
-        self.assertIn("instead of resending prompt or provider_prompt", check_description)
-
-        image_transport_description = generate_properties["provider_prompt"]["description"]
-        self.assertIn("derived only after the complete source prompt is finalized", image_transport_description)
-        self.assertIn("used only when the source exceeds", image_transport_description)
-        self.assertIn("Never shorten the source", image_transport_description)
-        self.assertIn("validation occurs before any provider request", image_transport_description)
 
         transport_description = prepare_schema["properties"]["provider_prompt"]["description"]
         self.assertIn("used only with prompt_session_id", transport_description)
@@ -444,10 +389,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertNotIn(str(self.policy["max_chars"]), transport_description)
         self.assertNotIn(str(self.policy["target_chars"]), transport_description)
 
-        visible_ezai_schema = json.dumps(
-            [tools[name] for name in EZAI_TOOLS],
-            ensure_ascii=False,
-        )
+        visible_ezai_schema = json.dumps(tools[EZAI_PREPARE_TOOL], ensure_ascii=False)
         for hidden_stage_two_detail in (
             "English-dominant",
             "Chinese-dominant",
@@ -461,24 +403,19 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             "initialize",
             {"protocolVersion": "2025-11-25"},
         )["result"]["instructions"]
-        self.assertIn(
-            "When the selected provider exposes matching provider-specific image tools",
-            initialize,
-        )
+        self.assertIn("selected provider may apply a prompt profile automatically", initialize)
         self.assertIn("Keep the complete source prompt unchanged", initialize)
         self.assertIn("ready=false with provider_request_sent=false", initialize)
         self.assertIn("prompt_check_id only", initialize)
         self.assertNotIn(EZAI, initialize)
         self.assertNotIn("gpt-image-2", initialize)
-        self.assertNotIn(EZAI_PREPARE_TOOL, initialize)
-        self.assertNotIn("edit_image_dalle3", initialize)
+        self.assertIn(EZAI_PREPARE_TOOL, initialize)
         self.assertLess(len(initialize), 1000)
         self.assertNotIn("English-dominant", initialize)
         self.assertNotIn("translate", initialize)
 
         skill = SKILL_PATH.read_text(encoding="utf-8")
-        self.assertIn("provider-specific image tool", skill)
-        self.assertIn("never probe the standard tool first", skill)
+        self.assertIn("prompt_profile", skill)
         self.assertIn(EZAI_PREPARE_TOOL, skill)
         self.assertIn("exactly the same complete unrestricted source prompt", skill)
         self.assertIn("do not shorten, summarize, pad, repeat, or change its language", skill)
@@ -489,7 +426,10 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertIn("Do not use a subagent or external model", skill)
         self.assertNotIn("For a Chinese request, write the complete source prompt in Chinese", skill)
         self.assertNotIn("keep it concise when no meaning is lost", skill)
-        self.assertIn("one-call transport adaptation is never required", skill)
+        self.assertIn(
+            'For a provider explicitly configured with `prompt_profile: "dalle3"`, never pass `provider_prompt`',
+            skill,
+        )
         self.assertIn("never resend `prompt` or `provider_prompt`", skill)
         self.assertIn("require no user approval", skill)
         self.assertIn("do not call `view_image`", skill)
@@ -503,7 +443,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             "tools/call",
             {"name": "get_provider_status", "arguments": {}},
         )["result"]["structuredContent"]
-        self.assertEqual(status["compatibility"], "dalle3")
+        self.assertEqual(status["prompt_profile"], "dalle3")
         self.assertEqual(status["prompt_policy"]["max_chars"], self.policy["max_chars"])
 
         without_policy = self.ezai_normal_config()
@@ -514,21 +454,14 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         response = call_server(self.ezai_multi_provider_config(), "tools/list", {})
         listed_tools = response["result"]["tools"]
         tools = tool_map(response)
-        self.assertEqual(
-            [tool["name"] for tool in listed_tools[:5]],
-            [
-                "generate_image_dalle3",
-                "generate_image_batch_dalle3",
-                "edit_image_dalle3",
-                "edit_image_batch_dalle3",
-                EZAI_PREPARE_TOOL,
-            ],
-        )
+        self.assertEqual(len(listed_tools), 9)
         self.assertTrue(STANDARD_IMAGE_TOOLS.issubset(tools))
+        self.assertIn(EZAI_PREPARE_TOOL, tools)
         for name in STANDARD_IMAGE_TOOLS:
             self.assertNotIn("provider_prompt", all_property_names(tools[name]))
+            self.assertIn("prompt_check_id", all_property_names(tools[name]))
             self.assertIn(
-                "When the selected provider exposes a dedicated image tool",
+                "selected provider may apply a prompt profile automatically",
                 tools[name]["description"],
             )
             self.assertNotIn(EZAI, tools[name]["description"])
@@ -577,13 +510,11 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         }
         self.assertTrue(forbidden.isdisjoint(result))
 
-    def test_dalle3_prompt_policy_accepts_non_openai_transport(self) -> None:
+    def test_dalle3_prompt_policy_rejects_non_openai_transport(self) -> None:
         wrong_transport = banana_provider()
+        wrong_transport["prompt_profile"] = "dalle3"
         wrong_transport["prompt_policy"] = self.policy
         config = provider_config([EZAI], {EZAI: wrong_transport})
-
-        tools = tool_map(call_server(config, "tools/list", {}))
-        self.assertTrue(EZAI_TOOLS.issubset(tools))
 
         response = self.call_image_tool(
             config,
@@ -591,19 +522,15 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             provider=EZAI,
             prompt="short",
         )
-        self.assertNotIn("error", response)
-        result = response["result"]["structuredContent"]
-        self.assertEqual(result["provider"], EZAI)
-        self.assertEqual(result["provider_transport"], "ezai-banana-images")
-        self.assertEqual(result["request"]["prompt"], "short")
-        self.assertFalse(result["prompt_policy_applied"])
+        self.assertIn("error", response)
+        self.assertIn('prompt_profile "dalle3" currently requires transport "openai-images"', response["error"]["message"])
 
-    def test_named_compatibility_profile_accepts_custom_relay_and_model(self) -> None:
+    def test_explicit_prompt_profile_accepts_custom_relay_and_model(self) -> None:
         provider_name = "custom-image-relay"
         custom_provider = provider(provider_name)
         custom_provider.update(
             {
-                "compatibility": "dalle3",
+                "prompt_profile": "dalle3",
                 "base_url": "https://relay.example.invalid/custom/v1",
                 "model": "vendor/dalle-compatible-latest",
             }
@@ -618,13 +545,13 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             "tools/call",
             {"name": "get_provider_status", "arguments": {}},
         )["result"]["structuredContent"]
-        self.assertEqual(status["compatibility"], "dalle3")
+        self.assertEqual(status["prompt_profile"], "dalle3")
         self.assertEqual(status["prompt_policy"]["max_chars"], 4000)
         self.assertEqual(status["prompt_policy"]["target_chars"], 3900)
 
         response = self.call_image_tool(
             config,
-            "generate_image_dalle3",
+            "generate_image",
             prompt="custom relay prompt",
         )
         self.assertNotIn("error", response)
@@ -635,7 +562,45 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual(result["request"]["model"], custom_provider["model"])
         self.assertFalse(result["prompt_policy_applied"])
 
-    def test_ezai_image_two_is_a_normal_provider_even_with_legacy_policy(self) -> None:
+    def test_provider_name_does_not_enable_prompt_profile(self) -> None:
+        config = provider_config(
+            [EZAI],
+            {EZAI: provider(EZAI, self.policy)},
+        )
+        tools = tool_map(call_server(config, "tools/list", {}))
+        self.assertTrue(EZAI_TOOLS.isdisjoint(tools))
+
+        response = self.call_image_tool(
+            config,
+            "generate_image",
+            prompt="普通提示",
+            provider_prompt="不应触发 DALL-E 限制",
+        )
+        self.assertNotIn("error", response)
+        result = response["result"]["structuredContent"]
+        self.assertEqual(result["request"]["prompt"], "普通提示")
+        self.assertNotIn("prompt_profile", result)
+        self.assertNotIn("prompt_policy_applied", result)
+
+    def test_legacy_prompt_compatibility_fields_are_rejected(self) -> None:
+        for legacy_field in ("compatibility", "compatibility_profile"):
+            with self.subTest(legacy_field=legacy_field):
+                legacy_provider = provider("legacy-provider")
+                legacy_provider[legacy_field] = "dalle3"
+                config = provider_config(
+                    ["legacy-provider"],
+                    {"legacy-provider": legacy_provider},
+                )
+                response = self.call_image_tool(
+                    config,
+                    "generate_image",
+                    prompt="test",
+                )
+                self.assertIn("error", response)
+                self.assertIn(f'unsupported legacy field "{legacy_field}"', response["error"]["message"])
+                self.assertIn('prompt_profile: "dalle3"', response["error"]["message"])
+
+    def test_prompt_policy_without_prompt_profile_keeps_provider_normal(self) -> None:
         config = self.ezai_normal_config()
         tools = tool_map(call_server(config, "tools/list", {}))
         self.assertTrue(EZAI_TOOLS.isdisjoint(tools))
@@ -657,8 +622,10 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         providers = config["providers"]
 
         self.assertNotIn("prompt_policy", providers[EZAI_NORMAL])
-        self.assertEqual(providers[EZAI]["compatibility"], "dalle3")
+        self.assertEqual(providers[EZAI]["prompt_profile"], "dalle3")
         self.assertEqual(providers[EZAI]["prompt_policy"]["max_chars"], 4000)
+        self.assertEqual(providers["808-image-2"]["transport"], "openai-images")
+        self.assertEqual(providers["808-image-2"]["transport_profile"], "808")
         self.assertNotIn("right-image-2", providers)
         self.assertNotIn("right-banana-2", providers)
 
@@ -681,7 +648,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
     def test_ezai_under_limit_keeps_complete_prompt(self) -> None:
         response = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_dalle3",
+            "generate_image",
             prompt="完整提示",
         )
         result = response["result"]["structuredContent"]
@@ -693,65 +660,16 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual(result["prompt_preparation"]["mode"], "direct_source_within_limit")
         self.assertEqual(result["prompt_preparation"]["preparation_call_count"], 0)
 
-    def test_ezai_under_limit_ignores_unnecessary_transport_candidate(self) -> None:
+    def test_dalle3_profile_image_tool_rejects_direct_provider_prompt(self) -> None:
         response = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_dalle3",
+            "generate_image",
             prompt="短提示",
             provider_prompt="候选文本",
         )
-        result = response["result"]["structuredContent"]
-        self.assertEqual(result["request"]["prompt"], "短提示")
-        self.assertEqual(result["revised_prompt_source"], "短提示")
-        self.assertFalse(result["prompt_policy_applied"])
-        self.assertEqual(result["prompt_preparation"]["mode"], "direct_source_within_limit")
-
-    def test_ezai_over_limit_submits_chinese_transport_in_one_call(self) -> None:
-        response = self.call_image_tool(
-            self.ezai_config(),
-            "generate_image_dalle3",
-            prompt="完整中文提示词",
-            provider_prompt="紧凑中文",
-        )
-        self.assertNotIn("error", response)
-        result = response["result"]["structuredContent"]
-        self.assertEqual(result["request"]["prompt"], "紧凑中文")
-        self.assertEqual(result["revised_prompt_source"], "完整中文提示词")
-        self.assertEqual(result["revised_prompt_submitted"], "紧凑中文")
-        self.assertTrue(result["prompt_policy_applied"])
-        self.assertEqual(result["prompt_preparation"]["mode"], "single_call_transport")
-        self.assertEqual(result["prompt_preparation"]["preparation_call_count"], 0)
-
-    def test_ezai_over_limit_english_source_submits_chinese_transport_in_one_call(self) -> None:
-        source_prompt = "Detailed English visual direction"
-        response = self.call_image_tool(
-            self.ezai_config(),
-            "generate_image_dalle3",
-            prompt=source_prompt,
-            provider_prompt="中文译文",
-        )
-        self.assertNotIn("error", response)
-        result = response["result"]["structuredContent"]
-        self.assertEqual(result["revised_prompt_source"], source_prompt)
-        self.assertEqual(result["request"]["prompt"], "中文译文")
-        self.assertEqual(result["prompt_preparation"]["mode"], "single_call_transport")
-
-    def test_ezai_single_call_rejects_invalid_transport_candidates(self) -> None:
-        oversized = self.call_image_tool(
-            self.ezai_config(),
-            "generate_image_dalle3",
-            prompt="完整中文提示词",
-            provider_prompt="仍然超过限制",
-        )
-        self.assertIn("provider_prompt has 6 Unicode characters", oversized["error"]["message"])
-
-        untranslated = self.call_image_tool(
-            self.ezai_config(),
-            "generate_image_dalle3",
-            prompt="Detailed English source prompt",
-            provider_prompt="short",
-        )
-        self.assertIn("must be Chinese-dominant", untranslated["error"]["message"])
+        self.assertIn("error", response)
+        self.assertIn('prompt_profile "dalle3"', response["error"]["message"])
+        self.assertIn("provider_prompt", response["error"]["message"])
 
     def test_ezai_over_limit_uses_transport_only_prompt(self) -> None:
         initial = self.start_over_limit_image_prompt("完整中文提示词")
@@ -762,7 +680,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertTrue(prepared["ready"])
         response = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_dalle3",
+            "generate_image",
             prompt_check_id=str(prepared["prompt_check_id"]),
         )
         result = response["result"]["structuredContent"]
@@ -787,7 +705,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         )
         response = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_dalle3",
+            "generate_image",
             prompt_check_id=str(prepared["prompt_check_id"]),
         )
         result = response["result"]["structuredContent"]
@@ -863,15 +781,15 @@ class PromptPolicyIsolationTests(unittest.TestCase):
 
         without_check = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_dalle3",
+            "generate_image",
             provider_prompt="完整提示",
         )
-        self.assertIn("complete unrestricted prompt", without_check["error"]["message"])
+        self.assertIn("provider_prompt", without_check["error"]["message"])
 
         valid_check = str(translated_ready["prompt_check_id"])
         tampered = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_dalle3",
+            "generate_image",
             prompt="重复源提示",
             prompt_check_id=valid_check,
         )
@@ -879,13 +797,13 @@ class PromptPolicyIsolationTests(unittest.TestCase):
 
         accepted = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_dalle3",
+            "generate_image",
             prompt_check_id=valid_check,
         )
         self.assertNotIn("error", accepted)
         reused = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_dalle3",
+            "generate_image",
             prompt_check_id=valid_check,
         )
         self.assertIn("invalid or expired", reused["error"]["message"])
@@ -895,7 +813,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         second_check = self.ready_prompt_check_id("第二个完整提示", "第二短版")
         response = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_batch_dalle3",
+            "generate_image_batch",
             return_when="completed",
             jobs=[
                 {"prompt_check_id": first_check},
@@ -910,14 +828,15 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual(result["revised_prompts_source"], ["完整中文提示词", "第二个完整提示"])
         self.assertEqual(result["prompt_policies_applied"], [True, True])
 
-    def test_ezai_batch_mixes_direct_and_single_call_transport_jobs(self) -> None:
+    def test_ezai_batch_mixes_direct_and_staged_transport_jobs(self) -> None:
+        staged_check = self.ready_prompt_check_id("完整中文提示词", "紧凑中文")
         response = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_batch_dalle3",
+            "generate_image_batch",
             return_when="completed",
             jobs=[
                 {"prompt": "短提示"},
-                {"prompt": "完整中文提示词", "provider_prompt": "紧凑中文"},
+                {"prompt_check_id": staged_check},
             ],
         )
         self.assertNotIn("error", response)
@@ -930,13 +849,13 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual(result["prompt_policies_applied"], [False, True])
         self.assertEqual(
             [item["mode"] for item in result["prompt_preparations"]],
-            ["direct_source_within_limit", "single_call_transport"],
+            ["direct_source_within_limit", "staged_transport"],
         )
 
     def test_ezai_batch_stages_over_limit_jobs_before_any_provider_request(self) -> None:
         response = self.call_image_tool(
             self.ezai_config(),
-            "generate_image_batch_dalle3",
+            "generate_image_batch",
             return_when="completed",
             jobs=[
                 {"prompt": "短提示"},

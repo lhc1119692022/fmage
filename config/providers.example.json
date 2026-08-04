@@ -19,7 +19,7 @@
       "api_key": ""
     },
     "DALLE3": {
-      "compatibility": "dalle3",
+      "prompt_profile": "dalle3",
       "prompt_policy": {
         "max_chars": 4000,
         "target_chars": 3900,
@@ -39,7 +39,8 @@
       "api_key": ""
     },
     "808-image-2": {
-      "transport": "808-openai-images",
+      "transport": "openai-images",
+      "transport_profile": "808",
       "base_url": "https://api.808relay.com/v1",
       "model": "gpt-image-2",
       "response_format": "url",
