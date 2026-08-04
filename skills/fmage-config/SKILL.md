@@ -37,7 +37,7 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
 - The primary transports are `openai-images`, `ezai-banana-images`, and `zenmux-vertex`.
   `transport_profile: "808"` may be attached only to `openai-images` and supplies the relay-specific
   asynchronous submission and polling contract.
-- Every provider, including one named `DALLE3`, must explicitly set `prompt_profile: "dalle3"` to opt in.
+- Every provider, including one named `DE3限制版-image-2`, must explicitly set `prompt_profile: "dall-e3"` to opt in.
   This prompt profile currently requires `openai-images` and is independent of the
   optional `808` transport profile. When `prompt_policy` is omitted, it defaults to a 4000-character
   limit with a 3900-character target. Providers without this prompt profile, including

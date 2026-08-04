@@ -13,7 +13,7 @@ const TOOL_GENERATE = "generate_image";
 const TOOL_EDIT = "edit_image";
 const TOOL_GENERATE_BATCH = "generate_image_batch";
 const TOOL_EDIT_BATCH = "edit_image_batch";
-const PROMPT_PROFILE_DALLE3 = "dalle3";
+const PROMPT_PROFILE_DALLE3 = "dall-e3";
 const DALLE3_DEFAULT_PROMPT_POLICY = Object.freeze({
   max_chars: 4000,
   target_chars: 3900,

@@ -13,7 +13,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 SERVER_PATH = PLUGIN_ROOT / "mcp" / "server.mjs"
 SKILL_PATH = PLUGIN_ROOT / "skills" / "fmage" / "SKILL.md"
 PROVIDERS_EXAMPLE_PATH = PLUGIN_ROOT / "config" / "providers.example.json"
-EZAI = "DALLE3"
+EZAI = "DE3限制版-image-2"
 EZAI_NORMAL = "ezai-image-2"
 EZAI_BANANA = "ezai-banana"
 EZAI_PREPARE_TOOL = "prepare_prompt_dalle3"
@@ -61,7 +61,7 @@ def banana_provider() -> dict[str, object]:
 
 def dalle3_provider(prompt_policy: dict[str, object] | None = None) -> dict[str, object]:
     value = provider(EZAI, prompt_policy)
-    value["prompt_profile"] = "dalle3"
+    value["prompt_profile"] = "dall-e3"
     return value
 
 
@@ -427,7 +427,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertNotIn("For a Chinese request, write the complete source prompt in Chinese", skill)
         self.assertNotIn("keep it concise when no meaning is lost", skill)
         self.assertIn(
-            'For a provider explicitly configured with `prompt_profile: "dalle3"`, never pass `provider_prompt`',
+            'For a provider explicitly configured with `prompt_profile: "dall-e3"`, never pass `provider_prompt`',
             skill,
         )
         self.assertIn("never resend `prompt` or `provider_prompt`", skill)
@@ -443,7 +443,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             "tools/call",
             {"name": "get_provider_status", "arguments": {}},
         )["result"]["structuredContent"]
-        self.assertEqual(status["prompt_profile"], "dalle3")
+        self.assertEqual(status["prompt_profile"], "dall-e3")
         self.assertEqual(status["prompt_policy"]["max_chars"], self.policy["max_chars"])
 
         without_policy = self.ezai_normal_config()
@@ -512,7 +512,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
 
     def test_dalle3_prompt_policy_rejects_non_openai_transport(self) -> None:
         wrong_transport = banana_provider()
-        wrong_transport["prompt_profile"] = "dalle3"
+        wrong_transport["prompt_profile"] = "dall-e3"
         wrong_transport["prompt_policy"] = self.policy
         config = provider_config([EZAI], {EZAI: wrong_transport})
 
@@ -523,14 +523,14 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             prompt="short",
         )
         self.assertIn("error", response)
-        self.assertIn('prompt_profile "dalle3" currently requires transport "openai-images"', response["error"]["message"])
+        self.assertIn('prompt_profile "dall-e3" currently requires transport "openai-images"', response["error"]["message"])
 
     def test_explicit_prompt_profile_accepts_custom_relay_and_model(self) -> None:
         provider_name = "custom-image-relay"
         custom_provider = provider(provider_name)
         custom_provider.update(
             {
-                "prompt_profile": "dalle3",
+                "prompt_profile": "dall-e3",
                 "base_url": "https://relay.example.invalid/custom/v1",
                 "model": "vendor/dalle-compatible-latest",
             }
@@ -545,7 +545,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             "tools/call",
             {"name": "get_provider_status", "arguments": {}},
         )["result"]["structuredContent"]
-        self.assertEqual(status["prompt_profile"], "dalle3")
+        self.assertEqual(status["prompt_profile"], "dall-e3")
         self.assertEqual(status["prompt_policy"]["max_chars"], 4000)
         self.assertEqual(status["prompt_policy"]["target_chars"], 3900)
 
@@ -586,7 +586,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         for legacy_field in ("compatibility", "compatibility_profile"):
             with self.subTest(legacy_field=legacy_field):
                 legacy_provider = provider("legacy-provider")
-                legacy_provider[legacy_field] = "dalle3"
+                legacy_provider[legacy_field] = "dall-e3"
                 config = provider_config(
                     ["legacy-provider"],
                     {"legacy-provider": legacy_provider},
@@ -598,7 +598,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
                 )
                 self.assertIn("error", response)
                 self.assertIn(f'unsupported legacy field "{legacy_field}"', response["error"]["message"])
-                self.assertIn('prompt_profile: "dalle3"', response["error"]["message"])
+                self.assertIn('prompt_profile: "dall-e3"', response["error"]["message"])
 
     def test_prompt_policy_without_prompt_profile_keeps_provider_normal(self) -> None:
         config = self.ezai_normal_config()
@@ -622,7 +622,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         providers = config["providers"]
 
         self.assertNotIn("prompt_policy", providers[EZAI_NORMAL])
-        self.assertEqual(providers[EZAI]["prompt_profile"], "dalle3")
+        self.assertEqual(providers[EZAI]["prompt_profile"], "dall-e3")
         self.assertNotIn("prompt_policy", providers[EZAI])
         self.assertEqual(providers["808-image-2"]["transport"], "openai-images")
         self.assertEqual(providers["808-image-2"]["transport_profile"], "808")
@@ -669,7 +669,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             provider_prompt="候选文本",
         )
         self.assertIn("error", response)
-        self.assertIn('prompt_profile "dalle3"', response["error"]["message"])
+        self.assertIn('prompt_profile "dall-e3"', response["error"]["message"])
         self.assertIn("provider_prompt", response["error"]["message"])
 
     def test_ezai_over_limit_uses_transport_only_prompt(self) -> None:
