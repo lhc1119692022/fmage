@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import argparse
+import json
 import sys
 import tempfile
 import unittest
@@ -14,6 +15,12 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 import openai_images_transport as transport
 import json_images_transport as json_transport
+from transport_common import (
+    build_prompt_provenance,
+    request_metadata_without_prompts,
+    request_prompt,
+    sanitize_provider_response_metadata,
+)
 
 
 def shape_args(model: str, command: str = "generate") -> argparse.Namespace:
@@ -142,6 +149,90 @@ class ImageFieldRetryTests(unittest.TestCase):
             )
 
         self.assertEqual(len(calls), 1)
+
+
+class PromptProvenanceTests(unittest.TestCase):
+    def test_echoed_provider_prompt_is_classified_without_duplicate_text(self) -> None:
+        prompt = "Use case: cover\nComposition/framing: centered"
+        provenance = build_prompt_provenance(
+            prompt,
+            {"data": [{"revised_prompt": prompt}]},
+            source_prompt=prompt,
+        )
+
+        self.assertEqual(
+            provenance,
+            {
+                "submitted": prompt,
+                "changed": False,
+                "provider_prompt_status": "echoed",
+            },
+        )
+        self.assertEqual(list(provenance.values()).count(prompt), 1)
+
+    def test_only_distinct_source_and_provider_rewrite_are_preserved(self) -> None:
+        provenance = build_prompt_provenance(
+            "submitted prompt",
+            {"revised_prompt": "provider rewrite"},
+            source_prompt="source prompt",
+        )
+
+        self.assertEqual(provenance["source"], "source prompt")
+        self.assertEqual(provenance["submitted"], "submitted prompt")
+        self.assertEqual(provenance["provider_revised"], "provider rewrite")
+        self.assertEqual(provenance["provider_prompt_status"], "rewritten")
+        self.assertTrue(provenance["changed"])
+
+    def test_request_prompt_extraction_and_prompt_removal_support_nested_payloads(self) -> None:
+        request = {
+            "model": "image-model",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "nested prompt"},
+                        {"type": "image_url", "image_url": {"url": "reference.png"}},
+                    ],
+                }
+            ],
+        }
+
+        self.assertEqual(request_prompt(request), "nested prompt")
+        sanitized = request_metadata_without_prompts(request)
+        self.assertEqual(sanitized["model"], "image-model")
+        self.assertNotIn("nested prompt", json.dumps(sanitized))
+        self.assertNotIn("text", sanitized["messages"][0]["content"][0])
+
+
+class ProviderResponseMetadataTests(unittest.TestCase):
+    def test_sensitive_image_payload_and_prompt_fields_are_removed(self) -> None:
+        metadata = sanitize_provider_response_metadata(
+            {
+                "id": "request-123",
+                "model": "gpt-image-1",
+                "usage": {"input_tokens": 10, "output_tokens": 20},
+                "authorization": "secret",
+                "api_key": "secret",
+                "data": [
+                    {
+                        "index": 0,
+                        "b64_json": "very-large-image-data",
+                        "url": "https://signed.example.invalid/image",
+                        "revised_prompt": "provider prompt",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(
+            metadata,
+            {
+                "id": "request-123",
+                "model": "gpt-image-1",
+                "usage": {"input_tokens": 10, "output_tokens": 20},
+                "data": [{"index": 0}],
+            },
+        )
 
 
 if __name__ == "__main__":

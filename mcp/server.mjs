@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { access, copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import readline from "node:readline";
@@ -659,6 +659,7 @@ function normalizeTaskForResponse(task, options = {}) {
   const displayStatePath = normalizeDisplayPath(task.state_path ?? taskStatePath(task.task_id));
 
   if (!options.verbose) {
+    const includeProviderMetadata = Boolean(options.includeProviderMetadata);
     const compact = {
       task_id: task.task_id,
       status: task.status,
@@ -676,6 +677,14 @@ function normalizeTaskForResponse(task, options = {}) {
       manifest: task.manifest,
       display_manifest: displayManifest,
       error: task.error,
+      prompt_provenance: includeProviderMetadata ? task.prompt_provenance : undefined,
+      prompt_provenances: includeProviderMetadata ? task.prompt_provenances : undefined,
+      provider_response_metadata: includeProviderMetadata
+        ? task.provider_response_metadata
+        : undefined,
+      provider_response_metadata_items: includeProviderMetadata
+        ? task.provider_response_metadata_items
+        : undefined,
     };
     Object.keys(compact).forEach((key) => {
       if (compact[key] === undefined) delete compact[key];
@@ -1254,8 +1263,61 @@ function sanitizeRequestCompact(request) {
   return compact;
 }
 
+function normalizePromptProvenance(value = {}, fallbacks = {}) {
+  const submitted =
+    nonEmptyString(value?.submitted) ||
+    nonEmptyString(fallbacks.submitted);
+  const source =
+    nonEmptyString(value?.source) ||
+    nonEmptyString(fallbacks.source);
+  const providerCandidates = [
+    nonEmptyString(value?.provider_revised),
+    ...normalizedStringArray(value?.provider_revised_prompts),
+    nonEmptyString(fallbacks.providerRevised),
+    ...normalizedStringArray(fallbacks.providerRevisedPrompts),
+  ].filter(Boolean);
+  const uniqueProviderPrompts = [...new Set(providerCandidates)];
+  const rewrittenPrompts = uniqueProviderPrompts.filter((prompt) => prompt !== submitted);
+  const storedStatus = nonEmptyString(value?.provider_prompt_status);
+  const providerPromptStatus = storedStatus || (
+    uniqueProviderPrompts.length === 0
+      ? "not_returned"
+      : rewrittenPrompts.length
+        ? "rewritten"
+        : "echoed"
+  );
+  const provenance = {
+    submitted,
+    changed: Boolean((source && source !== submitted) || providerPromptStatus === "rewritten"),
+    provider_prompt_status: providerPromptStatus,
+  };
+  if (source && source !== submitted) provenance.source = source;
+  if (rewrittenPrompts.length) {
+    provenance.provider_revised = rewrittenPrompts[0];
+    if (rewrittenPrompts.length > 1) {
+      provenance.provider_revised_prompts = rewrittenPrompts;
+    }
+  }
+  Object.keys(provenance).forEach((key) => {
+    if (provenance[key] === undefined || provenance[key] === null) delete provenance[key];
+  });
+  return provenance;
+}
+
+function legacyProviderResponseMetadata(responseMetadata) {
+  if (!responseMetadata || typeof responseMetadata !== "object") return undefined;
+  const metadata = { ...responseMetadata };
+  delete metadata.revised_prompt;
+  delete metadata.data_revised_prompts;
+  Object.keys(metadata).forEach((key) => {
+    if (metadata[key] === undefined || metadata[key] === null) delete metadata[key];
+  });
+  return Object.keys(metadata).length ? metadata : undefined;
+}
+
 function compactImageResultForResponse(result, args = {}) {
   if (args.verbose || result?.dry_run) return result;
+  const includeProviderMetadata = Boolean(args.include_provider_metadata);
   const compact = { ...result };
   delete compact.revised_prompt_submitted;
   delete compact.revised_prompts_submitted;
@@ -1272,6 +1334,12 @@ function compactImageResultForResponse(result, args = {}) {
   delete compact.timing;
   delete compact.timings;
   delete compact.request;
+  if (!includeProviderMetadata) {
+    delete compact.prompt_provenance;
+    delete compact.prompt_provenances;
+    delete compact.provider_response_metadata;
+    delete compact.provider_response_metadata_items;
+  }
   compact.image_metadata = compactImageMetadata(compact.image_metadata);
   compact.warnings = shouldExposeWarnings(compact) ? normalizedStringArray(compact.warnings) : undefined;
   Object.keys(compact).forEach((key) => {
@@ -1305,6 +1373,10 @@ async function enrichResult(result, revisedPrompt, provider, promptResolution = 
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
     revised_prompt_submitted: revisedPrompt,
+    prompt_provenance: normalizePromptProvenance({}, {
+      source: promptResolution?.sourcePrompt,
+      submitted: revisedPrompt,
+    }),
   };
 
   if (promptResolution) {
@@ -1323,10 +1395,20 @@ async function enrichResult(result, revisedPrompt, provider, promptResolution = 
     try {
       const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
       enriched.request = sanitizeRequest(manifest.request);
-      enriched.provider_revised_prompt =
+      const legacyProviderRevisedPrompt =
         manifest.response_metadata?.revised_prompt ??
         manifest.response_metadata?.data_revised_prompts?.[0] ??
         null;
+      enriched.prompt_provenance = normalizePromptProvenance(manifest.prompt_provenance, {
+        source: promptResolution?.sourcePrompt,
+        submitted: revisedPrompt,
+        providerRevised: legacyProviderRevisedPrompt,
+      });
+      enriched.provider_revised_prompt = enriched.prompt_provenance.provider_revised ?? null;
+      enriched.provider_revised_prompts = enriched.prompt_provenance.provider_revised_prompts;
+      enriched.provider_response_metadata =
+        manifest.provider_response_metadata ??
+        legacyProviderResponseMetadata(manifest.response_metadata);
       if (!Array.isArray(enriched.image_metadata) && Array.isArray(manifest.image_metadata)) {
         enriched.image_metadata = manifest.image_metadata;
       }
@@ -1371,12 +1453,34 @@ function isPathInside(childPath, parentPath) {
 }
 
 async function removeEmptyAncestors(startDir, boundaryDir) {
-  const boundary = resolve(boundaryDir);
-  let current = resolve(startDir);
+  const boundary = await realpathIfExists(boundaryDir);
+  let current = await realpathIfExists(startDir);
   while (current !== boundary && isPathInside(current, boundary)) {
-    try {
-      await rmdir(current);
-    } catch {
+    let removed = false;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await rmdir(current);
+        removed = true;
+        break;
+      } catch (error) {
+        if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(error?.code) || attempt === 2) {
+          break;
+        }
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 25 * (attempt + 1)));
+      }
+    }
+    if (!removed) {
+      try {
+        const entries = await readdir(current);
+        if (entries.length === 0) {
+          await rm(current, { recursive: true, force: true });
+          removed = true;
+        }
+      } catch {
+        // Leave non-empty or externally locked directories untouched.
+      }
+    }
+    if (!removed) {
       return;
     }
     current = dirname(current);
@@ -1472,19 +1576,32 @@ async function writeImageManifestSidecars(cacheDir, result) {
       provider: result.provider ?? baseManifest.provider,
       provider_transport: result.provider_transport ?? baseManifest.provider_transport,
       provider_model: result.provider_model ?? baseManifest.provider_model,
-      request: result.request ?? baseManifest.request,
+      request: sanitizeRequestCompact(result.request ?? baseManifest.request),
       requested_size: result.requested_size ?? baseManifest.requested_size,
-      revised_prompt_submitted: result.revised_prompt_submitted ?? baseManifest.revised_prompt_submitted,
-      provider_revised_prompt: result.provider_revised_prompt ?? baseManifest.provider_revised_prompt,
+      prompt_provenance:
+        result.prompt_provenance ??
+        baseManifest.prompt_provenance ??
+        normalizePromptProvenance({}, {
+          source: result.revised_prompt_source ?? baseManifest.revised_prompt_source,
+          submitted: result.revised_prompt_submitted ?? baseManifest.revised_prompt_submitted,
+          providerRevised: result.provider_revised_prompt ?? baseManifest.provider_revised_prompt,
+        }),
+      provider_response_metadata:
+        result.provider_response_metadata ??
+        baseManifest.provider_response_metadata ??
+        legacyProviderResponseMetadata(baseManifest.response_metadata),
       images: [imagePath],
       image_metadata: imageMetadata ? [imageMetadata] : [],
       warnings: Array.isArray(result.warnings) ? result.warnings : baseManifest.warnings,
       notes: Array.isArray(result.notes) ? result.notes : baseManifest.notes,
       timing: result.timing ?? baseManifest.timing,
     };
+    delete manifest.response_metadata;
+    delete manifest.revised_prompt_submitted;
+    delete manifest.provider_revised_prompt;
+    delete manifest.revised_prompt_source;
     if (result.provider === EZAI_PROVIDER_NAME && result.prompt_policy) {
       Object.assign(manifest, {
-        revised_prompt_source: result.revised_prompt_source,
         source_prompt_chars: result.source_prompt_chars,
         submitted_prompt_chars: result.submitted_prompt_chars,
         prompt_policy: result.prompt_policy,
@@ -1592,7 +1709,7 @@ async function publishResultImages(result, args, provider) {
     result.display_manifest = normalizeDisplayPath(sidecarManifests[0]);
     if (originalManifest && !sidecarManifests.some((item) => resolve(item) === resolve(originalManifest))) {
       await rm(originalManifest, { force: true });
-      cleanupDirectories.add(dirname(originalManifest));
+      await removeEmptyAncestors(dirname(originalManifest), cleanupBoundary);
     }
   }
   await writeGlobalLatestState(result);
@@ -1658,6 +1775,7 @@ function jobArgsFromBatchArgs(args, job) {
   delete merged.return_when;
   delete merged.embed_images;
   delete merged.verbose;
+  delete merged.include_provider_metadata;
   delete merged.n;
   return merged;
 }
@@ -1808,17 +1926,16 @@ async function writeBatchManifest(root, batchRoot, result) {
     pending_count: result.pending_count,
     failed_count: result.failed_count,
     orchestration_count: result.orchestration_count,
-    request: result.request,
+    request: sanitizeRequestCompact(result.request),
     requested_size: result.requested_size,
-    revised_prompt_submitted: result.revised_prompt_submitted,
-    revised_prompts_submitted: result.revised_prompts_submitted,
-    revised_prompts_source: result.revised_prompts_source,
+    prompt_provenance: result.prompt_provenance,
+    prompt_provenances: result.prompt_provenances,
     source_prompt_char_counts: result.source_prompt_char_counts,
     submitted_prompt_char_counts: result.submitted_prompt_char_counts,
     prompt_policies_applied: result.prompt_policies_applied,
     prompt_preparations: result.prompt_preparations,
-    provider_revised_prompt: result.provider_revised_prompt,
-    provider_revised_prompts: result.provider_revised_prompts,
+    provider_response_metadata: result.provider_response_metadata,
+    provider_response_metadata_items: result.provider_response_metadata_items,
     images: result.images,
     image_metadata: result.image_metadata,
     manifests: result.manifests,
@@ -1932,6 +2049,26 @@ async function combineBatchResults({
       };
     })
     .filter(Boolean);
+  const promptProvenances = settledResults.map((item, index) => {
+    const resolution = promptResolutions?.[index];
+    const jobPrompt = resolution?.submittedPrompt ?? jobs?.[index]?.prompt ?? prompt;
+    const sourcePrompt = resolution?.sourcePrompt ?? jobs?.[index]?.prompt ?? prompt;
+    const childResult = item?.status === "fulfilled" ? item.value : null;
+    return normalizePromptProvenance(childResult?.prompt_provenance, {
+      source: sourcePrompt,
+      submitted: jobPrompt,
+      providerRevised: childResult?.provider_revised_prompt,
+      providerRevisedPrompts: childResult?.provider_revised_prompts,
+    });
+  });
+  const providerResponseMetadataItems = settledResults
+    .map((item, index) => {
+      const metadata = item?.status === "fulfilled" ? item.value?.provider_response_metadata : null;
+      return metadata && typeof metadata === "object"
+        ? { job_index: index + 1, metadata }
+        : null;
+    })
+    .filter(Boolean);
 
   const result = {
     command,
@@ -1973,6 +2110,16 @@ async function combineBatchResults({
     provider_revised_prompt: successes
       .map((item) => item.provider_revised_prompt)
       .find((value) => value !== null && value !== undefined) ?? null,
+    prompt_provenance: promptProvenances.length === 1 ? promptProvenances[0] : undefined,
+    prompt_provenances: promptProvenances.length > 1 ? promptProvenances : undefined,
+    provider_response_metadata:
+      providerResponseMetadataItems.length === 1
+        ? providerResponseMetadataItems[0].metadata
+        : undefined,
+    provider_response_metadata_items:
+      providerResponseMetadataItems.length > 1
+        ? providerResponseMetadataItems
+        : undefined,
   };
 
   if (promptResolutions) {
@@ -2391,9 +2538,15 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
       }
       task.updated_at = isoNow();
       await writeTaskState(task);
-      return normalizeTaskForResponse(task, { verbose: Boolean(args.verbose || args.dry_run) });
+      return normalizeTaskForResponse(task, {
+        verbose: Boolean(args.verbose || args.dry_run),
+        includeProviderMetadata: Boolean(args.include_provider_metadata),
+      });
     }
-    return normalizeTaskForResponse(task, { verbose: Boolean(args.verbose || args.dry_run) });
+    return normalizeTaskForResponse(task, {
+      verbose: Boolean(args.verbose || args.dry_run),
+      includeProviderMetadata: Boolean(args.include_provider_metadata),
+    });
   }
 
   execute().catch(async (error) => {
@@ -2411,7 +2564,10 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     await writeTaskState(task);
   });
 
-  return normalizeTaskForResponse(task, { verbose: Boolean(args.verbose) });
+  return normalizeTaskForResponse(task, {
+    verbose: Boolean(args.verbose),
+    includeProviderMetadata: Boolean(args.include_provider_metadata),
+  });
 }
 
 async function runSingleImageCommand(command, args, resolvedProvider = null) {
@@ -2660,6 +2816,11 @@ function commonProperties(editing = false) {
       type: "boolean",
       description: "Return full prompts/request details.",
     },
+    include_provider_metadata: {
+      type: "boolean",
+      description:
+        "Return sanitized provider response metadata and prompt provenance without enabling all verbose fields.",
+    },
     embed_images: {
       type: "string",
       enum: ["auto", "never"],
@@ -2675,6 +2836,7 @@ function jobProperties(editing = false) {
   delete properties.timeout;
   delete properties.dry_run;
   delete properties.verbose;
+  delete properties.include_provider_metadata;
   delete properties.embed_images;
   if (editing) {
     properties.images = {
@@ -2714,6 +2876,10 @@ function batchProperties(editing = false) {
     type: "boolean",
     description: "Return full task state.",
   };
+  properties.include_provider_metadata = {
+    type: "boolean",
+    description: "Return sanitized provider response metadata and prompt provenance.",
+  };
   return properties;
 }
 
@@ -2742,6 +2908,7 @@ function ezaiJobProperties(editing) {
   delete properties.timeout;
   delete properties.dry_run;
   delete properties.verbose;
+  delete properties.include_provider_metadata;
   delete properties.embed_images;
   if (editing) {
     properties.images = {
@@ -2781,6 +2948,10 @@ function ezaiBatchProperties(editing) {
   properties.verbose = {
     type: "boolean",
     description: "Return full task state.",
+  };
+  properties.include_provider_metadata = {
+    type: "boolean",
+    description: "Return sanitized provider response metadata and prompt provenance.",
   };
   return properties;
 }
@@ -2968,6 +3139,10 @@ function toolDefinitions() {
             type: "boolean",
             description: "Return full task state.",
           },
+          include_provider_metadata: {
+            type: "boolean",
+            description: "Return sanitized provider response metadata and prompt provenance.",
+          },
           embed_images: {
             type: "string",
             enum: ["auto", "never"],
@@ -3137,6 +3312,7 @@ function toolDefinitions() {
 
 function resultText(result, options = {}) {
   const verbose = Boolean(options.verbose);
+  const includeProviderMetadata = Boolean(options.includeProviderMetadata || verbose);
   const images = Array.isArray(result.images) ? result.images : [];
   const displayImages =
     Array.isArray(result.display_images) && result.display_images.length
@@ -3230,12 +3406,41 @@ function resultText(result, options = {}) {
   if (result.display_state_path) {
     lines.push(`Task state: ${result.display_state_path}`);
   }
-  if (result.provider_revised_prompt) {
-    lines.push(`Provider revised_prompt:\n${result.provider_revised_prompt}`);
-  }
-  const providerPrompts = normalizedStringArray(result.provider_revised_prompts);
-  if (providerPrompts.length) {
-    lines.push(`Provider revised_prompts:\n${numberedBlock(providerPrompts)}`);
+  if (includeProviderMetadata) {
+    const provenance = normalizePromptProvenance(result.prompt_provenance, {
+      submitted: result.revised_prompt_submitted,
+      providerRevised: result.provider_revised_prompt,
+      providerRevisedPrompts: result.provider_revised_prompts,
+    });
+    if (provenance.provider_prompt_status) {
+      lines.push(`Provider prompt status: ${provenance.provider_prompt_status}`);
+    }
+    if (provenance.provider_revised) {
+      lines.push(`Provider revised prompt:\n${provenance.provider_revised}`);
+    }
+    const promptProvenances = Array.isArray(result.prompt_provenances)
+      ? result.prompt_provenances
+      : [];
+    if (promptProvenances.length) {
+      const statuses = promptProvenances.map((item, index) => {
+        const normalized = normalizePromptProvenance(item);
+        return `job_${index + 1}: ${normalized.provider_prompt_status ?? "not_returned"}`;
+      });
+      lines.push(`Provider prompt statuses:\n${statuses.join("\n")}`);
+    }
+    if (result.provider_response_metadata && typeof result.provider_response_metadata === "object") {
+      lines.push(
+        `Provider response metadata:\n${JSON.stringify(result.provider_response_metadata, null, 2)}`,
+      );
+    }
+    if (
+      Array.isArray(result.provider_response_metadata_items) &&
+      result.provider_response_metadata_items.length
+    ) {
+      lines.push(
+        `Provider response metadata by job:\n${JSON.stringify(result.provider_response_metadata_items, null, 2)}`,
+      );
+    }
   }
   return lines.join("\n\n");
 }
@@ -3342,6 +3547,7 @@ async function handleToolCall(id, params) {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
         verbose: Boolean(params.arguments?.verbose),
+        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
       }),
       structuredContent: responseResult,
     });
@@ -3355,6 +3561,7 @@ async function handleToolCall(id, params) {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
         verbose: Boolean(params.arguments?.verbose),
+        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
       }),
       structuredContent: responseResult,
     });
@@ -3384,6 +3591,7 @@ async function handleToolCall(id, params) {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
         verbose: Boolean(params.arguments?.verbose),
+        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
       }),
       structuredContent: responseResult,
     });
@@ -3404,6 +3612,7 @@ async function handleToolCall(id, params) {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
         verbose: Boolean(params.arguments?.verbose),
+        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
       }),
       structuredContent: responseResult,
     });
@@ -3417,6 +3626,7 @@ async function handleToolCall(id, params) {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
         verbose: Boolean(params.arguments?.verbose),
+        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
       }),
       structuredContent: responseResult,
     });
@@ -3430,6 +3640,7 @@ async function handleToolCall(id, params) {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
         verbose: Boolean(params.arguments?.verbose),
+        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
       }),
       structuredContent: responseResult,
     });
@@ -3450,6 +3661,7 @@ async function handleToolCall(id, params) {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
         verbose: Boolean(params.arguments?.verbose),
+        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
       }),
       structuredContent: responseResult,
     });
@@ -3470,6 +3682,7 @@ async function handleToolCall(id, params) {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
         verbose: Boolean(params.arguments?.verbose),
+        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
       }),
       structuredContent: responseResult,
     });
@@ -3479,11 +3692,13 @@ async function handleToolCall(id, params) {
   if (params?.name === TOOL_TASK_STATUS) {
     const result = await readTaskStateWithOptions(params.arguments?.task_id, {
       verbose: Boolean(params.arguments?.verbose),
+      includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
     });
     sendResult(id, {
       content: await imageContent(result, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
         verbose: Boolean(params.arguments?.verbose),
+        includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
       }),
       structuredContent: result,
     });

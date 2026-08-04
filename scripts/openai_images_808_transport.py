@@ -292,19 +292,14 @@ def write_manifest(
         "command": command,
         "transport": TRANSPORT_NAME,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "request": request_payload,
+        "request": openai.request_metadata_without_prompts(request_payload),
         "requested_size": request_payload.get("size"),
         "images": [str(path.resolve()) for path in images],
         "image_metadata": image_metadata,
-        "response_metadata": {
-            "created": response.get("created"),
-            "revised_prompt": response.get("revised_prompt"),
-            "data_revised_prompts": [
-                item.get("revised_prompt")
-                for item in response.get("data", [])
-                if isinstance(item, dict) and item.get("revised_prompt")
-            ],
-        },
+        "prompt_provenance": openai.build_prompt_provenance(
+            openai.request_prompt(request_payload), response
+        ),
+        "provider_response_metadata": openai.sanitize_provider_response_metadata(response),
         "timing": timing,
         "notes": notes,
         "warnings": warnings,

@@ -17,6 +17,50 @@ ALLOWED_IMAGE_CONTENT_TYPES = {
     "binary/octet-stream",
 }
 
+_PROVIDER_METADATA_OMIT_KEYS = {
+    "authorization",
+    "b64_json",
+    "base64",
+    "binary",
+    "bytes",
+    "content",
+    "cookie",
+    "cookies",
+    "credential",
+    "credentials",
+    "headers",
+    "image",
+    "image_bytes",
+    "image_data",
+    "image_url",
+    "image_urls",
+    "images",
+    "input_text",
+    "prompt",
+    "provider_prompt",
+    "revised_prompt",
+    "secret",
+    "secrets",
+    "set_cookie",
+    "text",
+    "token",
+    "tokens",
+    "url",
+    "urls",
+}
+_PROVIDER_METADATA_SECRET_FRAGMENTS = (
+    "api_key",
+    "apikey",
+    "access_token",
+    "auth_token",
+    "refresh_token",
+    "signature",
+    "signed_url",
+)
+_PROVIDER_METADATA_MAX_DEPTH = 6
+_PROVIDER_METADATA_MAX_ITEMS = 50
+_PROVIDER_METADATA_MAX_STRING_CHARS = 2048
+
 
 def max_download_bytes() -> int:
     value = os.environ.get("FMAGE_MAX_DOWNLOAD_BYTES", "").strip()
@@ -27,6 +71,169 @@ def max_download_bytes() -> int:
     except ValueError:
         return DEFAULT_MAX_DOWNLOAD_BYTES
     return parsed if parsed > 0 else DEFAULT_MAX_DOWNLOAD_BYTES
+
+
+def _non_empty_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def request_prompt(request: Any) -> str | None:
+    if not isinstance(request, dict):
+        return None
+
+    direct = _non_empty_string(request.get("prompt"))
+    if direct:
+        return direct
+
+    messages = request.get("messages")
+    if isinstance(messages, list):
+        parts: list[str] = []
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, str):
+                text = _non_empty_string(content)
+                if text:
+                    parts.append(text)
+            elif isinstance(content, list):
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+                    text = _non_empty_string(item.get("text")) or _non_empty_string(
+                        item.get("input_text")
+                    )
+                    if text:
+                        parts.append(text)
+        if parts:
+            return "\n\n".join(parts)
+
+    instances = request.get("instances")
+    if isinstance(instances, list):
+        parts = [
+            prompt
+            for item in instances
+            if isinstance(item, dict)
+            for prompt in [_non_empty_string(item.get("prompt"))]
+            if prompt
+        ]
+        if parts:
+            return "\n\n".join(parts)
+    return None
+
+
+def request_metadata_without_prompts(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key).strip().lower().replace("-", "_")
+            if normalized_key in {
+                "prompt",
+                "provider_prompt",
+                "revised_prompt",
+                "text",
+                "input_text",
+            }:
+                continue
+            cleaned = request_metadata_without_prompts(item)
+            if cleaned in ({}, [], None):
+                continue
+            sanitized[key] = cleaned
+        return sanitized
+    if isinstance(value, list):
+        sanitized_items = [request_metadata_without_prompts(item) for item in value]
+        return [item for item in sanitized_items if item not in ({}, [], None)]
+    return value
+
+
+def provider_revised_prompts(response: Any) -> list[str]:
+    if not isinstance(response, dict):
+        return []
+    candidates: list[Any] = [response.get("revised_prompt")]
+    data = response.get("data")
+    if isinstance(data, list):
+        candidates.extend(
+            item.get("revised_prompt")
+            for item in data
+            if isinstance(item, dict)
+        )
+
+    prompts: list[str] = []
+    for candidate in candidates:
+        prompt = _non_empty_string(candidate)
+        if prompt and prompt not in prompts:
+            prompts.append(prompt)
+    return prompts
+
+
+def build_prompt_provenance(
+    submitted_prompt: str | None,
+    response: Any = None,
+    source_prompt: str | None = None,
+) -> dict[str, Any]:
+    submitted = _non_empty_string(submitted_prompt)
+    source = _non_empty_string(source_prompt)
+    provider_prompts = provider_revised_prompts(response)
+    rewritten_prompts = [prompt for prompt in provider_prompts if prompt != submitted]
+
+    if not provider_prompts:
+        provider_status = "not_returned"
+    elif rewritten_prompts:
+        provider_status = "rewritten"
+    else:
+        provider_status = "echoed"
+
+    provenance: dict[str, Any] = {
+        "submitted": submitted,
+        "changed": bool((source and source != submitted) or rewritten_prompts),
+        "provider_prompt_status": provider_status,
+    }
+    if source and source != submitted:
+        provenance["source"] = source
+    if rewritten_prompts:
+        provenance["provider_revised"] = rewritten_prompts[0]
+        if len(rewritten_prompts) > 1:
+            provenance["provider_revised_prompts"] = rewritten_prompts
+    return {key: value for key, value in provenance.items() if value is not None}
+
+
+def _sanitize_provider_metadata(value: Any, depth: int = 0) -> Any:
+    if depth > _PROVIDER_METADATA_MAX_DEPTH:
+        return None
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key).strip().lower().replace("-", "_")
+            if normalized_key in _PROVIDER_METADATA_OMIT_KEYS or any(
+                fragment in normalized_key for fragment in _PROVIDER_METADATA_SECRET_FRAGMENTS
+            ):
+                continue
+            cleaned = _sanitize_provider_metadata(item, depth + 1)
+            if cleaned in ({}, [], None):
+                continue
+            sanitized[key] = cleaned
+        return sanitized
+    if isinstance(value, list):
+        sanitized_items = [
+            _sanitize_provider_metadata(item, depth + 1)
+            for item in value[:_PROVIDER_METADATA_MAX_ITEMS]
+        ]
+        return [item for item in sanitized_items if item not in ({}, [], None)]
+    if isinstance(value, str):
+        if len(value) <= _PROVIDER_METADATA_MAX_STRING_CHARS:
+            return value
+        return value[:_PROVIDER_METADATA_MAX_STRING_CHARS] + "…[truncated]"
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    return str(value)[:_PROVIDER_METADATA_MAX_STRING_CHARS]
+
+
+def sanitize_provider_response_metadata(response: Any) -> dict[str, Any]:
+    sanitized = _sanitize_provider_metadata(response)
+    return sanitized if isinstance(sanitized, dict) else {}
 
 
 def parse_size(value: str | None) -> tuple[int, int] | None:

@@ -20,13 +20,26 @@ SERVER_PATH = PLUGIN_ROOT / "mcp" / "server.mjs"
 
 class ImageApiHandler(BaseHTTPRequestHandler):
     image_bytes = b""
+    revised_prompt = "Create a tiny local transport test image."
 
     def do_POST(self) -> None:  # noqa: N802
         content_length = int(self.headers.get("Content-Length", "0"))
         if content_length:
             self.rfile.read(content_length)
         payload = json.dumps(
-            {"data": [{"b64_json": base64.b64encode(self.image_bytes).decode("ascii")}]}
+            {
+                "id": "provider-request-123",
+                "model": "gpt-image-1",
+                "usage": {"input_tokens": 12, "output_tokens": 34},
+                "authorization": "must-not-be-recorded",
+                "data": [
+                    {
+                        "b64_json": base64.b64encode(self.image_bytes).decode("ascii"),
+                        "revised_prompt": self.revised_prompt,
+                        "url": "https://signed.example.invalid/private-image",
+                    }
+                ],
+            }
         ).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -94,9 +107,9 @@ class DirectOutputTests(unittest.TestCase):
                     "params": {
                         "name": "generate_image",
                         "arguments": {
-                            "prompt": "Create a tiny local transport test image.",
+                            "prompt": ImageApiHandler.revised_prompt,
                             "output_format": "png",
-                            "verbose": True,
+                            "include_provider_metadata": True,
                         },
                     },
                 }
@@ -121,7 +134,42 @@ class DirectOutputTests(unittest.TestCase):
                 self.assertEqual(
                     [path for path in cache_dir.rglob("*") if path.is_dir()],
                     [],
+                    [str(path) for path in cache_dir.rglob("*")],
                 )
+                self.assertNotIn("request", result)
+                self.assertEqual(
+                    result["prompt_provenance"],
+                    {
+                        "submitted": ImageApiHandler.revised_prompt,
+                        "changed": False,
+                        "provider_prompt_status": "echoed",
+                    },
+                )
+                self.assertEqual(
+                    result["provider_response_metadata"],
+                    {
+                        "id": "provider-request-123",
+                        "model": "gpt-image-1",
+                        "usage": {"input_tokens": 12, "output_tokens": 34},
+                    },
+                )
+                response_text = response["result"]["content"][0]["text"]
+                self.assertIn("Provider prompt status: echoed", response_text)
+                self.assertIn("provider-request-123", response_text)
+
+                manifest_path = Path(result["manifest"])
+                manifest_text = manifest_path.read_text(encoding="utf-8")
+                manifest = json.loads(manifest_text)
+                self.assertNotIn("prompt", manifest["request"])
+                self.assertNotIn("response_metadata", manifest)
+                self.assertEqual(manifest["prompt_provenance"], result["prompt_provenance"])
+                self.assertEqual(
+                    manifest["provider_response_metadata"],
+                    result["provider_response_metadata"],
+                )
+                self.assertEqual(manifest_text.count(ImageApiHandler.revised_prompt), 1)
+                self.assertNotIn("must-not-be-recorded", manifest_text)
+                self.assertNotIn("signed.example.invalid", manifest_text)
             finally:
                 if process.stdin is not None:
                     process.stdin.close()

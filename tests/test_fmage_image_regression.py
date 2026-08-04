@@ -94,8 +94,8 @@ class FmageImageRegressionTests(unittest.TestCase):
 
             self.assertTrue(result["resized"])
             self.assertLessEqual(result["output_size"][0] * result["output_size"][1], 1_048_576)
-            self.assertEqual(Path(result["output_dir"]), configured_output_dir)
-            self.assertEqual(output_path.parent, configured_output_dir)
+            self.assertTrue(os.path.samefile(Path(result["output_dir"]), configured_output_dir))
+            self.assertTrue(os.path.samefile(output_path.parent, configured_output_dir))
             self.assertRegex(output_path.name, r"^\d{8}-\d{6}-001(?:-\d+)?\.png$")
             with Image.open(output_path) as output:
                 self.assertEqual(list(output.size), result["output_size"])
@@ -147,7 +147,7 @@ class FmageImageRegressionTests(unittest.TestCase):
             result = response["result"]["structuredContent"]
             saved_path = Path(result["output"])
 
-            self.assertEqual(saved_path.parent, output_dir)
+            self.assertTrue(os.path.samefile(saved_path.parent, output_dir))
             self.assertTrue(saved_path.is_file())
             self.assertEqual(result["display_images"], [saved_path.as_posix()])
             self.assertIn("处理完成", response["result"]["content"][0]["text"])

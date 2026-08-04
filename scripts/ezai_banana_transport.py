@@ -16,10 +16,14 @@ import uuid
 import banana_models
 import ezai_banana_support as support
 from transport_common import (
+    build_prompt_provenance,
     collect_image_metadata,
     image_dimensions,
     output_size_warnings,
     parse_size,
+    request_metadata_without_prompts,
+    request_prompt,
+    sanitize_provider_response_metadata,
     write_latest_state,
 )
 
@@ -231,20 +235,13 @@ def write_manifest(
         "transport": TRANSPORT_NAME,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "request_mode": request_mode,
-        "request": request_payload,
+        "request": request_metadata_without_prompts(request_payload),
         "input_images": input_images,
         "requested_size": requested_size,
         "images": [str(path.resolve()) for path in images],
         "image_metadata": image_metadata,
-        "response_metadata": {
-            "created": response.get("created"),
-            "revised_prompt": response.get("revised_prompt"),
-            "data_revised_prompts": [
-                item.get("revised_prompt")
-                for item in response.get("data", [])
-                if isinstance(item, dict) and item.get("revised_prompt")
-            ],
-        },
+        "prompt_provenance": build_prompt_provenance(request_prompt(request_payload), response),
+        "provider_response_metadata": sanitize_provider_response_metadata(response),
         "timing": timing,
         "notes": notes,
         "warnings": warnings,
