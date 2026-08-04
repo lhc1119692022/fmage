@@ -14,7 +14,6 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import openai_images_transport as transport
-import json_images_transport as json_transport
 from transport_common import (
     build_prompt_provenance,
     request_metadata_without_prompts,
@@ -42,11 +41,6 @@ class Image2DefaultResolutionTests(unittest.TestCase):
         self.assertEqual(size, "2048x2048")
         self.assertIn("fallback_2k_square", notes)
 
-    def test_json_image_2_variants_default_to_2k(self) -> None:
-        size, notes = json_transport.resolve_size(shape_args("gpt-image-2-vip"), [])
-        self.assertEqual(size, "2048x2048")
-        self.assertIn("fallback_2k_square", notes)
-
     def test_image_2_edit_uses_2k_with_reference_aspect(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             image_path = Path(temp_dir) / "reference.png"
@@ -55,16 +49,8 @@ class Image2DefaultResolutionTests(unittest.TestCase):
                 shape_args("gpt-image-2-token", "edit"),
                 [image_path],
             )
-            json_size, _ = json_transport.resolve_size(
-                shape_args("gpt-image-2-vip", "edit"),
-                [str(image_path)],
-            )
             self.assertGreater(
                 transport.parse_size(openai_size)[0] * transport.parse_size(openai_size)[1],
-                1_048_576,
-            )
-            self.assertGreater(
-                json_transport.parse_size(json_size)[0] * json_transport.parse_size(json_size)[1],
                 1_048_576,
             )
 
@@ -83,22 +69,6 @@ class Image2DefaultResolutionTests(unittest.TestCase):
             2048 * 2048,
         )
         self.assertIn("resolution_inferred_from_high_quality", openai_notes)
-
-        json_args = shape_args("gpt-image-2-vip")
-        json_args.quality = "high"
-        json_size, json_notes = json_transport.resolve_size(json_args, [])
-        self.assertEqual(json_size, "4096x4096")
-        self.assertIn("resolution_inferred_from_high_quality", json_notes)
-
-
-class JsonQualityPayloadTests(unittest.TestCase):
-    def test_quality_is_sent_to_json_images_provider(self) -> None:
-        args = json_transport.build_parser().parse_args(
-            ["generate", "--prompt", "test image", "--quality", "high"]
-        )
-        payload = json_transport.build_payload(args, "test image", "4096x4096", [], True)
-        self.assertEqual(payload["quality"], "high")
-
 
 class ImageFieldSelectionTests(unittest.TestCase):
     def test_auto_uses_singular_field_for_one_image(self) -> None:

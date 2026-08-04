@@ -13,14 +13,19 @@ const TOOL_GENERATE = "generate_image";
 const TOOL_EDIT = "edit_image";
 const TOOL_GENERATE_BATCH = "generate_image_batch";
 const TOOL_EDIT_BATCH = "edit_image_batch";
-const EZAI_PROVIDER_NAME = "ezai-image-2";
-// Prompt compaction belongs to this exact Image-series contract, never to a vendor prefix or base URL.
-const EZAI_IMAGE_POLICY_TRANSPORT = "openai-images";
-const TOOL_PREPARE_PROMPT_EZAI = "prepare_prompt_ezai_image_2";
-const TOOL_GENERATE_EZAI = "generate_image_ezai_image_2";
-const TOOL_EDIT_EZAI = "edit_image_ezai_image_2";
-const TOOL_GENERATE_BATCH_EZAI = "generate_image_batch_ezai_image_2";
-const TOOL_EDIT_BATCH_EZAI = "edit_image_batch_ezai_image_2";
+const DALLE3_PROVIDER_NAME = "DALLE3";
+const DALLE3_COMPATIBILITY = "dalle3";
+const DALLE3_DEFAULT_PROMPT_POLICY = Object.freeze({
+  max_chars: 4000,
+  target_chars: 3900,
+  overflow_strategy: "language_aware_compact",
+  preferred_compact_language: "zh-CN",
+});
+const TOOL_PREPARE_PROMPT_DALLE3 = "prepare_prompt_dalle3";
+const TOOL_GENERATE_DALLE3 = "generate_image_dalle3";
+const TOOL_EDIT_DALLE3 = "edit_image_dalle3";
+const TOOL_GENERATE_BATCH_DALLE3 = "generate_image_batch_dalle3";
+const TOOL_EDIT_BATCH_DALLE3 = "edit_image_batch_dalle3";
 const TOOL_TRACE_PLAN = "trace_image_job_plan";
 const TOOL_STATUS = "get_provider_status";
 const TOOL_TASK_STATUS = "get_image_task_status";
@@ -38,7 +43,7 @@ const PENDING_TOTAL_TIMEOUT_SECONDS = 500;
 const PENDING_POLL_FAST_WINDOW_SECONDS = 120;
 const PENDING_POLL_FAST_INTERVAL_SECONDS = 20;
 const PENDING_POLL_SLOW_INTERVAL_SECONDS = 45;
-const EZAI_PROMPT_STAGE_TTL_MS = 10 * 60 * 1000;
+const DALLE3_PROMPT_STAGE_TTL_MS = 10 * 60 * 1000;
 const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG_PATH =
   process.env.FMAGE_CONFIG ||
@@ -63,9 +68,7 @@ const TRANSPORTS = {
     "scripts",
     "ezai_banana_transport.py",
   ),
-  "json-images": join(PLUGIN_ROOT, "scripts", "json_images_transport.py"),
   "zenmux-vertex": join(PLUGIN_ROOT, "scripts", "zenmux_vertex_transport.py"),
-  "chat-completions-image": join(PLUGIN_ROOT, "scripts", "chat_completions_image_transport.py"),
 };
 const REGRESSION_SCRIPT = join(
   PLUGIN_ROOT,
@@ -81,7 +84,7 @@ const JsonRpcError = {
   INTERNAL_ERROR: -32603,
 };
 
-const ezaiPromptStages = new Map();
+const dalle3PromptStages = new Map();
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -116,36 +119,36 @@ function promptLanguageProfile(value) {
   };
 }
 
-function newEzaiPromptStageId() {
+function newDalle3PromptStageId() {
   return randomBytes(32).toString("hex");
 }
 
-function cleanupEzaiPromptStages(now = Date.now()) {
-  for (const [id, stage] of ezaiPromptStages.entries()) {
-    if (!stage || stage.expiresAtMs <= now) ezaiPromptStages.delete(id);
+function cleanupDalle3PromptStages(now = Date.now()) {
+  for (const [id, stage] of dalle3PromptStages.entries()) {
+    if (!stage || stage.expiresAtMs <= now) dalle3PromptStages.delete(id);
   }
 }
 
-function getEzaiPromptStage(id, expectedKind = null) {
-  cleanupEzaiPromptStages();
+function getDalle3PromptStage(id, expectedKind = null) {
+  cleanupDalle3PromptStages();
   const supplied = nonEmptyString(id);
-  const stage = supplied ? ezaiPromptStages.get(supplied) : null;
+  const stage = supplied ? dalle3PromptStages.get(supplied) : null;
   if (!stage || (expectedKind && stage.kind !== expectedKind)) {
     throw new Error(
       `The ${expectedKind === "pending" ? "prompt_session_id" : "prompt_check_id"} is invalid or expired. ` +
-        `No ${EZAI_PROVIDER_NAME} provider request has been sent; prepare the prompt again.`,
+        `No ${DALLE3_PROVIDER_NAME} provider request has been sent; prepare the prompt again.`,
     );
   }
   return { id: supplied, stage };
 }
 
-function stagePendingEzaiPrompt(sourcePrompt, sourcePromptChars, sourceLanguage, policy, previous = null) {
-  cleanupEzaiPromptStages();
+function stagePendingDalle3Prompt(sourcePrompt, sourcePromptChars, sourceLanguage, policy, previous = null) {
+  cleanupDalle3PromptStages();
   const now = Date.now();
-  const id = previous?.id ?? newEzaiPromptStageId();
+  const id = previous?.id ?? newDalle3PromptStageId();
   const sourcePreparedAt = previous?.stage?.sourcePreparedAt ?? isoNow();
   const preparationCallCount = (previous?.stage?.preparationCallCount ?? 0) + 1;
-  ezaiPromptStages.set(id, {
+  dalle3PromptStages.set(id, {
     kind: "pending",
     sourcePrompt,
     sourcePromptChars,
@@ -153,15 +156,15 @@ function stagePendingEzaiPrompt(sourcePrompt, sourcePromptChars, sourceLanguage,
     promptPolicy: policy,
     sourcePreparedAt,
     preparationCallCount,
-    expiresAtMs: now + EZAI_PROMPT_STAGE_TTL_MS,
+    expiresAtMs: now + DALLE3_PROMPT_STAGE_TTL_MS,
   });
   return { id, sourcePreparedAt, preparationCallCount };
 }
 
-function stageReadyEzaiPrompt(promptResolution, previous = null) {
-  cleanupEzaiPromptStages();
+function stageReadyDalle3Prompt(promptResolution, previous = null) {
+  cleanupDalle3PromptStages();
   const now = Date.now();
-  const id = newEzaiPromptStageId();
+  const id = newDalle3PromptStageId();
   const sourcePreparedAt = previous?.stage?.sourcePreparedAt ?? isoNow();
   const preparationCallCount = (previous?.stage?.preparationCallCount ?? 0) + 1;
   const transportReadyAt = isoNow();
@@ -172,21 +175,21 @@ function stageReadyEzaiPrompt(promptResolution, previous = null) {
       source_prepared_at: sourcePreparedAt,
       transport_ready_at: transportReadyAt,
       preparation_call_count: preparationCallCount,
-      ttl_seconds: EZAI_PROMPT_STAGE_TTL_MS / 1000,
+      ttl_seconds: DALLE3_PROMPT_STAGE_TTL_MS / 1000,
     },
   };
-  ezaiPromptStages.set(id, {
+  dalle3PromptStages.set(id, {
     kind: "ready",
     promptResolution: stagedResolution,
-    expiresAtMs: now + EZAI_PROMPT_STAGE_TTL_MS,
+    expiresAtMs: now + DALLE3_PROMPT_STAGE_TTL_MS,
   });
-  if (previous?.id) ezaiPromptStages.delete(previous.id);
+  if (previous?.id) dalle3PromptStages.delete(previous.id);
   return { id, promptResolution: stagedResolution };
 }
 
-function takeReadyEzaiPrompt(promptCheckId) {
-  const { id, stage } = getEzaiPromptStage(promptCheckId, "ready");
-  ezaiPromptStages.delete(id);
+function takeReadyDalle3Prompt(promptCheckId) {
+  const { id, stage } = getDalle3PromptStage(promptCheckId, "ready");
+  dalle3PromptStages.delete(id);
   return stage.promptResolution;
 }
 
@@ -221,27 +224,33 @@ function normalizePromptPolicy(rawPolicy, context = "prompt_policy") {
   };
 }
 
-function isEzaiImagePromptPolicyProvider(provider) {
-  return (
-    provider?.name === EZAI_PROVIDER_NAME &&
-    provider?.transport === EZAI_IMAGE_POLICY_TRANSPORT &&
-    Boolean(provider?.promptPolicy)
-  );
+function isDalle3ProviderName(providerName) {
+  const normalized = normalizeProviderLookup(providerName);
+  return normalized === "dalle3" || normalized === "dalle-3" || normalized === "dall-e-3";
+}
+
+function isDalle3CompatibilityValue(value) {
+  const normalized = normalizeProviderLookup(value);
+  return normalized === DALLE3_COMPATIBILITY || normalized === "dalle-3" || normalized === "dall-e-3";
+}
+
+function isDalle3PromptPolicyProvider(provider) {
+  return Boolean(provider?.dalle3Compatibility && provider?.promptPolicy);
 }
 
 function resolveProviderPrompt(args, provider) {
-  if (!isEzaiImagePromptPolicyProvider(provider)) {
-    throw new Error(`Provider prompt compaction is only available for ${EZAI_PROVIDER_NAME}.`);
+  if (!isDalle3PromptPolicyProvider(provider)) {
+    throw new Error(`Provider prompt compaction is only available for ${DALLE3_PROVIDER_NAME} compatibility.`);
   }
   if (args._prompt_resolution) return args._prompt_resolution;
-  if (args._ezai_prompt_check_required && nonEmptyString(args.prompt_check_id)) {
-    return takeReadyEzaiPrompt(args.prompt_check_id);
+  if (args._dalle3_prompt_check_required && nonEmptyString(args.prompt_check_id)) {
+    return takeReadyDalle3Prompt(args.prompt_check_id);
   }
   const sourcePrompt = nonEmptyString(args.prompt);
   if (!sourcePrompt) {
     throw new Error(
-      `Provide either the complete unrestricted prompt for the initial ${EZAI_PROVIDER_NAME} call ` +
-        `or a valid prompt_check_id returned by ${TOOL_PREPARE_PROMPT_EZAI}.`,
+      `Provide either the complete unrestricted prompt for the initial ${DALLE3_PROVIDER_NAME} compatibility call ` +
+        `or a valid prompt_check_id returned by ${TOOL_PREPARE_PROMPT_DALLE3}.`,
     );
   }
 
@@ -307,14 +316,14 @@ function resolveProviderPrompt(args, provider) {
   };
 }
 
-function prepareEzaiProviderPrompt(args) {
-  const context = configuredEzaiPolicyContext();
+function prepareDalle3ProviderPrompt(args) {
+  const context = configuredDalle3PolicyContext();
   if (!context) {
-    throw new Error(`${EZAI_PROVIDER_NAME} is not active with a prompt policy.`);
+    throw new Error(`${DALLE3_PROVIDER_NAME} is not active with a prompt policy.`);
   }
   const suppliedSessionId = nonEmptyString(args.prompt_session_id);
   const pending = suppliedSessionId
-    ? getEzaiPromptStage(suppliedSessionId, "pending")
+    ? getDalle3PromptStage(suppliedSessionId, "pending")
     : null;
   if (pending && nonEmptyString(args.prompt)) {
     throw new Error(
@@ -333,9 +342,9 @@ function prepareEzaiProviderPrompt(args) {
     pending &&
     JSON.stringify(pending.stage.promptPolicy) !== JSON.stringify(policy)
   ) {
-    ezaiPromptStages.delete(pending.id);
+    dalle3PromptStages.delete(pending.id);
     throw new Error(
-      `The ${EZAI_PROVIDER_NAME} prompt policy changed while this preparation was pending. ` +
+      `The ${context.providerName} prompt policy changed while this preparation was pending. ` +
         "No provider request has been sent; start again with the complete prompt.",
     );
   }
@@ -359,7 +368,7 @@ function prepareEzaiProviderPrompt(args) {
       promptPolicyApplied: false,
     };
     nextAction =
-      `Call the matching ${EZAI_PROVIDER_NAME} image tool once with only this prompt_check_id plus ` +
+      `Call the matching ${context.providerName} image tool once with only this prompt_check_id plus ` +
       "the image and output parameters; do not resend prompt or provider_prompt.";
   } else if (!providerPrompt) {
     if (
@@ -370,7 +379,7 @@ function prepareEzaiProviderPrompt(args) {
       nextAction =
         `Keep the staged source unchanged. First translate the complete English-dominant Stage 1 prompt ` +
         `meaning-for-meaning into Chinese without compacting or dropping detail. Then call ` +
-        `${TOOL_PREPARE_PROMPT_EZAI} with this prompt_session_id and that translation as ` +
+        `${TOOL_PREPARE_PROMPT_DALLE3} with this prompt_session_id and that translation as ` +
         `provider_prompt; do not resend prompt. Only compact the ` +
         "Chinese translation if a later preparation result says it is still over the limit.";
     } else {
@@ -378,7 +387,7 @@ function prepareEzaiProviderPrompt(args) {
       nextAction =
         `Keep the staged source unchanged. Compact the Chinese-dominant Stage 1 wording toward ` +
         `${policy.target_chars} characters without truncating, summarizing, or changing meaning, then call ` +
-        `${TOOL_PREPARE_PROMPT_EZAI} with this prompt_session_id and the result as provider_prompt; ` +
+        `${TOOL_PREPARE_PROMPT_DALLE3} with this prompt_session_id and the result as provider_prompt; ` +
         "do not resend prompt.";
     }
   } else if (providerPromptChars > policy.max_chars) {
@@ -396,7 +405,7 @@ function prepareEzaiProviderPrompt(args) {
       nextAction =
         `Keep the staged source unchanged. provider_prompt is still English-dominant and exceeds the limit by ` +
         `${excessCharacters} characters. Translate it meaning-for-meaning into Chinese before any ` +
-        `compaction, preserving every detail, then call ${TOOL_PREPARE_PROMPT_EZAI} again with this ` +
+        `compaction, preserving every detail, then call ${TOOL_PREPARE_PROMPT_DALLE3} again with this ` +
         `prompt_session_id and the revised provider_prompt only. Only compact ` +
         "the Chinese translation if it remains over the limit.";
     } else if (translatedChineseStillTooLong) {
@@ -404,14 +413,14 @@ function prepareEzaiProviderPrompt(args) {
       nextAction =
         `Keep prompt unchanged. The Chinese translation still exceeds the limit by ${excessCharacters} ` +
         `characters; now compact that translated Chinese toward ${policy.target_chars} without truncating, ` +
-        `summarizing, or changing meaning, then call ${TOOL_PREPARE_PROMPT_EZAI} again with this ` +
+        `summarizing, or changing meaning, then call ${TOOL_PREPARE_PROMPT_DALLE3} again with this ` +
         "prompt_session_id and the revised provider_prompt only.";
     } else {
       status = "chinese_compaction_required";
       nextAction =
         `Keep prompt unchanged. The Chinese-dominant provider_prompt exceeds the limit by ` +
         `${excessCharacters} characters; compact it toward ${policy.target_chars} without truncating, ` +
-        `summarizing, or changing meaning, then call ${TOOL_PREPARE_PROMPT_EZAI} again with this ` +
+        `summarizing, or changing meaning, then call ${TOOL_PREPARE_PROMPT_DALLE3} again with this ` +
         "prompt_session_id and the revised provider_prompt only.";
     }
   } else if (
@@ -423,7 +432,7 @@ function prepareEzaiProviderPrompt(args) {
     nextAction =
       `Keep prompt unchanged. The English-dominant provider_prompt is within the character limit, ` +
       "but the required first transformation is still a meaning-for-meaning Chinese translation, not " +
-      `English compaction. Translate it without dropping detail, then call ${TOOL_PREPARE_PROMPT_EZAI} ` +
+      `English compaction. Translate it without dropping detail, then call ${TOOL_PREPARE_PROMPT_DALLE3} ` +
       "again with this prompt_session_id and the revised provider_prompt only. Only compact the Chinese " +
       "translation if it is over the limit.";
   } else {
@@ -437,13 +446,13 @@ function prepareEzaiProviderPrompt(args) {
       promptPolicyApplied: true,
     };
     nextAction =
-      `Call the matching ${EZAI_PROVIDER_NAME} image tool once with only this prompt_check_id plus ` +
+      `Call the matching ${context.providerName} image tool once with only this prompt_check_id plus ` +
       "the image and output parameters; do not resend prompt or provider_prompt.";
   }
 
   const staged = promptResolution
-    ? stageReadyEzaiPrompt(promptResolution, pending)
-    : stagePendingEzaiPrompt(
+    ? stageReadyDalle3Prompt(promptResolution, pending)
+    : stagePendingDalle3Prompt(
         sourcePrompt,
         sourcePromptChars,
         sourceLanguage,
@@ -455,7 +464,7 @@ function prepareEzaiProviderPrompt(args) {
     status,
     ready: Boolean(promptResolution),
     provider_request_sent: false,
-    provider: EZAI_PROVIDER_NAME,
+    provider: context.providerName,
     source_prompt_chars: sourcePromptChars,
     source_language: sourceLanguage,
     provider_prompt_chars: providerPromptChars,
@@ -467,7 +476,7 @@ function prepareEzaiProviderPrompt(args) {
     preparation_call_count: promptResolution
       ? staged.promptResolution.promptPreparation.preparation_call_count
       : staged.preparationCallCount,
-    stage_expires_in_seconds: EZAI_PROMPT_STAGE_TTL_MS / 1000,
+    stage_expires_in_seconds: DALLE3_PROMPT_STAGE_TTL_MS / 1000,
     next_action: nextAction,
   };
 }
@@ -873,21 +882,15 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   const model = nonEmptyString(raw.model);
   const apiKeyEnv = nonEmptyString(raw.api_key_env);
   const apiKey = nonEmptyString(raw.api_key) || (apiKeyEnv ? nonEmptyString(process.env[apiKeyEnv]) : null);
-  if (
-    providerName === EZAI_PROVIDER_NAME &&
-    raw.prompt_policy !== undefined &&
-    raw.prompt_policy !== null &&
-    transport !== EZAI_IMAGE_POLICY_TRANSPORT
-  ) {
-    throw new Error(
-      `providers.${EZAI_PROVIDER_NAME}.prompt_policy is valid only with transport ` +
-        `"${EZAI_IMAGE_POLICY_TRANSPORT}".`,
-    );
-  }
-  const promptPolicy =
-    providerName === EZAI_PROVIDER_NAME && transport === EZAI_IMAGE_POLICY_TRANSPORT
-      ? normalizePromptPolicy(raw.prompt_policy, `providers.${providerName}.prompt_policy`)
-      : null;
+  const dalle3Compatibility = isDalle3ProviderName(providerName) ||
+    isDalle3CompatibilityValue(raw.compatibility) ||
+    isDalle3CompatibilityValue(raw.compatibility_profile);
+  const promptPolicy = dalle3Compatibility
+    ? normalizePromptPolicy(
+        raw.prompt_policy == null ? DALLE3_DEFAULT_PROMPT_POLICY : raw.prompt_policy,
+        `providers.${providerName}.prompt_policy`,
+      )
+    : null;
 
   if (!transport || !TRANSPORTS[transport]) {
     throw new Error(
@@ -953,6 +956,7 @@ async function resolveProvider(requestedProvider, requireKey = true) {
     apiKey,
     apiKeyConfigured: Boolean(apiKey),
     apiKeySource: nonEmptyString(raw.api_key) ? "external_config" : apiKey ? `environment:${apiKeyEnv}` : "missing",
+    dalle3Compatibility,
     promptPolicy,
     openaiImages808,
     ezaiBanana,
@@ -1083,10 +1087,7 @@ function commonArguments(args, promptFile, provider) {
   appendOption(argv, "--size", args.size);
   appendOption(argv, "--aspect", args.aspect);
   appendOption(argv, "--resolution", args.resolution);
-  const quality =
-    ["json-images", "chat-completions-image"].includes(provider.transport) && args.quality === "auto"
-      ? "medium"
-      : args.quality ?? "medium";
+  const quality = args.quality ?? "medium";
   appendOption(argv, "--quality", quality);
   appendOption(argv, "--output-dir", outputDir);
   appendOption(argv, "--timeout", args.timeout);
@@ -1106,15 +1107,9 @@ function commonArguments(args, promptFile, provider) {
         provider.ezaiBanana?.responseFormat ||
         EZAI_BANANA_DEFAULT_RESPONSE_FORMAT,
     );
-  } else if (provider.transport === "json-images") {
-    appendOption(argv, "--response-format", args.response_format ?? "url");
   } else if (provider.transport === "zenmux-vertex") {
     appendOption(argv, "--output-format", args.output_format ?? "png");
     appendOption(argv, "--output-compression", args.output_compression);
-  } else if (provider.transport === "chat-completions-image") {
-    appendOption(argv, "--output-format", args.output_format ?? "png");
-    appendOption(argv, "--output-compression", args.output_compression);
-    appendOption(argv, "--response-format", args.response_format);
   }
 
   appendOption(argv, "--pending-total-timeout", args._pending_total_timeout);
@@ -1348,7 +1343,7 @@ function compactImageResultForResponse(result, args = {}) {
   return compact;
 }
 
-function compactEzaiImageResultForResponse(result, args = {}) {
+function compactDalle3ImageResultForResponse(result, args = {}) {
   const compact = compactImageResultForResponse(result, args);
   if (args.verbose || result?.dry_run) return compact;
   delete compact.revised_prompt_source;
@@ -1600,7 +1595,7 @@ async function writeImageManifestSidecars(cacheDir, result) {
     delete manifest.revised_prompt_submitted;
     delete manifest.provider_revised_prompt;
     delete manifest.revised_prompt_source;
-    if (result.provider === EZAI_PROVIDER_NAME && result.prompt_policy) {
+    if (result.prompt_policy) {
       Object.assign(manifest, {
         source_prompt_chars: result.source_prompt_chars,
         submitted_prompt_chars: result.submitted_prompt_chars,
@@ -1752,7 +1747,7 @@ function batchJobs(args) {
   });
 }
 
-function ezaiBatchJobs(args) {
+function dalle3BatchJobs(args) {
   const jobs = Array.isArray(args.jobs) ? args.jobs : [];
   if (!jobs.length) throw new Error("jobs must contain at least one image job.");
   if (jobs.length > 10) throw new Error("jobs may contain at most 10 image jobs.");
@@ -1962,7 +1957,7 @@ async function combineBatchResults({
   batchRoot,
   settledResults,
 }) {
-  const promptResolutions = args._ezai_prompt_policy && Array.isArray(jobs)
+  const promptResolutions = args._dalle3_prompt_policy && Array.isArray(jobs)
     ? jobs.map((job) => job._prompt_resolution ?? resolveProviderPrompt(job, provider))
     : null;
   const fulfilled = settledResults
@@ -2160,10 +2155,10 @@ async function runBatchImageCommand(command, args) {
   return submitBatchJobs(command, args, jobs);
 }
 
-function routeEzaiImageArgs(args, { consume = true } = {}) {
-  const context = configuredEzaiPolicyContext();
+function routeDalle3ImageArgs(args, { consume = true } = {}) {
+  const context = configuredDalle3PolicyContext();
   if (!context) {
-    throw new Error(`${EZAI_PROVIDER_NAME} is not active with a prompt policy.`);
+    throw new Error(`${DALLE3_PROVIDER_NAME} is not active with a prompt policy.`);
   }
 
   const promptCheckId = nonEmptyString(args.prompt_check_id);
@@ -2173,15 +2168,15 @@ function routeEzaiImageArgs(args, { consume = true } = {}) {
         "Use prompt_check_id by itself; do not resend prompt or provider_prompt.",
       );
     }
-    const { id, stage } = getEzaiPromptStage(promptCheckId, "ready");
+    const { id, stage } = getDalle3PromptStage(promptCheckId, "ready");
     if (JSON.stringify(stage.promptResolution.promptPolicy) !== JSON.stringify(context.policy)) {
-      ezaiPromptStages.delete(id);
+      dalle3PromptStages.delete(id);
       throw new Error(
-        `The ${EZAI_PROVIDER_NAME} prompt policy changed after preparation. ` +
+        `The ${context.providerName} prompt policy changed after preparation. ` +
           "No provider request has been sent; prepare the prompt again.",
       );
     }
-    if (consume) ezaiPromptStages.delete(id);
+    if (consume) dalle3PromptStages.delete(id);
     return {
       ready: true,
       args: {
@@ -2196,7 +2191,7 @@ function routeEzaiImageArgs(args, { consume = true } = {}) {
   const prompt = nonEmptyString(args.prompt);
   if (!prompt) {
     throw new Error(
-      `Provide the complete unrestricted prompt for the initial ${EZAI_PROVIDER_NAME} call, ` +
+      `Provide the complete unrestricted prompt for the initial ${context.providerName} call, ` +
         `or provide prompt_check_id after an over-limit preparation.`,
     );
   }
@@ -2206,8 +2201,9 @@ function routeEzaiImageArgs(args, { consume = true } = {}) {
   if (nonEmptyString(args.provider_prompt)) {
     const transportReadyAt = isoNow();
     const promptResolution = resolveProviderPrompt(args, {
-      name: EZAI_PROVIDER_NAME,
-      transport: EZAI_IMAGE_POLICY_TRANSPORT,
+      name: context.providerName,
+      transport: context.transport,
+      dalle3Compatibility: true,
       promptPolicy: context.policy,
     });
     promptResolution.promptPreparation = {
@@ -2226,16 +2222,16 @@ function routeEzaiImageArgs(args, { consume = true } = {}) {
   }
   return {
     ready: false,
-    result: prepareEzaiProviderPrompt({ prompt }),
+    result: prepareDalle3ProviderPrompt({ prompt }),
   };
 }
 
-function ezaiBatchPreparationResult(routedJobs) {
+function dalle3BatchPreparationResult(routedJobs, providerName) {
   return {
     status: "prompt_preparation_required",
     ready: false,
     provider_request_sent: false,
-    provider: EZAI_PROVIDER_NAME,
+    provider: providerName,
     jobs: routedJobs.map((item, index) => ({
       job_index: index + 1,
       ready: item.ready,
@@ -2245,15 +2241,15 @@ function ezaiBatchPreparationResult(routedJobs) {
     })),
     next_action:
       `No provider requests were sent. Continue only the jobs with ready=false through ` +
-      `${TOOL_PREPARE_PROMPT_EZAI}, then call the same batch tool with prompt_check_id for those jobs.`,
+      `${TOOL_PREPARE_PROMPT_DALLE3}, then call the same batch tool with prompt_check_id for those jobs.`,
   };
 }
 
-function isEzaiPreparationResult(result) {
+function isDalle3PreparationResult(result) {
   return result?.ready === false && result?.provider_request_sent === false;
 }
 
-function ezaiPreparationText(result) {
+function dalle3PreparationText(result) {
   if (Array.isArray(result?.jobs)) {
     return (
       `Prompt preparation status: ${result.status}. ready=false. ` +
@@ -2268,34 +2264,36 @@ function ezaiPreparationText(result) {
   );
 }
 
-async function runEzaiImageCommand(command, args) {
-  const routed = routeEzaiImageArgs(args);
+async function runDalle3ImageCommand(command, args) {
+  const context = configuredDalle3PolicyContext();
+  const routed = routeDalle3ImageArgs(args);
   if (!routed.ready) return routed.result;
   return runImageCommand(command, {
     ...routed.args,
-    provider: EZAI_PROVIDER_NAME,
-    _ezai_prompt_policy: true,
-    _ezai_prompt_check_required: true,
+    provider: context.providerName,
+    _dalle3_prompt_policy: true,
+    _dalle3_prompt_check_required: true,
   });
 }
 
-async function runEzaiBatchImageCommand(command, args) {
-  const jobs = ezaiBatchJobs(args);
-  const routedJobs = jobs.map((job) => routeEzaiImageArgs(job, { consume: false }));
+async function runDalle3BatchImageCommand(command, args) {
+  const context = configuredDalle3PolicyContext();
+  const jobs = dalle3BatchJobs(args);
+  const routedJobs = jobs.map((job) => routeDalle3ImageArgs(job, { consume: false }));
   if (routedJobs.some((item) => !item.ready)) {
-    return ezaiBatchPreparationResult(routedJobs);
+    return dalle3BatchPreparationResult(routedJobs, context.providerName);
   }
   for (const item of routedJobs) {
-    if (item.stagedId) ezaiPromptStages.delete(item.stagedId);
+    if (item.stagedId) dalle3PromptStages.delete(item.stagedId);
   }
   const materializedJobs = routedJobs.map((item) => item.args);
   return submitBatchJobs(
     command,
     {
       ...args,
-      provider: EZAI_PROVIDER_NAME,
-      _ezai_prompt_policy: true,
-      _ezai_prompt_check_required: true,
+      provider: context.providerName,
+      _dalle3_prompt_policy: true,
+      _dalle3_prompt_check_required: true,
     },
     materializedJobs,
   );
@@ -2305,7 +2303,7 @@ async function submitBatchImageTask(command, args, count) {
   const prompt = nonEmptyString(args.prompt);
   if (!prompt) throw new Error("The prompt argument must contain one complete Codex-revised image prompt.");
   const jobs = Array.from({ length: count }, () =>
-    args._ezai_prompt_policy
+    args._dalle3_prompt_policy
       ? {
           prompt,
           _prompt_resolution: args._prompt_resolution,
@@ -2318,8 +2316,8 @@ async function submitBatchImageTask(command, args, count) {
 async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
   const returnWhen = args.dry_run ? "completed" : batchReturnWhen(args);
   const provider = await resolveProvider(args.provider, !args.dry_run);
-  if (isEzaiImagePromptPolicyProvider(provider) && !args._ezai_prompt_policy) {
-    args = { ...args, provider: EZAI_PROVIDER_NAME, _ezai_prompt_policy: true };
+  if (isDalle3PromptPolicyProvider(provider) && !args._dalle3_prompt_policy) {
+    args = { ...args, provider: provider.name, _dalle3_prompt_policy: true };
   }
   const root = transportOutputRoot(args, provider);
   const outputDir = finalOutputRoot(args, provider);
@@ -2339,7 +2337,7 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
       jobArgs.images = [...images, ...latestImages];
       jobArgs.use_latest = false;
     }
-    if (args._ezai_prompt_policy) {
+    if (args._dalle3_prompt_policy) {
       jobArgs._prompt_resolution = resolveProviderPrompt(jobArgs, provider);
     }
     return jobArgs;
@@ -2404,7 +2402,7 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
       task_submitted_at: submittedAt,
     },
   };
-  if (args._ezai_prompt_policy) {
+  if (args._dalle3_prompt_policy) {
     Object.assign(task, {
       revised_prompt_source: legacyPrompt,
       revised_prompt_submitted: legacyPrompt
@@ -2581,10 +2579,10 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     output_timestamp: nonEmptyString(args.output_timestamp) || timestampForPath(),
     output_sequence: positiveInteger(args.output_sequence, 1),
   };
-  if (isEzaiImagePromptPolicyProvider(provider) && !args._ezai_prompt_policy) {
-    args = { ...args, provider: EZAI_PROVIDER_NAME, _ezai_prompt_policy: true };
+  if (isDalle3PromptPolicyProvider(provider) && !args._dalle3_prompt_policy) {
+    args = { ...args, provider: provider.name, _dalle3_prompt_policy: true };
   }
-  const promptResolution = args._ezai_prompt_policy ? resolveProviderPrompt(args, provider) : null;
+  const promptResolution = args._dalle3_prompt_policy ? resolveProviderPrompt(args, provider) : null;
   if (promptResolution?.promptPreparation) {
     promptResolution.promptPreparation = {
       ...promptResolution.promptPreparation,
@@ -2620,20 +2618,18 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     const helperTimeoutSeconds =
       provider.transport === TRANSPORT_808_OPENAI_IMAGES
         ? openaiImages808PendingTimeoutSeconds(args, provider)
-        : ["json-images", "chat-completions-image"].includes(provider.transport)
-          ? Math.max(positiveInteger(args.timeout, 0), positiveInteger(args._pending_total_timeout, 0))
-          : args.timeout;
-    const helperEnvironment = provider.apiKey ? { FMAGE_ACTIVE_API_KEY: provider.apiKey } : {};
+        : args.timeout;
+    const helperEnvironment = {
+      PYTHONUTF8: "1",
+      PYTHONIOENCODING: "utf-8",
+      ...(provider.apiKey ? { FMAGE_ACTIVE_API_KEY: provider.apiKey } : {}),
+    };
     if (!args.dry_run) {
       Object.assign(helperEnvironment, {
         FMAGE_DIRECT_OUTPUT_DIR: finalOutputRoot(args, provider),
         FMAGE_OUTPUT_TIMESTAMP: args.output_timestamp,
         FMAGE_OUTPUT_SEQUENCE: String(args.output_sequence),
       });
-    }
-    if (args._ezai_prompt_policy) {
-      helperEnvironment.PYTHONUTF8 = "1";
-      helperEnvironment.PYTHONIOENCODING = "utf-8";
     }
     const result = await runProcess(
       pythonCommand(),
@@ -2668,24 +2664,36 @@ function revisedPromptProperty(editing = false) {
   };
 }
 
-function configuredEzaiPolicyContext() {
+function configuredDalle3PolicyContext() {
   try {
     const config = readConfigForPaths();
     if (!config?.providers || typeof config.providers !== "object") return null;
     const activeProviders = configuredActiveProviders(config);
-    if (!activeProviders.includes(EZAI_PROVIDER_NAME)) return null;
-    const raw = config.providers[EZAI_PROVIDER_NAME];
+    const providerName = activeProviders.find((name) => {
+      const raw = config.providers[name];
+      return (
+        raw &&
+        typeof raw === "object" &&
+        (isDalle3ProviderName(name) ||
+          isDalle3CompatibilityValue(raw.compatibility) ||
+          isDalle3CompatibilityValue(raw.compatibility_profile))
+      );
+    });
+    if (!providerName) return null;
+    const raw = config.providers[providerName];
     if (!raw || typeof raw !== "object") return null;
-    if (nonEmptyString(raw.transport) !== EZAI_IMAGE_POLICY_TRANSPORT) return null;
+    const transport = nonEmptyString(raw.transport);
     const policy = normalizePromptPolicy(
-      raw.prompt_policy,
-      `providers.${EZAI_PROVIDER_NAME}.prompt_policy`,
+      raw.prompt_policy == null ? DALLE3_DEFAULT_PROMPT_POLICY : raw.prompt_policy,
+      `providers.${providerName}.prompt_policy`,
     );
     if (!policy) return null;
     return {
+      providerName,
+      transport,
       policy,
-      isDefault: activeProviders[0] === EZAI_PROVIDER_NAME,
-      hasOtherActiveProviders: activeProviders.some((name) => name !== EZAI_PROVIDER_NAME),
+      isDefault: activeProviders[0] === providerName,
+      hasOtherActiveProviders: activeProviders.some((name) => name !== providerName),
     };
   } catch {
     return null;
@@ -2693,7 +2701,7 @@ function configuredEzaiPolicyContext() {
 }
 
 function configuredProviderRoutingGuidance() {
-  const context = configuredEzaiPolicyContext();
+  const context = configuredDalle3PolicyContext();
   if (!context) return "";
   return (
     " When the selected provider exposes matching provider-specific image tools, use those tools. " +
@@ -2703,13 +2711,13 @@ function configuredProviderRoutingGuidance() {
   );
 }
 
-function ezaiPromptProperty(editing = false) {
+function dalle3PromptProperty(editing = false) {
   const standardPrompt = revisedPromptProperty(editing);
   return {
     ...standardPrompt,
     description:
       `${standardPrompt.description} This initial value must be completed exactly as it would be for ` +
-      `the corresponding standard Fmage tool, before inspecting or applying any ${EZAI_PROVIDER_NAME} ` +
+      `the corresponding standard Fmage tool, before inspecting or applying any ${DALLE3_PROVIDER_NAME} ` +
       "provider policy. Do not make any policy-driven change to its language, detail, or length. " +
       "Any transport adaptation begins only after this complete value is finalized. " +
       "It is archived unchanged as revised_prompt_source. Omit it only when submitting " +
@@ -2717,17 +2725,17 @@ function ezaiPromptProperty(editing = false) {
   };
 }
 
-function ezaiProviderPromptProperty() {
+function dalle3ProviderPromptProperty() {
   return {
     type: "string",
     minLength: 1,
     description:
-      `Stage 2 transport candidate for ${EZAI_PROVIDER_NAME}, used only with prompt_session_id after the initial image tool reports an over-limit source. ` +
+      `Stage 2 transport candidate for ${DALLE3_PROVIDER_NAME} compatibility, used only with prompt_session_id after the initial image tool reports an over-limit source. ` +
       "Follow the latest preparation result's next_action exactly. Never replace or rewrite the staged source value, and never truncate or reduce the transport candidate to a summary. Preserve exact required text, names, counts, identities, spatial relationships, composition, edit invariants, camera, materials, lighting, style, and key avoid constraints.",
   };
 }
 
-function ezaiImageProviderPromptProperty() {
+function dalle3ImageProviderPromptProperty() {
   return {
     type: "string",
     minLength: 1,
@@ -2883,18 +2891,18 @@ function batchProperties(editing = false) {
   return properties;
 }
 
-function ezaiCommonProperties(editing) {
+function dalle3CommonProperties(editing) {
   const properties = {
     ...commonProperties(editing),
-    prompt: ezaiPromptProperty(editing),
-    provider_prompt: ezaiImageProviderPromptProperty(),
+    prompt: dalle3PromptProperty(editing),
+    provider_prompt: dalle3ImageProviderPromptProperty(),
     prompt_check_id: {
       type: "string",
       minLength: 64,
       maxLength: 64,
       pattern: "^[0-9a-f]{64}$",
       description:
-        `Short-lived one-time readiness ID returned by ${TOOL_PREPARE_PROMPT_EZAI}. ` +
+        `Short-lived one-time readiness ID returned by ${TOOL_PREPARE_PROMPT_DALLE3}. ` +
         "Use it instead of resending prompt or provider_prompt after over-limit preparation.",
     },
   };
@@ -2902,8 +2910,8 @@ function ezaiCommonProperties(editing) {
   return properties;
 }
 
-function ezaiJobProperties(editing) {
-  const properties = ezaiCommonProperties(editing);
+function dalle3JobProperties(editing) {
+  const properties = dalle3CommonProperties(editing);
   delete properties.output_dir;
   delete properties.timeout;
   delete properties.dry_run;
@@ -2924,18 +2932,18 @@ function ezaiJobProperties(editing) {
   return properties;
 }
 
-function ezaiBatchProperties(editing) {
-  const properties = ezaiCommonProperties(editing);
+function dalle3BatchProperties(editing) {
+  const properties = dalle3CommonProperties(editing);
   delete properties.prompt;
   delete properties.prompt_check_id;
   properties.jobs = {
     type: "array",
     minItems: 1,
     maxItems: 10,
-    description: `Independent ${EZAI_PROVIDER_NAME} image jobs.`,
+    description: `Independent ${DALLE3_PROVIDER_NAME} compatibility image jobs.`,
     items: {
       type: "object",
-      properties: ezaiJobProperties(editing),
+      properties: dalle3JobProperties(editing),
       anyOf: [{ required: ["prompt"] }, { required: ["prompt_check_id"] }],
       additionalProperties: false,
     },
@@ -2957,18 +2965,18 @@ function ezaiBatchProperties(editing) {
 }
 
 function toolDefinitions() {
-  const ezaiContext = configuredEzaiPolicyContext();
-  const standardProviderRoutingHint = ezaiContext
+  const dalle3Context = configuredDalle3PolicyContext();
+  const standardProviderRoutingHint = dalle3Context
     ? " When the selected provider exposes a dedicated image tool, use the matching dedicated tool."
     : "";
   const standardImageToolNames = [TOOL_GENERATE, TOOL_GENERATE_BATCH, TOOL_EDIT, TOOL_EDIT_BATCH];
   const imageToolNames = [...standardImageToolNames];
-  if (ezaiContext) {
+  if (dalle3Context) {
     imageToolNames.push(
-      TOOL_GENERATE_EZAI,
-      TOOL_GENERATE_BATCH_EZAI,
-      TOOL_EDIT_EZAI,
-      TOOL_EDIT_BATCH_EZAI,
+      TOOL_GENERATE_DALLE3,
+      TOOL_GENERATE_BATCH_DALLE3,
+      TOOL_EDIT_DALLE3,
+      TOOL_EDIT_BATCH_DALLE3,
     );
   }
   const tools = [
@@ -3182,20 +3190,20 @@ function toolDefinitions() {
     },
   ];
 
-  if (ezaiContext) {
-    const { policy } = ezaiContext;
+  if (dalle3Context) {
+    const { policy, providerName } = dalle3Context;
     const annotations = {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
       openWorldHint: true,
     };
-    const ezaiTools = [
+    const dalle3Tools = [
       {
-        name: TOOL_PREPARE_PROMPT_EZAI,
-        title: `Prepare Prompt for Fmage (${EZAI_PROVIDER_NAME})`,
+        name: TOOL_PREPARE_PROMPT_DALLE3,
+        title: `Prepare Prompt for Fmage (${providerName})`,
         description:
-          `After a ${EZAI_PROVIDER_NAME} image tool returns ready=false, validate its Stage 2 ` +
+          `After a ${providerName} compatibility image tool returns ready=false, validate its Stage 2 ` +
           "provider_prompt with prompt_session_id; it sends no provider request. When ready=true, call " +
           "the same image tool with prompt_check_id only.",
         inputSchema: {
@@ -3215,7 +3223,7 @@ function toolDefinitions() {
               description:
                 "Short-lived session ID returned when the initial image tool or this preparation tool reports ready=false. Use it instead of resending prompt.",
             },
-            provider_prompt: ezaiProviderPromptProperty(),
+            provider_prompt: dalle3ProviderPromptProperty(),
           },
           anyOf: [{ required: ["prompt"] }, { required: ["prompt_session_id"] }],
           additionalProperties: false,
@@ -3228,43 +3236,43 @@ function toolDefinitions() {
         },
       },
       {
-        name: TOOL_GENERATE_EZAI,
-        title: `Generate Image with Fmage (${EZAI_PROVIDER_NAME})`,
+        name: TOOL_GENERATE_DALLE3,
+        title: `Generate Image with Fmage (${providerName})`,
         description:
-          `Generate one image with ${EZAI_PROVIDER_NAME}. Initial call: complete source prompt. ` +
+          `Generate one image with ${providerName} DALL-E 3 compatibility. Initial call: complete source prompt. ` +
           `After ready=false preparation: prompt_check_id only.`,
         inputSchema: {
           type: "object",
-          properties: ezaiCommonProperties(false),
+          properties: dalle3CommonProperties(false),
           anyOf: [{ required: ["prompt"] }, { required: ["prompt_check_id"] }],
           additionalProperties: false,
         },
         annotations,
       },
       {
-        name: TOOL_GENERATE_BATCH_EZAI,
-        title: `Generate Image Batch with Fmage (${EZAI_PROVIDER_NAME})`,
+        name: TOOL_GENERATE_BATCH_DALLE3,
+        title: `Generate Image Batch with Fmage (${providerName})`,
         description:
-          `Generate an ${EZAI_PROVIDER_NAME} batch. Each job uses a complete source prompt or a staged ` +
+          `Generate a ${providerName} DALL-E 3 compatibility batch. Each job uses a complete source prompt or a staged ` +
           "prompt_check_id.",
         inputSchema: {
           type: "object",
-          properties: ezaiBatchProperties(false),
+          properties: dalle3BatchProperties(false),
           required: ["jobs"],
           additionalProperties: false,
         },
         annotations,
       },
       {
-        name: TOOL_EDIT_EZAI,
-        title: `Edit Image with Fmage (${EZAI_PROVIDER_NAME})`,
+        name: TOOL_EDIT_DALLE3,
+        title: `Edit Image with Fmage (${providerName})`,
         description:
-          `Edit reference images with ${EZAI_PROVIDER_NAME}. Initial call: complete source prompt. ` +
+          `Edit reference images with ${providerName} DALL-E 3 compatibility. Initial call: complete source prompt. ` +
           `After ready=false preparation: prompt_check_id only.`,
         inputSchema: {
           type: "object",
           properties: {
-            ...ezaiCommonProperties(true),
+            ...dalle3CommonProperties(true),
             images: {
               type: "array",
               items: { type: "string" },
@@ -3281,29 +3289,29 @@ function toolDefinitions() {
         annotations,
       },
       {
-        name: TOOL_EDIT_BATCH_EZAI,
-        title: `Edit Image Batch with Fmage (${EZAI_PROVIDER_NAME})`,
+        name: TOOL_EDIT_BATCH_DALLE3,
+        title: `Edit Image Batch with Fmage (${providerName})`,
         description:
-          `Edit an ${EZAI_PROVIDER_NAME} batch. Each job uses a complete source prompt or a staged ` +
+          `Edit a ${providerName} DALL-E 3 compatibility batch. Each job uses a complete source prompt or a staged ` +
           "prompt_check_id.",
         inputSchema: {
           type: "object",
-          properties: ezaiBatchProperties(true),
+          properties: dalle3BatchProperties(true),
           required: ["jobs"],
           additionalProperties: false,
         },
         annotations,
       },
     ];
-    if (ezaiContext.isDefault) {
-      const preparationTool = ezaiTools.find((tool) => tool.name === TOOL_PREPARE_PROMPT_EZAI);
-      const imageTools = ezaiTools.filter((tool) => tool.name !== TOOL_PREPARE_PROMPT_EZAI);
-      const fallbackTools = ezaiContext.hasOtherActiveProviders
+    if (dalle3Context.isDefault) {
+      const preparationTool = dalle3Tools.find((tool) => tool.name === TOOL_PREPARE_PROMPT_DALLE3);
+      const imageTools = dalle3Tools.filter((tool) => tool.name !== TOOL_PREPARE_PROMPT_DALLE3);
+      const fallbackTools = dalle3Context.hasOtherActiveProviders
         ? tools
         : tools.filter((tool) => !standardImageToolNames.includes(tool.name));
       return [...imageTools, preparationTool, ...fallbackTools];
     } else {
-      tools.push(...ezaiTools);
+      tools.push(...dalle3Tools);
     }
   }
 
@@ -3490,6 +3498,12 @@ async function providerStatus(requestedProvider) {
     transport: provider.transport,
     base_url: provider.baseUrl,
     model: provider.model,
+    ...(provider.dalle3Compatibility
+      ? {
+          compatibility: DALLE3_COMPATIBILITY,
+          prompt_policy: provider.promptPolicy,
+        }
+      : {}),
     api_key_configured: provider.apiKeyConfigured,
     api_key_source: provider.apiKeySource,
     available_providers: Object.keys(provider.config.providers),
@@ -3568,25 +3582,25 @@ async function handleToolCall(id, params) {
     return;
   }
 
-  if (params?.name === TOOL_PREPARE_PROMPT_EZAI) {
-    const result = prepareEzaiProviderPrompt(params.arguments ?? {});
+  if (params?.name === TOOL_PREPARE_PROMPT_DALLE3) {
+    const result = prepareDalle3ProviderPrompt(params.arguments ?? {});
     sendResult(id, {
-      content: [{ type: "text", text: ezaiPreparationText(result) }],
+      content: [{ type: "text", text: dalle3PreparationText(result) }],
       structuredContent: result,
     });
     return;
   }
 
-  if (params?.name === TOOL_GENERATE_EZAI) {
-    const result = await runEzaiImageCommand("generate", params.arguments ?? {});
-    if (isEzaiPreparationResult(result)) {
+  if (params?.name === TOOL_GENERATE_DALLE3) {
+    const result = await runDalle3ImageCommand("generate", params.arguments ?? {});
+    if (isDalle3PreparationResult(result)) {
       sendResult(id, {
-        content: [{ type: "text", text: ezaiPreparationText(result) }],
+        content: [{ type: "text", text: dalle3PreparationText(result) }],
         structuredContent: result,
       });
       return;
     }
-    const responseResult = compactEzaiImageResultForResponse(result, params.arguments ?? {});
+    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
     sendResult(id, {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
@@ -3598,16 +3612,16 @@ async function handleToolCall(id, params) {
     return;
   }
 
-  if (params?.name === TOOL_GENERATE_BATCH_EZAI) {
-    const result = await runEzaiBatchImageCommand("generate", params.arguments ?? {});
-    if (isEzaiPreparationResult(result)) {
+  if (params?.name === TOOL_GENERATE_BATCH_DALLE3) {
+    const result = await runDalle3BatchImageCommand("generate", params.arguments ?? {});
+    if (isDalle3PreparationResult(result)) {
       sendResult(id, {
-        content: [{ type: "text", text: ezaiPreparationText(result) }],
+        content: [{ type: "text", text: dalle3PreparationText(result) }],
         structuredContent: result,
       });
       return;
     }
-    const responseResult = compactEzaiImageResultForResponse(result, params.arguments ?? {});
+    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
     sendResult(id, {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
@@ -3647,16 +3661,16 @@ async function handleToolCall(id, params) {
     return;
   }
 
-  if (params?.name === TOOL_EDIT_EZAI) {
-    const result = await runEzaiImageCommand("edit", params.arguments ?? {});
-    if (isEzaiPreparationResult(result)) {
+  if (params?.name === TOOL_EDIT_DALLE3) {
+    const result = await runDalle3ImageCommand("edit", params.arguments ?? {});
+    if (isDalle3PreparationResult(result)) {
       sendResult(id, {
-        content: [{ type: "text", text: ezaiPreparationText(result) }],
+        content: [{ type: "text", text: dalle3PreparationText(result) }],
         structuredContent: result,
       });
       return;
     }
-    const responseResult = compactEzaiImageResultForResponse(result, params.arguments ?? {});
+    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
     sendResult(id, {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
@@ -3668,16 +3682,16 @@ async function handleToolCall(id, params) {
     return;
   }
 
-  if (params?.name === TOOL_EDIT_BATCH_EZAI) {
-    const result = await runEzaiBatchImageCommand("edit", params.arguments ?? {});
-    if (isEzaiPreparationResult(result)) {
+  if (params?.name === TOOL_EDIT_BATCH_DALLE3) {
+    const result = await runDalle3BatchImageCommand("edit", params.arguments ?? {});
+    if (isDalle3PreparationResult(result)) {
       sendResult(id, {
-        content: [{ type: "text", text: ezaiPreparationText(result) }],
+        content: [{ type: "text", text: dalle3PreparationText(result) }],
         structuredContent: result,
       });
       return;
     }
-    const responseResult = compactEzaiImageResultForResponse(result, params.arguments ?? {});
+    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
     sendResult(id, {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),

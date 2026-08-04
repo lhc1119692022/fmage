@@ -17,7 +17,6 @@ SERVER_PATH = PLUGIN_ROOT / "mcp" / "server.mjs"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import banana_models
-import chat_completions_image_transport as chat_transport
 import ezai_banana_transport as transport
 import zenmux_vertex_transport as zenmux_transport
 
@@ -267,20 +266,14 @@ class EndpointAndPayloadTests(unittest.TestCase):
 class BananaModelRuleTests(unittest.TestCase):
     def test_provider_wire_models_share_capability_without_being_interchangeable(self) -> None:
         ezai = banana_models.resolve_model(transport.TRANSPORT_NAME, "nano-banana-2")
-        chat = banana_models.resolve_model(
-            chat_transport.TRANSPORT_NAME,
-            "gemini-3.1-flash-image-preview",
-        )
         zenmux = banana_models.resolve_model(
             zenmux_transport.TRANSPORT_NAME,
             "google/gemini-3.1-flash-image",
         )
 
         self.assertEqual(ezai["canonical_model"], "nano-banana-2")
-        self.assertEqual(chat["canonical_model"], "nano-banana-2")
         self.assertEqual(zenmux["canonical_model"], "nano-banana-2")
         self.assertEqual(ezai["wire_model"], "nano-banana-2")
-        self.assertEqual(chat["wire_model"], "gemini-3.1-flash-image-preview")
         self.assertEqual(zenmux["wire_model"], "google/gemini-3.1-flash-image")
         for key in (
             "resolutions",
@@ -288,58 +281,14 @@ class BananaModelRuleTests(unittest.TestCase):
             "thinking_levels",
             "default_thinking_level",
         ):
-            self.assertEqual(chat[key], ezai[key])
             self.assertEqual(zenmux[key], ezai[key])
 
     def test_provider_wire_model_ids_cannot_cross_contracts(self) -> None:
-        with self.assertRaisesRegex(ValueError, "cannot be used with 'chat-completions-image'"):
-            banana_models.resolve_model(chat_transport.TRANSPORT_NAME, "nano-banana-2")
-        with self.assertRaisesRegex(ValueError, "cannot be used with 'zenmux-vertex'"):
+        with self.assertRaisesRegex(ValueError, "does not accept Nano Banana wire model ID"):
             banana_models.resolve_model(
                 zenmux_transport.TRANSPORT_NAME,
                 "gemini-3.1-flash-image-preview",
             )
-
-    def test_chat_transport_uses_shared_nano_banana_2_shape_rules(self) -> None:
-        args = chat_transport.build_parser().parse_args(
-            [
-                "generate",
-                "--prompt",
-                "test",
-                "--base-url",
-                "https://example.com",
-                "--model",
-                "gemini-3.1-flash-image-preview",
-                "--resolution",
-                "512px",
-                "--aspect",
-                "1:8",
-                "--dry-run",
-            ]
-        )
-
-        result = chat_transport.run_generate(args)
-
-        self.assertEqual(result["requested_size"], "1:8@512px")
-        self.assertEqual(result["request"]["image_size"], "512")
-        self.assertEqual(result["request"]["image_config"]["aspect_ratio"], "1:8")
-
-    def test_chat_transport_rejects_ezai_wire_model_id(self) -> None:
-        args = chat_transport.build_parser().parse_args(
-            [
-                "generate",
-                "--prompt",
-                "test",
-                "--base-url",
-                "https://example.com",
-                "--model",
-                "nano-banana-2",
-                "--dry-run",
-            ]
-        )
-
-        with self.assertRaisesRegex(ValueError, "cannot be used with 'chat-completions-image'"):
-            chat_transport.run_generate(args)
 
     def test_zenmux_transport_preserves_its_wire_model_and_nano_tokens(self) -> None:
         args = zenmux_transport.build_parser().parse_args(
@@ -367,14 +316,6 @@ class BananaModelRuleTests(unittest.TestCase):
         self.assertIn("/publishers/google/models/gemini-3.1-flash-image:predict", result["endpoint"])
 
     def test_512_wire_serialization_is_scoped_to_each_nano_contract(self) -> None:
-        self.assertEqual(
-            chat_transport.chat_resolution_value("gemini-3.1-flash-image-preview", "512px"),
-            "512",
-        )
-        self.assertEqual(
-            chat_transport.chat_resolution_value("custom-chat-image-model", "512px"),
-            "512px",
-        )
         self.assertEqual(
             zenmux_transport.zenmux_resolution_value("google/gemini-3.1-flash-image", "512px"),
             "512",
@@ -620,25 +561,6 @@ class ServerRoutingTests(unittest.TestCase):
         self.assertEqual(status["edit_input_modes"], ["json_image_urls", "multipart_local_files"])
         self.assertNotIn("banana_model_spec", status)
         self.assertNotIn("banana_model_capabilities", status)
-
-    def test_server_status_does_not_interpret_chat_transport_model_capabilities(self) -> None:
-        config = {
-            "active_providers": ["right-banana"],
-            "providers": {
-                "right-banana": {
-                    "transport": "chat-completions-image",
-                    "base_url": "https://www.rightapi.ai/draw",
-                    "model": "gemini-3.1-flash-image-preview",
-                    "api_key": "",
-                }
-            },
-        }
-
-        status = call_server(config, "get_provider_status", {"provider": "right-banana"})
-
-        self.assertEqual(status["model"], "gemini-3.1-flash-image-preview")
-        self.assertNotIn("banana_model_capabilities", status)
-
 
 if __name__ == "__main__":
     unittest.main()

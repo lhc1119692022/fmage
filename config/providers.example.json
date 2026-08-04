@@ -13,6 +13,13 @@
       "api_key": ""
     },
     "ezai-image-2": {
+      "transport": "openai-images",
+      "base_url": "https://api-direct.ezaiclub.com",
+      "model": "gpt-image-2",
+      "api_key": ""
+    },
+    "DALLE3": {
+      "compatibility": "dalle3",
       "prompt_policy": {
         "max_chars": 4000,
         "target_chars": 3900,
@@ -20,8 +27,8 @@
         "preferred_compact_language": "zh-CN"
       },
       "transport": "openai-images",
-      "base_url": "https://api-direct.ezaiclub.com",
-      "model": "gpt-image-2",
+      "base_url": "https://api.openai.com/v1",
+      "model": "dall-e-3",
       "api_key": ""
     },
     "ezai-nano": {
@@ -37,18 +44,6 @@
       "model": "gpt-image-2",
       "response_format": "url",
       "timeout": 600,
-      "api_key": ""
-    },
-    "right-image-2": {
-      "transport": "json-images",
-      "base_url": "https://www.rightapi.ai/draw",
-      "model": "gpt-image-2-vip",
-      "api_key": ""
-    },
-    "right-banana-2": {
-      "transport": "chat-completions-image",
-      "base_url": "https://www.rightapi.ai/draw",
-      "model": "gemini-3.1-flash-image-preview",
       "api_key": ""
     },
     "yunwu-image-2": {

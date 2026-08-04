@@ -51,9 +51,6 @@ MODEL_CONTRACT_BINDINGS: dict[str, dict[str, str]] = {
         "nano-banana-2": "nano-banana-2",
         "nano-banana-pro": "nano-banana-pro",
     },
-    "chat-completions-image": {
-        "gemini-3.1-flash-image-preview": "nano-banana-2",
-    },
     "zenmux-vertex": {
         "google/gemini-3.1-flash-image": "nano-banana-2",
     },
