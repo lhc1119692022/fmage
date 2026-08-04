@@ -36,12 +36,12 @@ def shape_args(model: str, command: str = "generate") -> argparse.Namespace:
 
 
 class Image2DefaultResolutionTests(unittest.TestCase):
-    def test_openai_image_2_generation_defaults_to_2k(self) -> None:
+    def test_openai_image_2_generation_defaults_to_4k(self) -> None:
         size, notes = transport.resolve_size(shape_args("gpt-image-2"), [])
-        self.assertEqual(size, "2048x2048")
-        self.assertIn("fallback_2k_square", notes)
+        self.assertEqual(size, "2880x2880")
+        self.assertIn("fallback_4k_square", notes)
 
-    def test_image_2_edit_uses_2k_with_reference_aspect(self) -> None:
+    def test_image_2_edit_uses_4k_with_reference_aspect(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             image_path = Path(temp_dir) / "reference.png"
             Image.new("RGB", (2048, 1024), (1, 2, 3)).save(image_path)
@@ -51,7 +51,7 @@ class Image2DefaultResolutionTests(unittest.TestCase):
             )
             self.assertGreater(
                 transport.parse_size(openai_size)[0] * transport.parse_size(openai_size)[1],
-                1_048_576,
+                2048 * 2048,
             )
 
     def test_explicit_resolution_still_overrides_image_2_default(self) -> None:
@@ -59,6 +59,13 @@ class Image2DefaultResolutionTests(unittest.TestCase):
         args.resolution = "1k"
         size, _ = transport.resolve_size(args, [])
         self.assertLessEqual(transport.parse_size(size)[0] * transport.parse_size(size)[1], 1_048_576)
+
+    def test_explicit_medium_quality_keeps_image_2_at_2k(self) -> None:
+        args = shape_args("gpt-image-2")
+        args.quality = "medium"
+        size, notes = transport.resolve_size(args, [])
+        self.assertEqual(size, "2048x2048")
+        self.assertIn("resolution_inferred_from_medium_quality", notes)
 
     def test_quality_maps_resolution_without_explicit_aspect(self) -> None:
         openai_args = shape_args("gpt-image-2")
@@ -68,6 +75,7 @@ class Image2DefaultResolutionTests(unittest.TestCase):
             transport.parse_size(openai_size)[0] * transport.parse_size(openai_size)[1],
             2048 * 2048,
         )
+        self.assertEqual(openai_size, "2880x2880")
         self.assertIn("resolution_inferred_from_high_quality", openai_notes)
 
 class ImageFieldSelectionTests(unittest.TestCase):

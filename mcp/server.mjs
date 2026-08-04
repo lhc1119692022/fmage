@@ -1126,7 +1126,7 @@ function commonArguments(args, promptFile, provider) {
   appendOption(argv, "--size", args.size);
   appendOption(argv, "--aspect", args.aspect);
   appendOption(argv, "--resolution", args.resolution);
-  const quality = args.quality ?? "medium";
+  const quality = args.quality ?? defaultQualityForProvider(provider);
   appendOption(argv, "--quality", quality);
   appendOption(argv, "--output-dir", outputDir);
   appendOption(argv, "--timeout", args.timeout);
@@ -1197,7 +1197,7 @@ function openaiImages808Arguments(args, promptFile, provider) {
   appendOption(argv, "--size", args.size);
   appendOption(argv, "--aspect", args.aspect);
   appendOption(argv, "--resolution", args.resolution);
-  appendOption(argv, "--quality", args.quality ?? "medium");
+  appendOption(argv, "--quality", args.quality ?? defaultQualityForProvider(provider));
   appendOption(argv, "--moderation", args.moderation ?? "low");
   appendOption(argv, "--background", args.background ?? "auto");
   appendOption(argv, "--output-format", args.output_format ?? "png");
@@ -1214,6 +1214,11 @@ function openaiImages808Arguments(args, promptFile, provider) {
   appendOption(argv, "--pending-total-timeout", openaiImages808PendingTimeoutSeconds(args, provider));
   appendFlag(argv, "--dry-run", args.dry_run);
   return argv;
+}
+
+function defaultQualityForProvider(provider) {
+  const model = nonEmptyString(provider?.model)?.toLowerCase() ?? "";
+  return model.startsWith("gpt-image-2") ? "high" : "medium";
 }
 
 function enforceQualityPolicy(args = {}) {
@@ -2811,7 +2816,7 @@ function commonProperties(editing = false) {
     quality: {
       type: "string",
       enum: ["low", "medium", "high", "auto"],
-      description: "Delivery tier; omit for medium.",
+      description: "Delivery tier; omit for the model default (high for gpt-image-2, medium otherwise).",
     },
     quality_user_requested: {
       type: "boolean",
