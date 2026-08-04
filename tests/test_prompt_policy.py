@@ -617,15 +617,16 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertNotIn("prompt_policy_applied", result)
         self.assertNotIn("revised_prompt_source", result)
 
-    def test_example_config_migrates_special_policy_and_removes_closed_providers(self) -> None:
+    def test_example_config_uses_profile_defaults_and_removes_closed_providers(self) -> None:
         config = json.loads(PROVIDERS_EXAMPLE_PATH.read_text(encoding="utf-8"))
         providers = config["providers"]
 
         self.assertNotIn("prompt_policy", providers[EZAI_NORMAL])
         self.assertEqual(providers[EZAI]["prompt_profile"], "dalle3")
-        self.assertEqual(providers[EZAI]["prompt_policy"]["max_chars"], 4000)
+        self.assertNotIn("prompt_policy", providers[EZAI])
         self.assertEqual(providers["808-image-2"]["transport"], "openai-images")
         self.assertEqual(providers["808-image-2"]["transport_profile"], "808")
+        self.assertNotIn("yunwu-image-2", providers)
         self.assertNotIn("right-image-2", providers)
         self.assertNotIn("right-banana-2", providers)
 
