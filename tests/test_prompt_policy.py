@@ -435,6 +435,8 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertIn("do not call `view_image`", skill)
         self.assertIn("never issue concurrent or duplicate status checks", skill)
         self.assertIn("Do not create subagents", skill)
+        self.assertIn("explicitly selects any tier, including `medium`", skill)
+        self.assertIn("always pass that exact `quality`", skill)
         self.assertNotIn("delivery-language.md", skill)
         self.assertNotIn("resolution-tiers.md", skill)
 

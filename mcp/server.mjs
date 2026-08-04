@@ -2816,11 +2816,13 @@ function commonProperties(editing = false) {
     quality: {
       type: "string",
       enum: ["low", "medium", "high", "auto"],
-      description: "Delivery tier; omit for the model default (high for gpt-image-2, medium otherwise).",
+      description:
+        "Delivery tier. Always pass an explicitly requested tier, including medium; omit only when the user did not select one (model default: high for gpt-image-2, medium otherwise).",
     },
     quality_user_requested: {
       type: "boolean",
-      description: "True only when the user explicitly requested a non-medium tier.",
+      description:
+        "True when the user explicitly requested a tier that differs from the selected model default.",
     },
     moderation: {
       type: "string",

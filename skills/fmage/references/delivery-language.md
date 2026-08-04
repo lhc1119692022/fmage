@@ -1,5 +1,6 @@
 # Delivery And Visual Language
 
+- When the user explicitly requests any quality tier, including `medium`, always pass that exact `quality`; never omit an explicit tier merely because it is the historical or current model default. If the tier differs from the selected model's default, also pass `quality_user_requested: true`.
 - Phrases such as `quality low`, `low quality`, `draft quality`, `preview quality`, `草图质量`, or `低质量输出` select `quality: low` and `quality_user_requested: true`. For `草图质量` or `draft quality`, also pass `resolution: 1k` unless the user explicitly selects another resolution.
 - An explicit `1k` request sets only `resolution: 1k`; do not infer `quality` from resolution alone.
 - Phrases such as `sketch style`, `hand-drawn sketch`, `wireframe`, `low-fidelity`, or `线框/手绘草图风格` affect only the prompt when that aesthetic is explicitly requested. Do not turn `草图` into a sketch aesthetic when it modifies quality, resolution, cost, or speed.
