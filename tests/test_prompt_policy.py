@@ -49,11 +49,11 @@ def provider(name: str, prompt_policy: dict[str, object] | None = None) -> dict[
     return value
 
 
-def banana_provider() -> dict[str, object]:
+def banana_provider(model: str = "nano-banana-2") -> dict[str, object]:
     return {
         "transport": "ezai-banana-images",
         "base_url": "https://api-direct.ezaiclub.com",
-        "model": "nano-banana-2",
+        "model": model,
         "response_format": "url",
         "api_key": "",
     }
@@ -300,6 +300,8 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             self.assertNotIn(ezai_only_guidance, ordinary_schema)
         for name in STANDARD_IMAGE_TOOLS:
             self.assertNotIn("provider_prompt", all_property_names(current_tools[name]))
+            self.assertIn("resolution_user_requested", all_property_names(current_tools[name]))
+            self.assertIn("thinking_level_user_requested", all_property_names(current_tools[name]))
         self.assertEqual(
             current_tools["generate_image"]["inputSchema"]["properties"]["prompt"]["description"],
             "One complete provider-appropriate image prompt revised by the active Codex model. "
@@ -437,6 +439,9 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertIn("Do not create subagents", skill)
         self.assertIn("explicitly selects any tier, including `medium`", skill)
         self.assertIn("always pass that exact `quality`", skill)
+        self.assertIn("set `resolution_user_requested: true`", skill)
+        self.assertIn("Never derive image-model `thinking_level`", skill)
+        self.assertIn("`thinking_level_user_requested: true`", skill)
         self.assertNotIn("delivery-language.md", skill)
         self.assertNotIn("resolution-tiers.md", skill)
 
@@ -647,6 +652,112 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertNotIn("error", response)
         result = response["result"]["structuredContent"]
         self.assertEqual(result["request"]["quality"], "auto")
+
+    def test_unmarked_resolution_override_is_ignored_for_image_2(self) -> None:
+        response = self.call_image_tool(
+            self.ordinary_config(),
+            "generate_image",
+            prompt="default resolution routing",
+            aspect="3:4",
+            resolution="2k",
+        )
+        self.assertNotIn("error", response)
+        result = response["result"]["structuredContent"]
+        self.assertEqual(result["request"]["size"], "2496x3312")
+        self.assertEqual(result["request"]["quality"], "high")
+        self.assertTrue(
+            any("resolution_user_requested was not true" in item for item in result["warnings"])
+        )
+
+    def test_user_requested_resolution_override_is_preserved_for_image_2(self) -> None:
+        response = self.call_image_tool(
+            self.ordinary_config(),
+            "generate_image",
+            prompt="explicit resolution routing",
+            aspect="3:4",
+            resolution="2k",
+            resolution_user_requested=True,
+        )
+        self.assertNotIn("error", response)
+        result = response["result"]["structuredContent"]
+        self.assertEqual(result["request"]["size"], "1776x2368")
+        self.assertEqual(result["request"]["quality"], "high")
+        self.assertFalse(result.get("warnings"))
+
+    def test_unmarked_incompatible_thinking_level_is_removed_after_model_resolution(self) -> None:
+        config = provider_config(
+            [EZAI_BANANA],
+            {EZAI_BANANA: banana_provider("nano-banana-pro")},
+        )
+        response = self.call_image_tool(
+            config,
+            "generate_image",
+            prompt="model capability routing",
+            thinking_level="high",
+        )
+        self.assertNotIn("error", response)
+        result = response["result"]["structuredContent"]
+        self.assertNotIn("thinking_level", result["request"])
+        self.assertTrue(
+            any("thinking_level_user_requested was not true" in item for item in result["warnings"])
+        )
+
+    def test_explicit_incompatible_thinking_level_is_rejected_before_provider_request(self) -> None:
+        config = provider_config(
+            [EZAI_BANANA],
+            {EZAI_BANANA: banana_provider("nano-banana-pro")},
+        )
+        response = self.call_image_tool(
+            config,
+            "generate_image",
+            prompt="model capability routing",
+            thinking_level="high",
+            thinking_level_user_requested=True,
+        )
+        self.assertIn("error", response)
+        self.assertIn("explicitly requested thinking_level", response["error"]["message"])
+        self.assertIn("nano-banana-pro", response["error"]["message"])
+
+    def test_batch_rejects_explicit_incompatible_thinking_before_task_submission(self) -> None:
+        config = provider_config(
+            [EZAI_BANANA],
+            {EZAI_BANANA: banana_provider("nano-banana-pro")},
+        )
+        response = call_server(
+            config,
+            "tools/call",
+            {
+                "name": "generate_image_batch",
+                "arguments": {
+                    "dry_run": True,
+                    "provider": EZAI_BANANA,
+                    "jobs": [
+                        {
+                            "prompt": "model capability routing",
+                            "thinking_level": "high",
+                            "thinking_level_user_requested": True,
+                        }
+                    ],
+                },
+            },
+        )
+        self.assertIn("error", response)
+        self.assertIn("explicitly requested thinking_level", response["error"]["message"])
+
+    def test_unmarked_exact_size_override_is_ignored_for_image_2(self) -> None:
+        response = self.call_image_tool(
+            self.ordinary_config(),
+            "generate_image",
+            prompt="default exact-size routing",
+            aspect="3:4",
+            size="1024x1024",
+        )
+        self.assertNotIn("error", response)
+        result = response["result"]["structuredContent"]
+        self.assertEqual(result["request"]["size"], "2496x3312")
+        self.assertTrue(
+            any("size=\"1024x1024\"" in item for item in result["warnings"])
+        )
 
     def test_ezai_under_limit_keeps_complete_prompt(self) -> None:
         response = self.call_image_tool(

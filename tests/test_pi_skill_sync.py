@@ -41,6 +41,8 @@ class PiSkillSyncTests(unittest.TestCase):
             self.assertIn("`Fmage_generate_image`", main_skill)
             self.assertIn("`Fmage_prepare_prompt_dalle3`", main_skill)
             self.assertIn("including `medium`, always pass that exact `quality`", main_skill)
+            self.assertIn("set `resolution_user_requested: true`", main_skill)
+            self.assertIn("`thinking_level_user_requested: true`", main_skill)
             self.assertIn("`Fmage_get_provider_status`", diagnostics)
             self.assertIn("include_provider_metadata", diagnostics)
             self.assertNotIn("Fmage_generate_image_ezai_image_2", main_skill)
@@ -50,6 +52,8 @@ class PiSkillSyncTests(unittest.TestCase):
             self.assertIn("Keep this.", agents)
             self.assertIn("Keep this too.", agents)
             self.assertIn("including `medium`, always pass that exact `quality`", agents)
+            self.assertIn("with `resolution_user_requested: true`", agents)
+            self.assertIn("with `thinking_level_user_requested: true`", agents)
             self.assertNotIn("Old Fmage rules.", agents)
 
             source_config = (PLUGIN_ROOT / "skills" / "fmage-config" / "SKILL.md").read_bytes()

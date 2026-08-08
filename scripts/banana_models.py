@@ -11,49 +11,41 @@ user-supplied EzAI API examples and capability comparison dated 2026-08-01.
 
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 import re
 from typing import Any
 
 
-BASE_ASPECT_RATIOS = (
-    "1:1",
-    "2:3",
-    "3:2",
-    "3:4",
-    "4:3",
-    "4:5",
-    "5:4",
-    "9:16",
-    "16:9",
-    "21:9",
-)
+CAPABILITY_SPEC_PATH = Path(__file__).resolve().parents[1] / "config" / "banana-model-capabilities.json"
 
+
+def _load_capability_spec() -> dict[str, Any]:
+    try:
+        value = json.loads(CAPABILITY_SPEC_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Invalid Nano Banana capability spec at {CAPABILITY_SPEC_PATH}: {error}") from error
+    if not isinstance(value, dict):
+        raise RuntimeError(f"Nano Banana capability spec at {CAPABILITY_SPEC_PATH} must be an object.")
+    return value
+
+
+CAPABILITY_SPEC = _load_capability_spec()
+BASE_ASPECT_RATIOS = tuple(CAPABILITY_SPEC["base_aspect_ratios"])
 MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
-    "nano-banana-2": {
-        "display_name": "Nano Banana 2 / Gemini 3.1 Flash Image",
-        "resolutions": ("512px", "1K", "2K", "4K"),
-        "aspect_ratios": (*BASE_ASPECT_RATIOS, "1:4", "4:1", "1:8", "8:1"),
-        "thinking_levels": ("minimal", "high"),
-        "default_thinking_level": "minimal",
-    },
-    "nano-banana-pro": {
-        "display_name": "Nano Banana Pro / Gemini 3 Pro Image",
-        "resolutions": ("1K", "2K", "4K"),
-        "aspect_ratios": BASE_ASPECT_RATIOS,
-        "thinking_levels": (),
-        "default_thinking_level": None,
-    },
+    model: {
+        "display_name": capability["display_name"],
+        "resolutions": tuple(capability["resolutions"]),
+        "aspect_ratios": (*BASE_ASPECT_RATIOS, *tuple(capability.get("extra_aspect_ratios", ()))),
+        "thinking_levels": tuple(capability.get("thinking_levels", ())),
+        "default_thinking_level": capability.get("default_thinking_level"),
+    }
+    for model, capability in CAPABILITY_SPEC["models"].items()
 }
-
 MODEL_CONTRACT_BINDINGS: dict[str, dict[str, str]] = {
-    "ezai-banana-images": {
-        "nano-banana-2": "nano-banana-2",
-        "nano-banana-pro": "nano-banana-pro",
-    },
-    "zenmux-vertex": {
-        "google/gemini-3.1-flash-image": "nano-banana-2",
-    },
+    contract: dict(bindings)
+    for contract, bindings in CAPABILITY_SPEC["contracts"].items()
 }
 
 WIRE_MODEL_CONTRACTS: dict[str, str] = {}

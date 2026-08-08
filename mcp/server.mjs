@@ -45,6 +45,9 @@ const CONFIG_PATH =
 const TRANSPORT_OPENAI_IMAGES = "openai-images";
 const TRANSPORT_PROFILE_808 = "808";
 const TRANSPORT_EZAI_BANANA_IMAGES = "ezai-banana-images";
+const BANANA_MODEL_CAPABILITY_SPEC = JSON.parse(
+  readFileSync(join(PLUGIN_ROOT, "config", "banana-model-capabilities.json"), "utf8"),
+);
 const OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS = 600;
 const OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT = "url";
 const OPENAI_IMAGES_808_SUPPORTED_MODELS = new Set(["gpt-image-2", "gpt-image-2-token"]);
@@ -1234,6 +1237,79 @@ function enforceQualityPolicy(args = {}) {
   };
 }
 
+function enforceResolutionPolicy(args = {}) {
+  const requestedResolution = nonEmptyString(args.resolution);
+  const requestedSize = nonEmptyString(args.size);
+  if ((!requestedResolution && !requestedSize) || args.resolution_user_requested === true) {
+    return args;
+  }
+  const ignored = [
+    requestedResolution ? `resolution="${requestedResolution}"` : null,
+    requestedSize ? `size="${requestedSize}"` : null,
+  ].filter(Boolean).join(" and ");
+  const result = { ...args };
+  delete result.resolution;
+  delete result.size;
+  result._resolution_policy_warning =
+    `Ignored ${ignored} because resolution_user_requested was not true; using the model default.`;
+  return result;
+}
+
+function enforceDeliveryPolicy(args = {}) {
+  return enforceResolutionPolicy(enforceQualityPolicy(args));
+}
+
+function bananaModelCapability(provider) {
+  if (provider.transport !== TRANSPORT_EZAI_BANANA_IMAGES) return null;
+  const bindings = BANANA_MODEL_CAPABILITY_SPEC.contracts?.[provider.transport];
+  const wireModel = nonEmptyString(provider.model)?.toLowerCase();
+  if (!bindings || !wireModel) return null;
+  const binding = Object.entries(bindings).find(
+    ([candidate]) => candidate.toLowerCase() === wireModel,
+  );
+  if (!binding) return null;
+  const [configuredModel, canonicalModel] = binding;
+  const capability = BANANA_MODEL_CAPABILITY_SPEC.models?.[canonicalModel];
+  if (!capability) {
+    throw new Error(
+      `Nano Banana model capability "${canonicalModel}" for "${configuredModel}" is missing.`,
+    );
+  }
+  return { canonicalModel, ...capability };
+}
+
+function enforceModelCapabilityPolicy(args = {}, provider) {
+  const thinkingLevel = nonEmptyString(args.thinking_level)?.toLowerCase();
+  if (!thinkingLevel) return args;
+
+  const capability = bananaModelCapability(provider);
+  if (provider.transport === TRANSPORT_EZAI_BANANA_IMAGES && !capability) {
+    return args;
+  }
+  const supported = Array.isArray(capability?.thinking_levels)
+    ? capability.thinking_levels.map((value) => String(value).toLowerCase())
+    : [];
+  if (supported.includes(thinkingLevel)) return args;
+
+  const modelLabel = `provider "${provider.name}" model "${provider.model}"`;
+  if (args.thinking_level_user_requested === true) {
+    const supportedText = supported.length
+      ? ` Supported values: ${supported.join(", ")}.`
+      : " This model does not support thinking_level.";
+    throw new Error(
+      `The explicitly requested thinking_level "${thinkingLevel}" is not supported by ${modelLabel}.` +
+        supportedText,
+    );
+  }
+
+  const result = { ...args };
+  delete result.thinking_level;
+  result._model_capability_policy_warning =
+    `Ignored thinking_level="${thinkingLevel}" because ${modelLabel} does not support it and ` +
+    "thinking_level_user_requested was not true.";
+  return result;
+}
+
 function textPartsFromRequestContent(content) {
   if (typeof content === "string") {
     return [nonEmptyString(content)].filter(Boolean);
@@ -2203,7 +2279,7 @@ async function combineBatchResults({
 }
 
 async function runImageCommand(command, args) {
-  args = enforceQualityPolicy(args);
+  args = enforceDeliveryPolicy(args);
   const provider = await resolveProvider(args.provider, !args.dry_run);
   if (isDalle3PromptPolicyProvider(provider)) {
     const routed = routeDalle3ImageArgs(args, provider);
@@ -2390,7 +2466,8 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     command === "edit" && (args.use_latest || jobs.some((job) => Boolean(job.use_latest)));
   const latestImages = needsLatestImages ? await loadLatestImages(provider.config) : [];
   const normalizedJobs = jobs.map((job) => {
-    const jobArgs = enforceQualityPolicy(jobArgsFromBatchArgs(args, job));
+    let jobArgs = enforceDeliveryPolicy(jobArgsFromBatchArgs(args, job));
+    jobArgs = enforceModelCapabilityPolicy(jobArgs, provider);
     if (command === "edit" && latestImages.length && (args.use_latest || jobArgs.use_latest)) {
       const images = Array.isArray(jobArgs.images) ? jobArgs.images : [];
       jobArgs.images = [...images, ...latestImages];
@@ -2635,6 +2712,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
 
   const singleStartedAt = isoNow();
   const provider = resolvedProvider ?? (await resolveProvider(args.provider, !args.dry_run));
+  args = enforceModelCapabilityPolicy(args, provider);
   args = {
     ...args,
     output_timestamp: nonEmptyString(args.output_timestamp) || timestampForPath(),
@@ -2703,6 +2781,18 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
       enriched.warnings = [
         ...normalizedStringArray(enriched.warnings),
         args._quality_policy_warning,
+      ];
+    }
+    if (args._resolution_policy_warning) {
+      enriched.warnings = [
+        ...normalizedStringArray(enriched.warnings),
+        args._resolution_policy_warning,
+      ];
+    }
+    if (args._model_capability_policy_warning) {
+      enriched.warnings = [
+        ...normalizedStringArray(enriched.warnings),
+        args._model_capability_policy_warning,
       ];
     }
     enriched.timing = {
@@ -2796,7 +2886,8 @@ function commonProperties(editing = false) {
     },
     size: {
       type: "string",
-      description: "WIDTHxHEIGHT.",
+      description:
+        "Exact WIDTHxHEIGHT size. Pass only when the user explicitly selected it, and also set resolution_user_requested=true.",
     },
     aspect: {
       type: "string",
@@ -2805,13 +2896,22 @@ function commonProperties(editing = false) {
     resolution: {
       type: "string",
       description:
-        "Provider-supported resolution tier, such as 512px, 1k, 2k, 3k, or 4k. Banana models are validated against their model-specific capability list.",
+        "Provider-supported resolution tier, such as 512px, 1k, 2k, 3k, or 4k. Pass only when the user explicitly selected a tier, and also set resolution_user_requested=true. Banana models are validated against their model-specific capability list.",
+    },
+    resolution_user_requested: {
+      type: "boolean",
+      description:
+        "True when the user explicitly requested a resolution tier or exact WIDTHxHEIGHT size, or selected an explicit preset such as draft quality that requires a resolution override.",
     },
     thinking_level: {
       type: "string",
       enum: ["minimal", "high"],
       description:
-        "Optional EzAI Nano Banana 2 thinking level. Nano Banana Pro does not support this parameter.",
+        "EzAI Nano Banana 2 only. Omit unless explicitly requested; never copy session reasoning.",
+    },
+    thinking_level_user_requested: {
+      type: "boolean",
+      description: "True only for an explicit user request.",
     },
     quality: {
       type: "string",

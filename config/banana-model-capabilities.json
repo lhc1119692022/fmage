@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "base_aspect_ratios": [
+    "1:1",
+    "2:3",
+    "3:2",
+    "3:4",
+    "4:3",
+    "4:5",
+    "5:4",
+    "9:16",
+    "16:9",
+    "21:9"
+  ],
+  "models": {
+    "nano-banana-2": {
+      "display_name": "Nano Banana 2 / Gemini 3.1 Flash Image",
+      "resolutions": ["512px", "1K", "2K", "4K"],
+      "extra_aspect_ratios": ["1:4", "4:1", "1:8", "8:1"],
+      "thinking_levels": ["minimal", "high"],
+      "default_thinking_level": "minimal"
+    },
+    "nano-banana-pro": {
+      "display_name": "Nano Banana Pro / Gemini 3 Pro Image",
+      "resolutions": ["1K", "2K", "4K"],
+      "extra_aspect_ratios": [],
+      "thinking_levels": [],
+      "default_thinking_level": null
+    }
+  },
+  "contracts": {
+    "ezai-banana-images": {
+      "nano-banana-2": "nano-banana-2",
+      "nano-banana-pro": "nano-banana-pro"
+    },
+    "zenmux-vertex": {
+      "google/gemini-3.1-flash-image": "nano-banana-2"
+    }
+  }
+}

@@ -35,7 +35,7 @@
     "808-image-2": {
       "transport": "openai-images",
       "transport_profile": "808",
-      "base_url": "https://api.808relay.com/v1",
+      "base_url": "https://va-api.40-160-63-37.sslip.io/v1",
       "model": "gpt-image-2",
       "response_format": "url",
       "timeout": 600,

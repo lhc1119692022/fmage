@@ -144,6 +144,10 @@ def check(
             problems.append("outdated: mcp-cache.json Fmage quality schema")
         if "Always pass an explicitly requested tier, including medium" not in serialized:
             problems.append("missing: mcp-cache.json current Fmage quality schema")
+        if "resolution_user_requested" not in serialized:
+            problems.append("missing: mcp-cache.json current Fmage resolution schema")
+        if "thinking_level_user_requested" not in serialized:
+            problems.append("missing: mcp-cache.json current Fmage model-capability schema")
     return problems
 
 
