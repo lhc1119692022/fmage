@@ -44,6 +44,7 @@ const CONFIG_PATH =
   join(process.env.CODEX_HOME || join(homedir(), ".codex"), "fmage", "providers.json");
 const TRANSPORT_OPENAI_IMAGES = "openai-images";
 const TRANSPORT_PROFILE_808 = "808";
+const TRANSPORT_808_MIDJOURNEY = "808-midjourney";
 const TRANSPORT_EZAI_BANANA_IMAGES = "ezai-banana-images";
 const BANANA_MODEL_CAPABILITY_SPEC = JSON.parse(
   readFileSync(join(PLUGIN_ROOT, "config", "banana-model-capabilities.json"), "utf8"),
@@ -51,11 +52,20 @@ const BANANA_MODEL_CAPABILITY_SPEC = JSON.parse(
 const OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS = 600;
 const OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT = "url";
 const OPENAI_IMAGES_808_SUPPORTED_MODELS = new Set(["gpt-image-2", "gpt-image-2-token"]);
+const MIDJOURNEY_808_DEFAULT_TIMEOUT_SECONDS = 600;
+const MIDJOURNEY_808_DEFAULT_RESPONSE_FORMAT = "url";
+const MIDJOURNEY_808_SUPPORTED_MODELS = new Set(["midjourney-v8.2"]);
+const MIDJOURNEY_FIXED_RESULT_COUNT = 4;
 const EZAI_BANANA_DEFAULT_RESPONSE_FORMAT = "url";
 const EZAI_BANANA_SUPPORTED_RESPONSE_FORMATS = new Set(["url", "b64_json"]);
 
 const TRANSPORTS = {
   [TRANSPORT_OPENAI_IMAGES]: join(PLUGIN_ROOT, "scripts", "openai_images_transport.py"),
+  [TRANSPORT_808_MIDJOURNEY]: join(
+    PLUGIN_ROOT,
+    "scripts",
+    "midjourney_808_transport.py",
+  ),
   [TRANSPORT_EZAI_BANANA_IMAGES]: join(
     PLUGIN_ROOT,
     "scripts",
@@ -965,6 +975,31 @@ async function resolveProvider(requestedProvider, requireKey = true) {
       timeoutSeconds: positiveInteger(configuredTimeout, OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS),
     };
   }
+  let midjourney808 = null;
+  if (transport === TRANSPORT_808_MIDJOURNEY) {
+    if (!MIDJOURNEY_808_SUPPORTED_MODELS.has(model)) {
+      throw new Error(
+        `Provider "${providerName}" model "${model}" is not supported by transport ` +
+          `"${TRANSPORT_808_MIDJOURNEY}". Use midjourney-v8.2.`,
+      );
+    }
+    const responseFormat = nonEmptyString(raw.response_format) || MIDJOURNEY_808_DEFAULT_RESPONSE_FORMAT;
+    if (!["url", "b64_json"].includes(responseFormat)) {
+      throw new Error(
+        `Provider "${providerName}" has unsupported response_format "${responseFormat}". ` +
+          `Use "url" or "b64_json".`,
+      );
+    }
+    const configuredTimeout = raw.timeout;
+    if (configuredTimeout !== undefined && positiveInteger(configuredTimeout, 0) === 0) {
+      throw new Error(`Provider "${providerName}" timeout must be a positive integer.`);
+    }
+    midjourney808 = {
+      responseFormat,
+      timeoutSeconds: positiveInteger(configuredTimeout, MIDJOURNEY_808_DEFAULT_TIMEOUT_SECONDS),
+      fixedResultCount: MIDJOURNEY_FIXED_RESULT_COUNT,
+    };
+  }
   let ezaiBanana = null;
   if (transport === TRANSPORT_EZAI_BANANA_IMAGES) {
     const responseFormat = nonEmptyString(raw.response_format) || EZAI_BANANA_DEFAULT_RESPONSE_FORMAT;
@@ -1001,6 +1036,7 @@ async function resolveProvider(requestedProvider, requireKey = true) {
     dalle3PromptProfile,
     promptPolicy,
     openaiImages808,
+    midjourney808,
     ezaiBanana,
     config,
     raw,
@@ -1177,6 +1213,20 @@ function openaiImages808PendingTimeoutSeconds(args, provider) {
   );
 }
 
+function midjourney808RequestTimeoutSeconds(args, provider) {
+  return positiveInteger(
+    args.timeout,
+    provider.midjourney808?.timeoutSeconds ?? MIDJOURNEY_808_DEFAULT_TIMEOUT_SECONDS,
+  );
+}
+
+function midjourney808PendingTimeoutSeconds(args, provider) {
+  return Math.max(
+    midjourney808RequestTimeoutSeconds(args, provider),
+    positiveInteger(args._pending_total_timeout, 0),
+  );
+}
+
 function providerTransportScript(provider) {
   if (provider.transportProfile) {
     const script = TRANSPORT_PROFILE_SCRIPTS[provider.transportProfile];
@@ -1217,6 +1267,54 @@ function openaiImages808Arguments(args, promptFile, provider) {
   appendOption(argv, "--pending-total-timeout", openaiImages808PendingTimeoutSeconds(args, provider));
   appendFlag(argv, "--dry-run", args.dry_run);
   return argv;
+}
+
+function midjourney808Arguments(args, promptFile, provider) {
+  const outputDir = transportOutputRoot(args, provider);
+  const argv = ["--prompt-file", promptFile];
+
+  appendOption(argv, "--base-url", provider.baseUrl);
+  appendOption(argv, "--model", provider.model);
+  appendOption(argv, "--api-key-env", "FMAGE_ACTIVE_API_KEY");
+  appendOption(argv, "--aspect", args.aspect);
+  appendOption(argv, "--midjourney-parameters", args.midjourney_parameters);
+  appendOption(argv, "--output-format", args.output_format ?? "png");
+  appendOption(
+    argv,
+    "--response-format",
+    nonEmptyString(args.response_format) ||
+      provider.midjourney808?.responseFormat ||
+      MIDJOURNEY_808_DEFAULT_RESPONSE_FORMAT,
+  );
+  appendOption(argv, "--output-dir", outputDir);
+  appendOption(argv, "--timeout", midjourney808RequestTimeoutSeconds(args, provider));
+  appendOption(argv, "--pending-total-timeout", midjourney808PendingTimeoutSeconds(args, provider));
+  appendFlag(argv, "--dry-run", args.dry_run);
+  return argv;
+}
+
+function isMidjourney808Provider(provider) {
+  return provider?.transport === TRANSPORT_808_MIDJOURNEY;
+}
+
+function normalizeMidjourneyArguments(args = {}) {
+  const normalized = { ...args };
+  delete normalized.n;
+  delete normalized.size;
+  delete normalized.resolution;
+  delete normalized.resolution_user_requested;
+  delete normalized.quality;
+  delete normalized.quality_user_requested;
+  delete normalized.moderation;
+  delete normalized.background;
+  delete normalized.output_compression;
+  delete normalized._quality_policy_warning;
+  delete normalized._resolution_policy_warning;
+  delete normalized.images;
+  delete normalized.use_latest;
+  delete normalized.prompt_check_id;
+  delete normalized.provider_prompt;
+  return normalized;
 }
 
 function defaultQualityForProvider(provider) {
@@ -1358,6 +1456,7 @@ function sanitizeRequest(request) {
   return {
     model: request.model,
     prompt: requestPrompt(request),
+    midjourney_parameters: request.midjourney_parameters,
     size: request.size,
     aspect: request.aspect,
     aspect_ratio: request.aspect_ratio,
@@ -2281,6 +2380,20 @@ async function combineBatchResults({
 async function runImageCommand(command, args) {
   args = enforceDeliveryPolicy(args);
   const provider = await resolveProvider(args.provider, !args.dry_run);
+  if (isMidjourney808Provider(provider)) {
+    const result = await runSingleImageCommand(
+      "generate",
+      normalizeMidjourneyArguments(args),
+      provider,
+    );
+    if (command !== "generate") {
+      result.notes = [
+        ...normalizedStringArray(result.notes),
+        "midjourney_edit_redirected_to_generate",
+      ];
+    }
+    return result;
+  }
   if (isDalle3PromptPolicyProvider(provider)) {
     const routed = routeDalle3ImageArgs(args, provider);
     if (!routed.ready) return routed.result;
@@ -2305,6 +2418,19 @@ async function runImageCommand(command, args) {
 
 async function runBatchImageCommand(command, args) {
   const provider = await resolveProvider(args.provider, !args.dry_run);
+  if (isMidjourney808Provider(provider)) {
+    const jobs = batchJobs(args);
+    const redirectedArgs = normalizeMidjourneyArguments(
+      jobArgsFromBatchArgs(args, jobs[0]),
+    );
+    redirectedArgs.provider = provider.name;
+    const result = await runSingleImageCommand("generate", redirectedArgs, provider);
+    result.notes = [
+      ...normalizedStringArray(result.notes),
+      "midjourney_batch_redirected_to_generate",
+    ];
+    return result;
+  }
   const jobs = isDalle3PromptPolicyProvider(provider) ? dalle3BatchJobs(args) : batchJobs(args);
   if (!isDalle3PromptPolicyProvider(provider)) {
     if (jobs.some((job) => nonEmptyString(job.prompt_check_id))) {
@@ -2738,7 +2864,9 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     const transportArguments =
       provider.transportProfile === TRANSPORT_PROFILE_808
         ? openaiImages808Arguments(args, promptFile, provider)
-        : commonArguments(args, promptFile, provider);
+        : isMidjourney808Provider(provider)
+          ? midjourney808Arguments(args, promptFile, provider)
+          : commonArguments(args, promptFile, provider);
     const argv = [scriptPath, command, ...transportArguments];
     if (command === "edit") {
       const images = Array.isArray(args.images) ? [...args.images] : [];
@@ -2757,7 +2885,9 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     const helperTimeoutSeconds =
       provider.transportProfile === TRANSPORT_PROFILE_808
         ? openaiImages808PendingTimeoutSeconds(args, provider)
-        : args.timeout;
+        : isMidjourney808Provider(provider)
+          ? midjourney808PendingTimeoutSeconds(args, provider)
+          : args.timeout;
     const helperEnvironment = {
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",
@@ -2815,6 +2945,16 @@ function revisedPromptProperty(editing = false) {
   };
 }
 
+function configuredMidjourney808Context() {
+  const config = readConfigForPaths();
+  if (!config?.providers || typeof config.providers !== "object") return false;
+  const activeProviders = configuredActiveProviders(config);
+  return activeProviders.some((name) => {
+    const raw = config.providers[name];
+    return raw && typeof raw === "object" && nonEmptyString(raw.transport) === TRANSPORT_808_MIDJOURNEY;
+  });
+}
+
 function configuredDalle3PolicyContext(requestedProvider = null) {
   try {
     const config = readConfigForPaths();
@@ -2858,13 +2998,23 @@ function configuredDalle3PolicyContext(requestedProvider = null) {
 
 function configuredProviderRoutingGuidance() {
   const context = configuredDalle3PolicyContext();
-  if (!context) return "";
-  return (
-    " The selected provider may apply a prompt profile automatically. Keep the complete source prompt " +
-    "unchanged before provider adaptation. If this tool returns ready=false with " +
-    "provider_request_sent=false, follow its next_action through prepare_prompt_dalle3, then call this " +
-    "same image tool with prompt_check_id only."
-  );
+  const guidance = [];
+  if (context) {
+    guidance.push(
+      "The selected provider may apply a prompt profile automatically. Keep the complete source prompt " +
+        "unchanged before provider adaptation. If this tool returns ready=false with " +
+        "provider_request_sent=false, follow its next_action through prepare_prompt_dalle3, then call this " +
+        "same image tool with prompt_check_id only.",
+    );
+  }
+  if (configuredMidjourney808Context()) {
+    guidance.push(
+      "For an active 808-midjourney provider, select generate_image exactly once; preserve leading " +
+        "reference URLs and trailing Midjourney --directives verbatim. The provider returns four results " +
+        "and ignores generic size, resolution, quality, n, and JSON seed parameters.",
+    );
+  }
+  return guidance.length ? ` ${guidance.join(" ")}` : "";
 }
 
 function dalle3ProviderPromptProperty() {
@@ -2977,6 +3127,19 @@ function commonProperties(editing = false) {
       description: "Embed image bytes when auto; default is never.",
     },
   };
+  if (configuredMidjourney808Context()) {
+    properties.prompt = {
+      ...properties.prompt,
+      description:
+        "For 808-midjourney, rewrite only the natural-language middle of the prompt. Preserve every leading reference URL and every trailing --directive with its value verbatim.",
+    };
+    properties.midjourney_parameters = {
+      type: "string",
+      minLength: 1,
+      description:
+        "Optional raw trailing Midjourney instruction block. Preserve every --directive, URL, quote, and parameter exactly.",
+    };
+  }
   if (configuredDalle3PolicyContext()) {
     properties.prompt_check_id = {
       type: "string",
@@ -3503,6 +3666,19 @@ async function providerStatus(requestedProvider) {
       ? {
           response_format: provider.openaiImages808.responseFormat,
           timeout_seconds: provider.openaiImages808.timeoutSeconds,
+          remote_async: {
+            enabled: true,
+            submission_query: { async: "true" },
+            status_path: "/images/tasks/{task_id}",
+          },
+        }
+      : {}),
+    ...(provider.midjourney808
+      ? {
+          response_format: provider.midjourney808.responseFormat,
+          timeout_seconds: provider.midjourney808.timeoutSeconds,
+          fixed_result_count: provider.midjourney808.fixedResultCount,
+          supported_operation: TOOL_GENERATE,
           remote_async: {
             enabled: true,
             submission_query: { async: "true" },
