@@ -34,14 +34,12 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
   `transport_profile`, `prompt_profile`, `base_url`, `model`, `response_format`, `timeout`,
   `prompt_policy`, and provider names. `transport: "808-openai-images"`, `compatibility`, and
   `compatibility_profile` are unsupported; migrate them to the explicit profile fields before use.
-- The primary transports are `openai-images`, `ezai-banana-images`, and `zenmux-vertex`.
+- The primary transports are `openai-images`, `ezai-banana-images`,
+  `gemini-generate-content`, and `zenmux-vertex`. Use `gemini-generate-content` for providers that
+  expose Google's native `/v1beta/models/{model}:generateContent` protocol; it supports generation
+  and edits through text and inline image parts.
   `transport_profile: "808"` may be attached only to `openai-images` and supplies the relay-specific
   asynchronous submission and polling contract.
-- The `808-midjourney` transport is a separate 808 relay contract for provider `808-MJ` and model
-  `midjourney-v8.2`. It does not use `transport_profile`, accepts only `generate_image`, returns four
-  results, and keeps Midjourney `--directives` in the prompt suffix unchanged.
-- When migrating an existing local configuration, add `808-MJ` by copying the connection fields from
-  `808-image-2`, then set `transport: "808-midjourney"`, `model: "midjourney-v8.2"`,
   `response_format: "url"`, and `timeout: 600`. Preserve the existing `api_key` or `api_key_env`.
 - Every provider, including one named `DE3限制版-image-2`, must explicitly set `prompt_profile: "dall-e3"` to opt in.
   This prompt profile currently requires `openai-images` and is independent of the

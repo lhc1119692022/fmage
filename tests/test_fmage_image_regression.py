@@ -152,6 +152,11 @@ class FmageImageRegressionTests(unittest.TestCase):
             self.assertEqual(result["display_images"], [saved_path.as_posix()])
             self.assertIn("处理完成", response["result"]["content"][0]["text"])
 
+    def test_image_results_include_a_local_file_shortcut(self) -> None:
+        server = SERVER_PATH.read_text(encoding="utf-8")
+        self.assertIn("function imageFileLinks(paths)", server)
+        self.assertIn("[打开生成图片", server)
+
 
 if __name__ == "__main__":
     unittest.main()

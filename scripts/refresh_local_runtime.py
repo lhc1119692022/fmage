@@ -131,9 +131,12 @@ def verify_plugin(cli: Path, marketplace: str) -> None:
         / PLUGIN_NAME
         / expected_version
     )
-    required_file = cache_path / "scripts" / "midjourney_808_transport.py"
-    if not required_file.is_file():
-        raise RuntimeError(f"Installed plugin cache is missing {required_file}.")
+    required_files = [
+        cache_path / "scripts" / "gemini_generate_content_transport.py",
+    ]
+    for required_file in required_files:
+        if not required_file.is_file():
+            raise RuntimeError(f"Installed plugin cache is missing {required_file}.")
 
 
 def refresh_plugin(*, check_only: bool) -> None:

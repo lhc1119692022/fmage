@@ -108,7 +108,13 @@ class DirectOutputTests(unittest.TestCase):
                         "name": "generate_image",
                         "arguments": {
                             "prompt": ImageApiHandler.revised_prompt,
+                            # Simulate Pi/Pix deriving output_dir from its
+                            # project-less conversation cwd. Fmage must use
+                            # the configured final directory instead.
+                            "output_dir": str(root / "Pix" / "conversations"),
                             "output_format": "png",
+                            "size": "1024x1024",
+                            "resolution_user_requested": True,
                             "include_provider_metadata": True,
                         },
                     },
@@ -156,6 +162,11 @@ class DirectOutputTests(unittest.TestCase):
                 response_text = response["result"]["content"][0]["text"]
                 self.assertIn("Provider prompt status: echoed", response_text)
                 self.assertIn("provider-request-123", response_text)
+                self.assertTrue(result["warnings"])
+                self.assertTrue(
+                    any("smaller than requested 1024x1024" in warning for warning in result["warnings"])
+                )
+                self.assertIn("Warnings:", response_text)
 
                 manifest_path = Path(result["manifest"])
                 manifest_text = manifest_path.read_text(encoding="utf-8")

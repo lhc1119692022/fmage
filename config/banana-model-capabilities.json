@@ -33,6 +33,10 @@
       "nano-banana-2": "nano-banana-2",
       "nano-banana-pro": "nano-banana-pro"
     },
+    "gemini-generate-content": {
+      "gemini-3.1-flash-image": "nano-banana-2",
+      "gemini-3-pro-image": "nano-banana-pro"
+    },
     "zenmux-vertex": {
       "google/gemini-3.1-flash-image": "nano-banana-2"
     }

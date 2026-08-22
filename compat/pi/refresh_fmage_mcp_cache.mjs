@@ -54,9 +54,10 @@ async function main() {
   }
 
   const moduleRoot = join(agentDir, "npm", "node_modules");
+  const clientRoot = join(moduleRoot, "@modelcontextprotocol", "client", "dist");
   const [{ Client }, { StdioClientTransport }] = await Promise.all([
-    import(pathToFileURL(join(moduleRoot, "@modelcontextprotocol", "sdk", "dist", "esm", "client", "index.js"))),
-    import(pathToFileURL(join(moduleRoot, "@modelcontextprotocol", "sdk", "dist", "esm", "client", "stdio.js"))),
+    import(pathToFileURL(join(clientRoot, "index.mjs"))),
+    import(pathToFileURL(join(clientRoot, "stdio.mjs"))),
   ]);
 
   const client = new Client({ name: "fmage-pi-compat-sync", version: "1.0.0" });

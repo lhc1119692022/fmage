@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import json
 import os
 from pathlib import Path
@@ -13,10 +12,13 @@ from typing import Any
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = Path.home() / ".codex" / "fmage" / "providers.json"
-MIDJOURNEY_PROVIDER = "808-MJ"
-MIDJOURNEY_TRANSPORT = "808-midjourney"
-MIDJOURNEY_MODEL = "midjourney-v8.2"
 OPENAI_IMAGES_TRANSPORT = "openai-images"
+LEGACY_EZAI_NANO_TRANSPORT = "ezai-banana-images"
+GEMINI_GENERATE_CONTENT_TRANSPORT = "gemini-generate-content"
+EZAI_NANO_MODELS = {
+    "nano-banana-2": "gemini-3.1-flash-image",
+    "nano-banana-pro": "gemini-3-pro-image",
+}
 
 
 def resolve_config_path(explicit: str | None = None) -> Path:
@@ -33,23 +35,6 @@ def resolve_config_path(explicit: str | None = None) -> Path:
 
 def _is_mapping(value: Any) -> bool:
     return isinstance(value, dict)
-
-
-def _find_midjourney_source(providers: dict[str, Any]) -> dict[str, Any]:
-    direct = providers.get("808-image-2")
-    if _is_mapping(direct):
-        return direct
-    for provider in providers.values():
-        if not _is_mapping(provider):
-            continue
-        if (
-            provider.get("transport") == OPENAI_IMAGES_TRANSPORT
-            and provider.get("transport_profile") == "808"
-        ):
-            return provider
-    raise ValueError(
-        'Cannot create "808-MJ": no existing 808 OpenAI Images provider was found.'
-    )
 
 
 def _normalize_legacy_fields(provider: dict[str, Any], provider_name: str, changes: list[str]) -> None:
@@ -71,6 +56,15 @@ def _normalize_legacy_fields(provider: dict[str, Any], provider_name: str, chang
             f'{provider_name}: migrated {", ".join(legacy_fields)} to prompt_profile dall-e3'
         )
 
+    model = provider.get("model")
+    if provider.get("transport") == LEGACY_EZAI_NANO_TRANSPORT and model in EZAI_NANO_MODELS:
+        provider["transport"] = GEMINI_GENERATE_CONTENT_TRANSPORT
+        provider["model"] = EZAI_NANO_MODELS[model]
+        provider.pop("response_format", None)
+        changes.append(
+            f'{provider_name}: migrated EzAI Nano to Gemini generateContent model {provider["model"]}'
+        )
+
 
 def migrate_payload(payload: dict[str, Any]) -> list[str]:
     providers = payload.get("providers")
@@ -82,39 +76,14 @@ def migrate_payload(payload: dict[str, Any]) -> list[str]:
         if _is_mapping(provider):
             _normalize_legacy_fields(provider, str(provider_name), changes)
 
-    source = _find_midjourney_source(providers)
-    existing = providers.get(MIDJOURNEY_PROVIDER)
-    if not _is_mapping(existing):
-        migrated = copy.deepcopy(source)
-        migrated.pop("transport_profile", None)
-        migrated["transport"] = MIDJOURNEY_TRANSPORT
-        migrated["model"] = MIDJOURNEY_MODEL
-        migrated.setdefault("response_format", "url")
-        migrated.setdefault("timeout", 600)
-        providers[MIDJOURNEY_PROVIDER] = migrated
-        changes.append('added provider "808-MJ" from the configured 808 provider')
-    else:
-        if existing.get("transport") != MIDJOURNEY_TRANSPORT:
-            existing["transport"] = MIDJOURNEY_TRANSPORT
-            changes.append('808-MJ: set transport to 808-midjourney')
-        if "transport_profile" in existing:
-            existing.pop("transport_profile", None)
-            changes.append('808-MJ: removed incompatible transport_profile')
-        if existing.get("model") != MIDJOURNEY_MODEL:
-            existing["model"] = MIDJOURNEY_MODEL
-            changes.append('808-MJ: set model to midjourney-v8.2')
-        if "response_format" not in existing:
-            existing["response_format"] = "url"
-            changes.append('808-MJ: defaulted response_format to url')
-        if "timeout" not in existing:
-            existing["timeout"] = 600
-            changes.append('808-MJ: defaulted timeout to 600 seconds')
+    if providers.pop("808-MJ", None) is not None:
+        changes.append('removed provider "808-MJ"')
 
     active_providers = payload.get("active_providers")
     if isinstance(active_providers, list):
-        if MIDJOURNEY_PROVIDER not in active_providers:
-            active_providers.append(MIDJOURNEY_PROVIDER)
-            changes.append('added "808-MJ" to active_providers')
+        if "808-MJ" in active_providers:
+            payload["active_providers"] = [name for name in active_providers if name != "808-MJ"]
+            changes.append('removed "808-MJ" from active_providers')
     elif "active_providers" in payload:
         raise ValueError('Fmage configuration field "active_providers" must be an array.')
 

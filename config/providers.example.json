@@ -19,10 +19,9 @@
       "api_key": ""
     },
     "ezai-nano": {
-      "transport": "ezai-banana-images",
+      "transport": "gemini-generate-content",
       "base_url": "https://api-direct.ezaiclub.com",
-      "model": "nano-banana-pro",
-      "response_format": "url",
+      "model": "gemini-3-pro-image",
       "api_key": ""
     },
     "808-image-2": {
@@ -30,14 +29,6 @@
       "transport_profile": "808",
       "base_url": "https://va-api.40-160-63-37.sslip.io/v1",
       "model": "gpt-image-2",
-      "response_format": "url",
-      "timeout": 600,
-      "api_key": ""
-    },
-    "808-MJ": {
-      "transport": "808-midjourney",
-      "base_url": "https://va-api.40-160-63-37.sslip.io/v1",
-      "model": "midjourney-v8.2",
       "response_format": "url",
       "timeout": 600,
       "api_key": ""

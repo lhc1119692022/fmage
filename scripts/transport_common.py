@@ -122,6 +122,24 @@ def request_prompt(request: Any) -> str | None:
         ]
         if parts:
             return "\n\n".join(parts)
+
+    contents = request.get("contents")
+    if isinstance(contents, list):
+        parts = []
+        for content in contents:
+            if not isinstance(content, dict):
+                continue
+            content_parts = content.get("parts")
+            if not isinstance(content_parts, list):
+                continue
+            for item in content_parts:
+                if not isinstance(item, dict):
+                    continue
+                text = _non_empty_string(item.get("text"))
+                if text:
+                    parts.append(text)
+        if parts:
+            return "\n\n".join(parts)
     return None
 
 

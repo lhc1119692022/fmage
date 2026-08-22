@@ -15,9 +15,45 @@ from migrate_local_config import migrate_file, migrate_payload
 
 
 class MigrateLocalConfigTests(unittest.TestCase):
-    def test_adds_midjourney_provider_and_preserves_api_key(self) -> None:
+    def test_migrates_ezai_nano_to_native_gemini_protocol(self) -> None:
         payload = {
-            "active_providers": ["808-image-2"],
+            "active_providers": ["EzAI-nano", "808-MJ"],
+            "providers": {
+                "EzAI-nano": {
+                    "transport": "ezai-banana-images",
+                    "base_url": "https://api-direct.ezaiclub.com",
+                    "model": "nano-banana-pro",
+                    "response_format": "url",
+                    "api_key": "keep-this-secret",
+                },
+                "808-image-2": {
+                    "transport": "openai-images",
+                    "transport_profile": "808",
+                    "base_url": "https://example.invalid/v1",
+                    "model": "gpt-image-2",
+                    "api_key": "other-secret",
+                },
+                "808-MJ": {
+                    "transport": "808-midjourney",
+                    "base_url": "https://example.invalid/v1",
+                    "model": "midjourney-v8.2",
+                    "api_key": "other-secret",
+                },
+            },
+        }
+
+        changes = migrate_payload(payload)
+
+        provider = payload["providers"]["EzAI-nano"]
+        self.assertEqual(provider["transport"], "gemini-generate-content")
+        self.assertEqual(provider["model"], "gemini-3-pro-image")
+        self.assertEqual(provider["api_key"], "keep-this-secret")
+        self.assertNotIn("response_format", provider)
+        self.assertTrue(any("Gemini generateContent" in change for change in changes))
+
+    def test_removes_midjourney_provider_and_active_entry(self) -> None:
+        payload = {
+            "active_providers": ["808-image-2", "808-MJ"],
             "providers": {
                 "808-image-2": {
                     "transport": "openai-images",
@@ -27,20 +63,20 @@ class MigrateLocalConfigTests(unittest.TestCase):
                     "response_format": "url",
                     "timeout": 600,
                     "api_key": "keep-this-secret",
-                }
+                },
+                "808-MJ": {
+                    "transport": "808-midjourney",
+                    "model": "midjourney-v8.2",
+                    "api_key": "remove-this-secret",
+                },
             },
         }
 
         changes = migrate_payload(payload)
 
-        midjourney = payload["providers"]["808-MJ"]
-        self.assertEqual(midjourney["transport"], "808-midjourney")
-        self.assertEqual(midjourney["model"], "midjourney-v8.2")
-        self.assertEqual(midjourney["base_url"], "https://example.invalid/v1")
-        self.assertEqual(midjourney["api_key"], "keep-this-secret")
-        self.assertNotIn("transport_profile", midjourney)
-        self.assertIn("808-MJ", payload["active_providers"])
-        self.assertTrue(any('added provider "808-MJ"' in change for change in changes))
+        self.assertNotIn("808-MJ", payload["providers"])
+        self.assertNotIn("808-MJ", payload["active_providers"])
+        self.assertTrue(any('removed provider "808-MJ"' in change for change in changes))
 
     def test_migrates_legacy_transport_and_compatibility_fields(self) -> None:
         payload = {
@@ -63,40 +99,11 @@ class MigrateLocalConfigTests(unittest.TestCase):
         self.assertEqual(legacy["transport_profile"], "808")
         self.assertEqual(legacy["prompt_profile"], "dall-e3")
         self.assertNotIn("compatibility", legacy)
-        self.assertIn("808-MJ", payload["providers"])
-
-    def test_existing_midjourney_provider_keeps_custom_connection_fields(self) -> None:
-        payload = {
-            "active_providers": ["808-MJ"],
-            "providers": {
-                "808-image-2": {
-                    "transport": "openai-images",
-                    "transport_profile": "808",
-                    "base_url": "https://source.invalid/v1",
-                    "model": "gpt-image-2",
-                    "api_key": "source-secret",
-                },
-                "808-MJ": {
-                    "transport": "openai-images",
-                    "transport_profile": "808",
-                    "base_url": "https://custom.invalid/v1",
-                    "model": "old-model",
-                    "api_key": "custom-secret",
-                },
-            },
-        }
-
-        migrate_payload(payload)
-
-        midjourney = payload["providers"]["808-MJ"]
-        self.assertEqual(midjourney["transport"], "808-midjourney")
-        self.assertEqual(midjourney["base_url"], "https://custom.invalid/v1")
-        self.assertEqual(midjourney["api_key"], "custom-secret")
-        self.assertEqual(midjourney["model"], "midjourney-v8.2")
+        self.assertNotIn("808-MJ", payload["providers"])
 
     def test_check_mode_does_not_write(self) -> None:
         payload = {
-            "active_providers": ["808-image-2"],
+            "active_providers": ["808-image-2", "808-MJ"],
             "providers": {
                 "808-image-2": {
                     "transport": "openai-images",
@@ -104,7 +111,8 @@ class MigrateLocalConfigTests(unittest.TestCase):
                     "base_url": "https://example.invalid/v1",
                     "model": "gpt-image-2",
                     "api_key": "keep-this-secret",
-                }
+                },
+                "808-MJ": {"transport": "808-midjourney", "model": "midjourney-v8.2"},
             },
         }
         with tempfile.TemporaryDirectory() as temporary_directory:
