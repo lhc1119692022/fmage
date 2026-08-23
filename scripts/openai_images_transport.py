@@ -67,6 +67,10 @@ def is_image_2_model(model: str | None) -> bool:
     return (model or "").strip().lower().startswith("gpt-image-2")
 
 
+def is_gpt_image_model(model: str | None) -> bool:
+    return (model or "").strip().lower().startswith("gpt-image-")
+
+
 def default_resolution_for_model(model: str | None) -> str:
     return "4k" if is_image_2_model(model) else DEFAULT_RESOLUTION
 
@@ -570,6 +574,7 @@ def request_with_compat_retry(
     payload: dict[str, Any],
     retry_label: str,
     abort_retry: Callable[[ApiError], bool] | None = None,
+    protected_fields: set[str] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     retries: list[str] = []
     last_error: ApiError | None = None
@@ -582,7 +587,12 @@ def request_with_compat_retry(
         if error.status not in {400, 404, 415, 422}:
             raise
 
-    trimmed = {key: value for key, value in payload.items() if key not in OPTIONAL_FIELDS}
+    protected = protected_fields or set()
+    trimmed = {
+        key: value
+        for key, value in payload.items()
+        if key not in OPTIONAL_FIELDS or key in protected
+    }
     if trimmed != payload:
         retries.append(f"{retry_label}: dropped optional fields for provider compatibility")
         try:
@@ -779,9 +789,17 @@ def common_payload(args: argparse.Namespace, prompt: str, size: str) -> dict[str
     return payload
 
 
-def validate_common(args: argparse.Namespace) -> None:
+def protected_output_fields(args: argparse.Namespace) -> set[str]:
     if args.background == "transparent":
-        raise ValueError("gpt-image-2 does not support transparent backgrounds. Use auto or opaque.")
+        return {"background", "output_format"}
+    return set()
+
+
+def validate_common(args: argparse.Namespace) -> None:
+    if args.background == "transparent" and not is_gpt_image_model(args.model):
+        raise ValueError("Transparent backgrounds are supported only for GPT Image models.")
+    if args.background == "transparent" and args.output_format == "jpeg":
+        raise ValueError("--background transparent requires --output-format png or webp.")
     if args.output_compression is not None:
         if args.output_format not in {"jpeg", "webp"}:
             raise ValueError("--output-compression can only be used with --output-format jpeg or webp.")
@@ -826,6 +844,7 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
         lambda body: json_request(url, body, key, args.timeout),
         payload,
         "generate",
+        protected_fields=protected_output_fields(args),
     )
     timing["provider_response_completed_at"] = iso_now()
     try:
@@ -927,6 +946,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
             payload,
             "edit",
             abort_retry=should_retry_image_field,
+            protected_fields=protected_output_fields(args),
         )
     except ApiError as error:
         if not should_retry_image_field(error):
@@ -938,6 +958,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
             payload,
             "edit_image_field",
             abort_retry=should_retry_image_field,
+            protected_fields=protected_output_fields(args),
         )
         retry_notes.append(f"edit: retried multipart field name {fallback_field} instead of {image_field}")
     timing["provider_response_completed_at"] = iso_now()

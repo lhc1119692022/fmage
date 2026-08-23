@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -34,6 +35,9 @@ BASELINE_INSTRUCTIONS = (
     "Use Fmage image tools. Complete the unrestricted prompt with the active model before provider "
     "adaptation. For edits, identify reference-image roles and preserve required text, layout, and "
     "other locked details."
+)
+TRANSPARENT_TEST_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlD7xkAAAAASUVORK5CYII="
 )
 
 
@@ -330,6 +334,97 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         ):
             self.assertNotIn(ezai_only_guidance, current_initialize["result"]["instructions"])
 
+    def test_transparent_background_is_declared_and_forwarded_for_standard_tools(self) -> None:
+        config = self.ordinary_config()
+        tools = tool_map(call_server(config, "tools/list", {}))
+        for name in STANDARD_IMAGE_TOOLS:
+            properties = tools[name]["inputSchema"]["properties"]
+            self.assertIn("transparent", properties["background"]["enum"])
+            if name.endswith("_batch"):
+                job_properties = properties["jobs"]["items"]["properties"]
+                self.assertIn("transparent", job_properties["background"]["enum"])
+
+        single = self.call_image_tool(
+            config,
+            "generate_image",
+            prompt="transparent product cutout",
+            background="transparent",
+        )
+        self.assertNotIn("error", single)
+        single_result = single["result"]["structuredContent"]
+        self.assertEqual(single_result["request"]["background"], "transparent")
+        self.assertEqual(single_result["request"]["output_format"], "png")
+
+        batch = call_server(
+            config,
+            "tools/call",
+            {
+                "name": "generate_image_batch",
+                "arguments": {
+                    "dry_run": True,
+                    "verbose": True,
+                    "jobs": [
+                        {
+                            "prompt": "transparent batch product cutout",
+                            "background": "transparent",
+                        }
+                    ],
+                },
+            },
+        )
+        self.assertNotIn("error", batch)
+        batch_request = batch["result"]["structuredContent"]["request"]
+        self.assertEqual(batch_request["jobs"][0]["background"], "transparent")
+        self.assertEqual(batch_request["jobs"][0]["output_format"], "png")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            reference.write_bytes(TRANSPARENT_TEST_PNG)
+            edit = self.call_image_tool(
+                config,
+                "edit_image",
+                prompt="turn the reference into a transparent product cutout",
+                images=[str(reference)],
+                background="transparent",
+            )
+            self.assertNotIn("error", edit)
+            edit_request = edit["result"]["structuredContent"]["request"]
+            self.assertEqual(edit_request["background"], "transparent")
+            self.assertEqual(edit_request["output_format"], "png")
+
+            edit_batch = call_server(
+                config,
+                "tools/call",
+                {
+                    "name": "edit_image_batch",
+                    "arguments": {
+                        "dry_run": True,
+                        "verbose": True,
+                        "jobs": [
+                            {
+                                "prompt": "make the reference a transparent product cutout",
+                                "images": [str(reference)],
+                                "background": "transparent",
+                            }
+                        ],
+                    },
+                },
+            )
+            self.assertNotIn("error", edit_batch)
+            edit_batch_request = edit_batch["result"]["structuredContent"]["request"]
+            self.assertEqual(edit_batch_request["jobs"][0]["background"], "transparent")
+            self.assertEqual(edit_batch_request["jobs"][0]["output_format"], "png")
+
+        incompatible = self.call_image_tool(
+            config,
+            "generate_image",
+            prompt="transparent product cutout",
+            background="transparent",
+            output_format="jpeg",
+        )
+        self.assertIn("error", incompatible)
+        self.assertIn("requires --output-format png or webp", incompatible["error"]["message"])
+
     def test_inactive_ezai_is_invisible_and_ordinary_policy_is_ignored(self) -> None:
         config = self.ordinary_config()
         tools = tool_map(call_server(config, "tools/list", {}))
@@ -369,7 +464,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual(len(listed_tools), 9)
         self.assertLess(
             len(json.dumps(listed_tools, ensure_ascii=False, separators=(",", ":"))),
-            25000,
+            27000,
         )
         self.assertIn("prompt_check_id", all_property_names(tools["generate_image"]))
         self.assertIn("prompt_check_id", all_property_names(tools["generate_image_batch"]))
@@ -437,6 +532,9 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertIn("do not call `view_image`", skill)
         self.assertIn("never issue concurrent or duplicate status checks", skill)
         self.assertIn("Do not create subagents", skill)
+        self.assertIn('Map an explicit user request for a transparent background', skill)
+        self.assertIn('background: "transparent"', skill)
+        self.assertIn('do not silently coerce it', skill)
         self.assertIn("explicitly selects any tier, including `medium`", skill)
         self.assertIn("always pass that exact `quality`", skill)
         self.assertIn("set `resolution_user_requested: true`", skill)

@@ -1416,6 +1416,9 @@ function requestPrompt(request) {
 
 function sanitizeRequest(request) {
   if (!request || typeof request !== "object") return undefined;
+  const background = request.background;
+  const outputFormat =
+    request.output_format ?? (background === "transparent" ? "png" : request.output_format);
   return {
     model: request.model,
     prompt: requestPrompt(request),
@@ -1429,8 +1432,8 @@ function sanitizeRequest(request) {
     image_urls: request.image_urls,
     quality: request.quality,
     moderation: request.moderation,
-    background: request.background,
-    output_format: request.output_format,
+    background,
+    output_format: outputFormat,
     output_mime_type: request.output_mime_type,
     response_format: request.response_format,
     parameters: request.parameters,
@@ -2996,8 +2999,9 @@ function commonProperties(editing = false) {
     },
     background: {
       type: "string",
-      enum: ["auto", "opaque"],
-      description: "Optional background mode.",
+      enum: ["auto", "opaque", "transparent"],
+      description:
+        "Map explicit transparent/no-background/cutout requests to transparent. Transparent defaults to PNG; JPEG is rejected before the provider call.",
     },
     output_format: {
       type: "string",

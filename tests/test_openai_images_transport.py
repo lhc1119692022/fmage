@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+from io import BytesIO
 from pathlib import Path
 import argparse
 import json
@@ -32,6 +34,10 @@ def shape_args(model: str, command: str = "generate") -> argparse.Namespace:
         resolution=None,
         quality=None,
         model=model,
+        moderation="low",
+        background="auto",
+        output_format="png",
+        output_compression=None,
     )
 
 
@@ -77,6 +83,55 @@ class Image2DefaultResolutionTests(unittest.TestCase):
         )
         self.assertEqual(openai_size, "2880x2880")
         self.assertIn("resolution_inferred_from_high_quality", openai_notes)
+
+
+class TransparentBackgroundTests(unittest.TestCase):
+    def test_transparent_background_is_forwarded_for_gpt_image_models(self) -> None:
+        args = shape_args("gpt-image-2")
+        args.background = "transparent"
+        transport.validate_common(args)
+
+        payload = transport.common_payload(args, "transparent asset", "1024x1024")
+        self.assertEqual(payload["background"], "transparent")
+        self.assertEqual(payload["output_format"], "png")
+        self.assertEqual(transport.protected_output_fields(args), {"background", "output_format"})
+
+    def test_transparent_background_allows_webp_when_explicitly_requested(self) -> None:
+        args = shape_args("gpt-image-2")
+        args.background = "transparent"
+        args.output_format = "webp"
+        transport.validate_common(args)
+
+    def test_transparent_background_rejects_jpeg_before_provider_request(self) -> None:
+        args = shape_args("gpt-image-2")
+        args.background = "transparent"
+        args.output_format = "jpeg"
+        with self.assertRaisesRegex(ValueError, "requires --output-format png or webp"):
+            transport.validate_common(args)
+
+    def test_transparent_background_is_restricted_to_gpt_image_models(self) -> None:
+        args = shape_args("dall-e-3")
+        args.background = "transparent"
+        with self.assertRaisesRegex(ValueError, "only for GPT Image models"):
+            transport.validate_common(args)
+
+    def test_transparent_png_bytes_preserve_the_alpha_channel_when_saved(self) -> None:
+        image = Image.new("RGBA", (2, 2), (10, 20, 30, 0))
+        image.putpixel((0, 0), (10, 20, 30, 255))
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved = transport.save_response_images(
+                {"data": [{"b64_json": base64.b64encode(buffer.getvalue()).decode("ascii")}]},
+                Path(temp_dir),
+                "png",
+                10,
+            )
+            with Image.open(saved[0]) as loaded:
+                self.assertEqual(loaded.mode, "RGBA")
+                self.assertEqual(loaded.getchannel("A").getextrema(), (0, 255))
+
 
 class ImageFieldSelectionTests(unittest.TestCase):
     def test_auto_uses_singular_field_for_one_image(self) -> None:
@@ -127,6 +182,31 @@ class ImageFieldRetryTests(unittest.TestCase):
             )
 
         self.assertEqual(len(calls), 1)
+
+    def test_transparent_output_fields_are_not_dropped_on_compatibility_retry(self) -> None:
+        calls: list[dict[str, object]] = []
+        error = transport.ApiError(400, "Unsupported background")
+
+        def fail(payload: dict[str, object]) -> dict[str, object]:
+            calls.append(payload)
+            raise error
+
+        with self.assertRaises(transport.ApiError):
+            transport.request_with_compat_retry(
+                fail,
+                {
+                    "model": "gpt-image-2",
+                    "prompt": "transparent asset",
+                    "background": "transparent",
+                    "output_format": "png",
+                },
+                "generate",
+                protected_fields={"background", "output_format"},
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["background"], "transparent")
+        self.assertEqual(calls[0]["output_format"], "png")
 
 
 class PromptProvenanceTests(unittest.TestCase):

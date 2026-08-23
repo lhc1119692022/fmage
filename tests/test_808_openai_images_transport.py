@@ -140,6 +140,16 @@ class EndpointAndPayloadTests(unittest.TestCase):
         )
         self.assertEqual(image808_payload["response_format"], "url")
 
+    def test_transparent_background_is_forwarded_with_png_for_async_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            args = image808_args("generate", Path(temp_dir), "--background", "transparent")
+            transport.validate_808_arguments(args)
+            payload = transport.common_payload(args, "transparent prompt", "1024x1024")
+
+        self.assertEqual(payload["background"], "transparent")
+        self.assertEqual(payload["output_format"], "png")
+        self.assertEqual(openai.protected_output_fields(args), {"background", "output_format"})
+
     def test_submission_accepts_id_and_task_id(self) -> None:
         self.assertEqual(
             transport.initial_remote_task({"id": "id-1", "status": "queued"}),

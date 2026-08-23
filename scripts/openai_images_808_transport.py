@@ -368,6 +368,7 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
         lambda body: openai.json_request(url, body, key, args.timeout),
         payload,
         "generate",
+        protected_fields=openai.protected_output_fields(args),
     )
     timing["provider_submission_completed_at"] = openai.iso_now()
     response, remote_metadata, async_notes = resolve_async_response(
@@ -467,6 +468,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
         payload,
         "edit",
         abort_retry=openai.should_retry_image_field,
+        protected_fields=openai.protected_output_fields(args),
     )
     timing["provider_submission_completed_at"] = openai.iso_now()
     response, remote_metadata, async_notes = resolve_async_response(
