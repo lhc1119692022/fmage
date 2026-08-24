@@ -1,6 +1,6 @@
 {
   "name": "fmage",
-  "version": "0.1.0+codex.20260824050249",
+  "version": "0.1.0+codex.20260824050358",
   "description": "Generate and edit images through configurable OpenAI-compatible providers, and apply a fixed local image-regression pipeline with Codex-guided workflows.",
   "author": {
     "name": "Local developer"
