@@ -190,15 +190,27 @@ def refresh_pi(*, target: str | None, agents_file: str | None, check_only: bool)
     require_success(result, "synchronizing Pi skills")
 
 
+def refresh_scnet(*, target: str | None, check_only: bool) -> None:
+    command = [sys.executable, str(PLUGIN_ROOT / "scripts" / "sync_scnet_plugin.py")]
+    if target:
+        command.extend(["--target", target])
+    if check_only:
+        command.append("--check")
+    result = run_command(command)
+    require_success(result, "synchronizing SCNet plugin")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", help="Path to the local providers.json")
     parser.add_argument("--pi-target", help="Pi/Pix skills root")
     parser.add_argument("--pi-agents-file", help="Pi/Pix AGENTS.md path")
+    parser.add_argument("--scnet-target", help="SCNet plugin directory")
     parser.add_argument("--check", action="store_true", help="Only verify local runtime state")
     parser.add_argument("--skip-plugin", action="store_true")
     parser.add_argument("--skip-config", action="store_true")
     parser.add_argument("--skip-pi", action="store_true")
+    parser.add_argument("--skip-scnet", action="store_true")
     return parser.parse_args()
 
 
@@ -208,6 +220,8 @@ def main() -> int:
         refresh_config(config=args.config, check_only=args.check)
     if not args.skip_pi:
         refresh_pi(target=args.pi_target, agents_file=args.pi_agents_file, check_only=args.check)
+    if not args.skip_scnet:
+        refresh_scnet(target=args.scnet_target, check_only=args.check)
     if not args.skip_plugin:
         refresh_plugin(check_only=args.check)
     print("Fmage local runtime refresh complete.")
