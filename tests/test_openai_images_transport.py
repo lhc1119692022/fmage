@@ -8,6 +8,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from PIL import Image
 
@@ -85,6 +86,51 @@ class Image2DefaultResolutionTests(unittest.TestCase):
         self.assertIn("resolution_inferred_from_high_quality", openai_notes)
 
 
+class RequestHeaderTests(unittest.TestCase):
+    def test_json_request_sets_provider_compatible_headers(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"data": []}'
+
+        def fake_urlopen(request, timeout):
+            captured["headers"] = dict(request.headers)
+            return FakeResponse()
+
+        with mock.patch.object(transport.urllib.request, "urlopen", fake_urlopen):
+            transport.json_request(
+                "https://example.test/v1/images/generations",
+                {"model": "gpt-image-2", "prompt": "test"},
+                "test-key",
+                10,
+            )
+
+        headers = {str(key).lower(): str(value) for key, value in captured["headers"].items()}
+        self.assertEqual(headers["accept"], "application/json")
+        self.assertEqual(headers["user-agent"], transport.CLIENT_USER_AGENT)
+
+
+class EndpointTests(unittest.TestCase):
+    def test_image_endpoint_adds_v1_for_host_root(self) -> None:
+        self.assertEqual(
+            transport.endpoint("https://api-direct.ezaiclub.com", "/images/generations"),
+            "https://api-direct.ezaiclub.com/v1/images/generations",
+        )
+
+    def test_image_endpoint_does_not_duplicate_v1(self) -> None:
+        self.assertEqual(
+            transport.endpoint("https://api-direct.ezaiclub.com/v1", "/images/generations"),
+            "https://api-direct.ezaiclub.com/v1/images/generations",
+        )
+
+
 class TransparentBackgroundTests(unittest.TestCase):
     def test_transparent_background_is_forwarded_for_gpt_image_models(self) -> None:
         args = shape_args("gpt-image-2")
@@ -110,7 +156,7 @@ class TransparentBackgroundTests(unittest.TestCase):
             transport.validate_common(args)
 
     def test_transparent_background_is_restricted_to_gpt_image_models(self) -> None:
-        args = shape_args("dall-e-3")
+        args = shape_args("legacy-image-model")
         args.background = "transparent"
         with self.assertRaisesRegex(ValueError, "only for GPT Image models"):
             transport.validate_common(args)
