@@ -51,7 +51,7 @@ def render_main_skill(text: str) -> str:
     )
     text = replace_required(
         text,
-        "- Use Fmage MCP tools, not scripts. Choose `generate_image` or `edit_image` for one request and the matching batch tool for multiple independent requests. Provider `transport`, `transport_profile`, and `prompt_profile` routing is automatic after provider selection; do not look for provider-specific image-tool variants. Call the selected base tool directly without enumerating or rediscovering tools; discover only when an expected Fmage tool is unavailable.",
+        "- Use Fmage MCP tools, not scripts. Choose `generate_image` or `edit_image` for one request and the matching batch tool for multiple independent requests. Provider routing is automatic after provider selection; call the selected base tool directly without enumerating or rediscovering tools.",
         "- Use Fmage MCP tools through Pi MCP Adapter's `mcp` bridge, not scripts. The `tool` value must be the exact full name exposed by the gateway, for example `mcp({ server: \"Fmage\", tool: \"Fmage_generate_image\", args: { ... } })`. Current image tools are `Fmage_generate_image`, `Fmage_edit_image`, `Fmage_generate_image_batch`, and `Fmage_edit_image_batch`; provider routing remains automatic inside those base tools. Never use provider-specific image-tool variants, Codex-style `mcp__Fmage.*` names, or unprefixed logical names. Discover tools only when an expected full name is unavailable.",
         "Pi MCP bridge rule",
     )
@@ -73,12 +73,7 @@ def render_main_skill(text: str) -> str:
         "Pi/Pix completed-image response order and location links",
     )
     replacements = {
-        "same active Codex model": "same active Pix/Pi model",
-        "active Codex model": "active Pix/Pi model",
-        "named Codex model": "named model",
-        "Codex must not simulate failover": "Pi/Pix must not simulate failover",
         "Codex/Pi session reasoning level": "Pix/Pi session reasoning level",
-        "`prepare_prompt_dalle3`": "`Fmage_prepare_prompt_dalle3`",
         "directly to `edit_image`": "directly to `Fmage_edit_image`",
     }
     for old, new in replacements.items():
@@ -88,7 +83,6 @@ def render_main_skill(text: str) -> str:
 
 def render_diagnostics(text: str) -> str:
     replacements = {
-        "`prepare_prompt_dalle3`": "`Fmage_prepare_prompt_dalle3`",
         "`get_image_task_status`": "`Fmage_get_image_task_status`",
         "`trace_image_job_plan`": "`Fmage_trace_image_job_plan`",
         "`get_provider_status`": "`Fmage_get_provider_status`",

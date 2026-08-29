@@ -56,8 +56,7 @@ class CursorSkillSyncTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("native MCP tools in Cursor", main_skill)
-            self.assertIn("same active Cursor model", main_skill)
-            self.assertIn("Cursor must not simulate failover", main_skill)
+            self.assertIn("one concise understanding-and-expansion pass", main_skill)
             self.assertIn("Cursor session reasoning level", main_skill)
             self.assertIn("`generate_image`", main_skill)
             self.assertNotIn("Pi MCP Adapter", main_skill)

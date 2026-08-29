@@ -12,7 +12,6 @@ This directory defines the host-facing compatibility contract for Pi and Pix.
 | `mcp__Fmage.edit_image_batch` | `mcp({ server: "Fmage", tool: "Fmage_edit_image_batch", args: { ... } })` |
 | `get_image_task_status` | `Fmage_get_image_task_status` |
 | `get_provider_status` | `Fmage_get_provider_status` |
-| `prepare_prompt_dalle3` | `Fmage_prepare_prompt_dalle3` |
 | active Codex model | active Pix/Pi model |
 
 The underlying provider names, model IDs, output paths, manifests, and

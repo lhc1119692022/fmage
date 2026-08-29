@@ -41,10 +41,6 @@ def render_main_skill(text: str) -> str:
         "main skill description",
     )
     replacements = {
-        "same active Codex model": "same active Cursor model",
-        "active Codex model": "active Cursor model",
-        "named Codex model": "named model",
-        "Codex must not simulate failover": "Cursor must not simulate failover",
         "Codex/Pi session reasoning level": "Cursor session reasoning level",
         "Use `display_images` for inline Markdown": "Render saved local paths as inline Markdown images",
     }

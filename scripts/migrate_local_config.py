@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,12 @@ EZAI_NANO_MODELS = {
     "nano-banana-2": "gemini-3.1-flash-image",
     "nano-banana-pro": "gemini-3-pro-image",
 }
+REMOVED_PROMPT_FIELDS = (
+    "compatibility",
+    "compatibility_profile",
+    "prompt_profile",
+    "prompt_policy",
+)
 
 
 def resolve_config_path(explicit: str | None = None) -> Path:
@@ -37,23 +44,30 @@ def _is_mapping(value: Any) -> bool:
     return isinstance(value, dict)
 
 
+def _is_removed_dalle_provider(provider_name: str, provider: dict[str, Any]) -> bool:
+    identity = " ".join(
+        str(value)
+        for value in (provider_name, provider.get("model", ""))
+        if value is not None
+    ).lower()
+    return bool(
+        re.search(r"dall[\s_-]*(?:e|image)", identity)
+        or re.search(r"(?:^|[^a-z])de3(?:[^a-z]|$)", identity)
+    )
+
+
 def _normalize_legacy_fields(provider: dict[str, Any], provider_name: str, changes: list[str]) -> None:
     if provider.get("transport") == "808-openai-images":
         provider["transport"] = OPENAI_IMAGES_TRANSPORT
         provider["transport_profile"] = "808"
         changes.append(f'{provider_name}: migrated transport to openai-images + profile 808')
 
-    legacy_fields = [
-        field
-        for field in ("compatibility", "compatibility_profile")
-        if field in provider
-    ]
-    if legacy_fields:
-        provider["prompt_profile"] = "dall-e3"
-        for field in legacy_fields:
+    removed_fields = [field for field in REMOVED_PROMPT_FIELDS if field in provider]
+    if removed_fields:
+        for field in removed_fields:
             provider.pop(field, None)
         changes.append(
-            f'{provider_name}: migrated {", ".join(legacy_fields)} to prompt_profile dall-e3'
+            f'{provider_name}: removed obsolete prompt-preparation fields ({", ".join(removed_fields)})'
         )
 
     model = provider.get("model")
@@ -72,20 +86,43 @@ def migrate_payload(payload: dict[str, Any]) -> list[str]:
         raise ValueError('Fmage configuration must contain an object named "providers".')
 
     changes: list[str] = []
-    for provider_name, provider in providers.items():
+    removed_provider_names: set[str] = set()
+    for provider_name, provider in list(providers.items()):
+        name = str(provider_name)
+        if _is_mapping(provider) and _is_removed_dalle_provider(name, provider):
+            providers.pop(provider_name, None)
+            removed_provider_names.add(name)
+            changes.append(f'removed provider "{name}"')
+            continue
         if _is_mapping(provider):
-            _normalize_legacy_fields(provider, str(provider_name), changes)
+            _normalize_legacy_fields(provider, name, changes)
 
     if providers.pop("808-MJ", None) is not None:
         changes.append('removed provider "808-MJ"')
 
     active_providers = payload.get("active_providers")
     if isinstance(active_providers, list):
-        if "808-MJ" in active_providers:
-            payload["active_providers"] = [name for name in active_providers if name != "808-MJ"]
-            changes.append('removed "808-MJ" from active_providers')
+        removed_active = [
+            name
+            for name in active_providers
+            if name == "808-MJ" or name in removed_provider_names
+        ]
+        if removed_active:
+            payload["active_providers"] = [
+                name for name in active_providers if name not in set(removed_active)
+            ]
+            for name in removed_active:
+                if name == "808-MJ":
+                    changes.append('removed "808-MJ" from active_providers')
+                else:
+                    changes.append(f'removed "{name}" from active_providers')
     elif "active_providers" in payload:
         raise ValueError('Fmage configuration field "active_providers" must be an array.')
+
+    active_provider = payload.get("active_provider")
+    if isinstance(active_provider, str) and active_provider in removed_provider_names:
+        payload["active_provider"] = None
+        changes.append(f'removed "{active_provider}" from active_provider')
 
     return changes
 
