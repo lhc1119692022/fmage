@@ -850,8 +850,7 @@ function openaiImages808Arguments(args, promptFile, provider) {
 }
 
 function defaultQualityForProvider(provider) {
-  const model = nonEmptyString(provider?.model)?.toLowerCase() ?? "";
-  return model.startsWith("gpt-image-2") ? "high" : "medium";
+  return "high";
 }
 
 const RESOLUTION_TOKEN_PATTERN = String.raw`(?:\b\d+(?:\.\d+)?\s*k\b|\b\d{3,5}\s*[x×]\s*\d{3,5}\b)`;
@@ -914,14 +913,19 @@ function visualResolutionPolicyWarning(args = {}) {
 
 function enforceQualityPolicy(args = {}) {
   const requestedQuality = nonEmptyString(args.quality);
-  if (!requestedQuality || requestedQuality === "medium" || args.quality_user_requested === true) {
+  if (
+    !requestedQuality ||
+    requestedQuality === "high" ||
+    requestedQuality === "medium" ||
+    args.quality_user_requested === true
+  ) {
     return args;
   }
   return {
     ...args,
-    quality: "medium",
+    quality: "high",
     _quality_policy_warning:
-      `Ignored quality="${requestedQuality}" because quality_user_requested was not true; using medium.`,
+      `Ignored quality="${requestedQuality}" because quality_user_requested was not true; using high.`,
   };
 }
 
