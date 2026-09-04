@@ -123,21 +123,8 @@ function resolveConfigDirectory(value, fallback) {
   return directory ? resolve(configBaseDir(), directory) : fallback;
 }
 
-function isPixConversationStoragePath(value) {
-  const normalized = resolve(value).replaceAll("\\", "/").replace(/\/+$/, "");
-  return /(?:^|\/)Pix\/conversations(?:\/|$)/i.test(normalized);
-}
-
 function outputDirectoryOverride(args) {
-  const requested = nonEmptyString(args.output_dir);
-  if (!requested) return null;
-
-  // Pix runs project-less conversations from Documents/Pix/conversations.
-  // That host cwd is session storage, not a user-selected artifact directory.
-  // Ignore only this known host-derived path; explicit custom output folders
-  // continue to work as before.
-  const resolved = resolveConfigDirectory(requested, requested);
-  return isPixConversationStoragePath(resolved) ? null : requested;
+  return nonEmptyString(args.output_dir);
 }
 
 function configuredGlobalCacheRoot() {
@@ -388,7 +375,7 @@ function shouldExposeWarnings(result, { verbose = false } = {}) {
   if (verbose) return true;
 
   // A completed image can still have an actionable requested-vs-returned
-  // dimension mismatch. Keep that warning visible to hosts such as Pi/Pix.
+  // dimension mismatch. Keep that warning visible to the caller.
   if (warnings.some((warning) => /requested\s+\d+x\d+|dimensions|size/i.test(warning))) {
     return true;
   }
@@ -2378,7 +2365,7 @@ function commonProperties(editing = false) {
     },
     output_dir: {
       type: "string",
-      description: "Explicit user-selected save folder only; omit Pix conversation storage.",
+      description: "Explicit user-selected save folder.",
     },
     timeout: {
       type: "integer",
