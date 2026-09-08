@@ -1,3 +1,5 @@
+禁用 chatgpt app 原生生图 skill 并向个性化指令中添加下面的内容
+
 ## Image Generation And Editing
 
 - For raster image generation, image editing, color correction, color optimization, retouching, background changes, style transfer, or any other task that produces or edits an image, use the Fmage plugin.
