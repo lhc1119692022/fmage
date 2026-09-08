@@ -52,7 +52,7 @@ class ImageApiHandler(BaseHTTPRequestHandler):
 
 
 class DirectOutputTests(unittest.TestCase):
-    def test_mcp_writes_image_directly_to_final_output_and_removes_empty_cache_dirs(self) -> None:
+    def test_mcp_writes_image_to_explicit_output_and_removes_empty_cache_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             png_path = root / "fixture.png"
@@ -108,10 +108,7 @@ class DirectOutputTests(unittest.TestCase):
                         "name": "generate_image",
                         "arguments": {
                             "prompt": ImageApiHandler.revised_prompt,
-                            # Simulate Pi/Pix deriving output_dir from its
-                            # project-less conversation cwd. Fmage must use
-                            # the configured final directory instead.
-                            "output_dir": str(root / "Pix" / "conversations"),
+                            "output_dir": str(root / "requested-output"),
                             "output_format": "png",
                             "size": "1024x1024",
                             "resolution_user_requested": True,
@@ -130,7 +127,7 @@ class DirectOutputTests(unittest.TestCase):
                 result = response["result"]["structuredContent"]
 
                 output_path = Path(result["images"][0])
-                final_dir = root / "final"
+                final_dir = root / "requested-output"
                 cache_dir = root / "cache"
                 self.assertEqual(output_path.parent, final_dir)
                 self.assertTrue(output_path.is_file())

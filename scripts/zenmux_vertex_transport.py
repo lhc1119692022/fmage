@@ -619,7 +619,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--size", help="Explicit WIDTHxHEIGHT or auto.")
     parser.add_argument("--aspect", help="Aspect ratio such as 1:1, 16:9, 3:4, or 21:9.")
     parser.add_argument("--resolution", help="Resolution tier such as 512, 1k, 2k, or 4k.")
-    parser.add_argument("--quality", choices=["low", "medium", "high", "auto"], default="medium")
+    parser.add_argument("--quality", choices=["low", "medium", "high", "auto"], default="high")
     parser.add_argument("--output-format", choices=["png", "jpeg", "webp"], default="png")
     parser.add_argument("--output-compression", type=int)
     parser.add_argument("--base-url", default=configured_value(PROVIDER_BASE_URL, "PROVIDER_BASE_URL", DEFAULT_BASE_URL))

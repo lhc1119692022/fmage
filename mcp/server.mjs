@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { access, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -13,20 +12,15 @@ const TOOL_GENERATE = "generate_image";
 const TOOL_EDIT = "edit_image";
 const TOOL_GENERATE_BATCH = "generate_image_batch";
 const TOOL_EDIT_BATCH = "edit_image_batch";
-const PROMPT_PROFILE_DALLE3 = "dall-e3";
-const DALLE3_DEFAULT_PROMPT_POLICY = Object.freeze({
-  max_chars: 4000,
-  target_chars: 3900,
-  overflow_strategy: "language_aware_compact",
-  preferred_compact_language: "zh-CN",
-});
-const TOOL_PREPARE_PROMPT_DALLE3 = "prepare_prompt_dalle3";
 const TOOL_TRACE_PLAN = "trace_image_job_plan";
+const TOOL_PROBE = "probe_image_generation";
 const TOOL_STATUS = "get_provider_status";
 const TOOL_TASK_STATUS = "get_image_task_status";
 const TOOL_REGRESS = "regress_image";
 const BASE_INITIALIZE_INSTRUCTIONS =
-  "Use Fmage image tools. Complete the unrestricted prompt with the active model before provider adaptation. " +
+  "Use Fmage image tools. For each image request, make one concise understanding-and-expansion pass in the same turn, " +
+  "then call the matching base image tool immediately. Keep simple requests short; expand only missing visual constraints. " +
+  "Do not create a separate plan, prompt-optimizer pass, trace/status preflight, or repeated rewrite. " +
   "For edits, identify reference-image roles and preserve required text, layout, and other locked details.";
 const MAX_EMBEDDED_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_CHILD_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -37,7 +31,6 @@ const PENDING_TOTAL_TIMEOUT_SECONDS = 500;
 const PENDING_POLL_FAST_WINDOW_SECONDS = 120;
 const PENDING_POLL_FAST_INTERVAL_SECONDS = 20;
 const PENDING_POLL_SLOW_INTERVAL_SECONDS = 45;
-const DALLE3_PROMPT_STAGE_TTL_MS = 10 * 60 * 1000;
 const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG_PATH =
   process.env.FMAGE_CONFIG ||
@@ -86,8 +79,6 @@ const JsonRpcError = {
   INTERNAL_ERROR: -32603,
 };
 
-const dalle3PromptStages = new Map();
-
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
@@ -104,405 +95,11 @@ function nonEmptyString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function unicodeCharacterCount(value) {
-  return Array.from(value).length;
-}
-
-function promptLanguageProfile(value) {
-  const hanCharacters = value.match(/\p{Script=Han}/gu)?.length ?? 0;
-  const latinCharacters = value.match(/\p{Script=Latin}/gu)?.length ?? 0;
-  let dominantLanguage = "mixed_or_other";
-  if (latinCharacters > hanCharacters) dominantLanguage = "english_dominant";
-  if (hanCharacters > latinCharacters) dominantLanguage = "chinese_dominant";
-  return {
-    dominant_language: dominantLanguage,
-    han_characters: hanCharacters,
-    latin_characters: latinCharacters,
-  };
-}
-
-function newDalle3PromptStageId() {
-  return randomBytes(32).toString("hex");
-}
-
-function cleanupDalle3PromptStages(now = Date.now()) {
-  for (const [id, stage] of dalle3PromptStages.entries()) {
-    if (!stage || stage.expiresAtMs <= now) dalle3PromptStages.delete(id);
-  }
-}
-
-function getDalle3PromptStage(id, expectedKind = null) {
-  cleanupDalle3PromptStages();
-  const supplied = nonEmptyString(id);
-  const stage = supplied ? dalle3PromptStages.get(supplied) : null;
-  if (!stage || (expectedKind && stage.kind !== expectedKind)) {
-    throw new Error(
-      `The ${expectedKind === "pending" ? "prompt_session_id" : "prompt_check_id"} is invalid or expired. ` +
-        `No provider request has been sent; prepare the prompt again.`,
-    );
-  }
-  return { id: supplied, stage };
-}
-
-function stagePendingDalle3Prompt(
-  sourcePrompt,
-  sourcePromptChars,
-  sourceLanguage,
-  policy,
-  provider,
-  previous = null,
-) {
-  cleanupDalle3PromptStages();
-  const now = Date.now();
-  const id = previous?.id ?? newDalle3PromptStageId();
-  const sourcePreparedAt = previous?.stage?.sourcePreparedAt ?? isoNow();
-  const preparationCallCount = (previous?.stage?.preparationCallCount ?? 0) + 1;
-  dalle3PromptStages.set(id, {
-    kind: "pending",
-    sourcePrompt,
-    sourcePromptChars,
-    sourceLanguage,
-    promptPolicy: policy,
-    providerName: provider.name,
-    transport: provider.transport,
-    transportProfile: provider.transportProfile ?? null,
-    promptProfile: provider.promptProfile ?? PROMPT_PROFILE_DALLE3,
-    sourcePreparedAt,
-    preparationCallCount,
-    expiresAtMs: now + DALLE3_PROMPT_STAGE_TTL_MS,
-  });
-  return { id, sourcePreparedAt, preparationCallCount };
-}
-
-function stageReadyDalle3Prompt(promptResolution, provider, previous = null) {
-  cleanupDalle3PromptStages();
-  const now = Date.now();
-  const id = newDalle3PromptStageId();
-  const sourcePreparedAt = previous?.stage?.sourcePreparedAt ?? isoNow();
-  const preparationCallCount = (previous?.stage?.preparationCallCount ?? 0) + 1;
-  const transportReadyAt = isoNow();
-  const stagedResolution = {
-    ...promptResolution,
-    providerName: provider.name,
-    transport: provider.transport,
-    transportProfile: provider.transportProfile ?? null,
-    promptProfile: provider.promptProfile ?? PROMPT_PROFILE_DALLE3,
-    promptPreparation: {
-      mode: "staged_transport",
-      source_prepared_at: sourcePreparedAt,
-      transport_ready_at: transportReadyAt,
-      preparation_call_count: preparationCallCount,
-      ttl_seconds: DALLE3_PROMPT_STAGE_TTL_MS / 1000,
-    },
-  };
-  dalle3PromptStages.set(id, {
-    kind: "ready",
-    promptResolution: stagedResolution,
-    expiresAtMs: now + DALLE3_PROMPT_STAGE_TTL_MS,
-  });
-  if (previous?.id) dalle3PromptStages.delete(previous.id);
-  return { id, promptResolution: stagedResolution };
-}
-
-function takeReadyDalle3Prompt(promptCheckId) {
-  const { id, stage } = getDalle3PromptStage(promptCheckId, "ready");
-  dalle3PromptStages.delete(id);
-  return stage.promptResolution;
-}
-
-function normalizePromptPolicy(rawPolicy, context = "prompt_policy") {
-  if (rawPolicy === undefined || rawPolicy === null) return null;
-  if (typeof rawPolicy !== "object" || Array.isArray(rawPolicy)) {
-    throw new Error(`${context} must be an object.`);
-  }
-
-  const maxChars = positiveInteger(rawPolicy.max_chars, 0);
-  if (!maxChars) throw new Error(`${context}.max_chars must be a positive integer.`);
-
-  const targetChars = positiveInteger(rawPolicy.target_chars, maxChars);
-  if (targetChars > maxChars) {
-    throw new Error(`${context}.target_chars must not exceed max_chars.`);
-  }
-
-  const overflowStrategy = nonEmptyString(rawPolicy.overflow_strategy) || "semantic_compact";
-  if (!["language_aware_compact", "semantic_compact"].includes(overflowStrategy)) {
-    throw new Error(
-      `${context}.overflow_strategy must be "language_aware_compact" or "semantic_compact".`,
-    );
-  }
-
-  const preferredCompactLanguage = nonEmptyString(rawPolicy.preferred_compact_language);
-  return {
-    max_chars: maxChars,
-    target_chars: targetChars,
-    overflow_strategy: overflowStrategy,
-    preferred_compact_language: preferredCompactLanguage ?? undefined,
-    count: "unicode_code_points",
-  };
-}
-
 function normalizeTransportProfile(value) {
   const configured = nonEmptyString(value);
   if (!configured) return null;
   if (configured === TRANSPORT_PROFILE_808) return TRANSPORT_PROFILE_808;
   throw new Error(`Unsupported transport_profile "${value}". Use "${TRANSPORT_PROFILE_808}".`);
-}
-
-function normalizePromptProfile(value) {
-  const configured = nonEmptyString(value);
-  if (!configured) return null;
-  if (configured === PROMPT_PROFILE_DALLE3) return PROMPT_PROFILE_DALLE3;
-  throw new Error(`Unsupported prompt_profile "${value}". Use "${PROMPT_PROFILE_DALLE3}".`);
-}
-
-function isDalle3PromptPolicyProvider(provider) {
-  return Boolean(provider?.dalle3PromptProfile && provider?.promptPolicy);
-}
-
-function resolveProviderPrompt(args, provider) {
-  if (!isDalle3PromptPolicyProvider(provider)) {
-    throw new Error(
-      `Provider prompt preparation is only available when prompt_profile is "${PROMPT_PROFILE_DALLE3}".`,
-    );
-  }
-  if (args._prompt_resolution) return args._prompt_resolution;
-  if (args._dalle3_prompt_check_required && nonEmptyString(args.prompt_check_id)) {
-    return takeReadyDalle3Prompt(args.prompt_check_id);
-  }
-  const sourcePrompt = nonEmptyString(args.prompt);
-  if (!sourcePrompt) {
-    throw new Error(
-      `Provide either the complete unrestricted prompt for the initial prompt-profile call ` +
-        `or a valid prompt_check_id returned by ${TOOL_PREPARE_PROMPT_DALLE3}.`,
-    );
-  }
-
-  const sourcePromptChars = unicodeCharacterCount(sourcePrompt);
-  const policy = provider.promptPolicy;
-  if (!policy || sourcePromptChars <= policy.max_chars) {
-    return {
-      sourcePrompt,
-      submittedPrompt: sourcePrompt,
-      sourcePromptChars,
-      submittedPromptChars: sourcePromptChars,
-      promptPolicy: policy,
-      promptPolicyApplied: false,
-      promptPreparation: {
-        mode: "direct_source_within_limit",
-        preparation_call_count: 0,
-      },
-    };
-  }
-
-  const providerPrompt = nonEmptyString(args.provider_prompt);
-  if (!providerPrompt) {
-    const languageGuidance =
-      policy.overflow_strategy === "language_aware_compact"
-        ? " For English-dominant prompts, prefer a meaning-preserving Chinese translation; for Chinese-dominant prompts, compact the Chinese wording without summarizing."
-        : " Compact semantically without summarizing.";
-    throw new Error(
-      `The complete prompt has ${sourcePromptChars} Unicode characters, exceeding the selected provider limit of ` +
-        `${policy.max_chars}. Keep prompt unchanged and provide provider_prompt derived only after the complete prompt is formed; ` +
-        `aim for about ${policy.target_chars} characters.${languageGuidance}`,
-    );
-  }
-
-  const submittedPromptChars = unicodeCharacterCount(providerPrompt);
-  if (submittedPromptChars > policy.max_chars) {
-    throw new Error(
-      `provider_prompt has ${submittedPromptChars} Unicode characters, exceeding the selected provider limit of ` +
-        `${policy.max_chars}. Keep prompt unchanged and compact provider_prompt to about ${policy.target_chars} characters.`,
-    );
-  }
-
-  const sourceLanguage = promptLanguageProfile(sourcePrompt);
-  const providerPromptLanguage = promptLanguageProfile(providerPrompt);
-  if (
-    policy.overflow_strategy === "language_aware_compact" &&
-    sourceLanguage.dominant_language === "english_dominant" &&
-    providerPromptLanguage.dominant_language !== "chinese_dominant"
-  ) {
-    throw new Error(
-      "provider_prompt must be Chinese-dominant when the over-limit source prompt is " +
-        "English-dominant. Translate meaning-for-meaning without dropping detail, then compact only " +
-        `if needed to stay within ${policy.max_chars} characters.`,
-    );
-  }
-
-  return {
-    sourcePrompt,
-    submittedPrompt: providerPrompt,
-    sourcePromptChars,
-    submittedPromptChars,
-    promptPolicy: policy,
-    promptPolicyApplied: true,
-  };
-}
-
-function prepareDalle3ProviderPrompt(args, providerContext = null) {
-  const suppliedSessionId = nonEmptyString(args.prompt_session_id);
-  const pending = suppliedSessionId
-    ? getDalle3PromptStage(suppliedSessionId, "pending")
-    : null;
-  const context = providerContext ?? configuredDalle3PolicyContext(pending?.stage.providerName);
-  if (!context) {
-    throw new Error(`No active provider uses prompt_profile "${PROMPT_PROFILE_DALLE3}".`);
-  }
-  if (pending && nonEmptyString(args.prompt)) {
-    throw new Error(
-      "Do not resend prompt when continuing with prompt_session_id; send only provider_prompt.",
-    );
-  }
-  const sourcePrompt = pending?.stage.sourcePrompt ?? nonEmptyString(args.prompt);
-  if (!sourcePrompt) {
-    throw new Error(
-      "Provide prompt for a new preparation or prompt_session_id to continue an over-limit preparation.",
-    );
-  }
-
-  const policy = context.policy ?? context.promptPolicy;
-  if (
-    pending &&
-    JSON.stringify(pending.stage.promptPolicy) !== JSON.stringify(policy)
-  ) {
-    dalle3PromptStages.delete(pending.id);
-    throw new Error(
-      `The ${context.providerName} prompt policy changed while this preparation was pending. ` +
-        "No provider request has been sent; start again with the complete prompt.",
-    );
-  }
-  const sourcePromptChars = unicodeCharacterCount(sourcePrompt);
-  const sourceLanguage = promptLanguageProfile(sourcePrompt);
-  const providerPrompt = nonEmptyString(args.provider_prompt);
-  const providerPromptChars = providerPrompt ? unicodeCharacterCount(providerPrompt) : null;
-  const providerPromptLanguage = providerPrompt ? promptLanguageProfile(providerPrompt) : null;
-  let promptResolution = null;
-  let status;
-  let nextAction;
-
-  if (sourcePromptChars <= policy.max_chars) {
-    status = "ready_source_within_limit";
-    promptResolution = {
-      sourcePrompt,
-      submittedPrompt: sourcePrompt,
-      sourcePromptChars,
-      submittedPromptChars: sourcePromptChars,
-      promptPolicy: policy,
-      promptPolicyApplied: false,
-    };
-    nextAction =
-      `Call the matching ${context.providerName} image tool once with only this prompt_check_id plus ` +
-      "the image and output parameters; do not resend prompt or provider_prompt.";
-  } else if (!providerPrompt) {
-    if (
-      policy.overflow_strategy === "language_aware_compact" &&
-      sourceLanguage.dominant_language === "english_dominant"
-    ) {
-      status = "english_translation_required";
-      nextAction =
-        `Keep the staged source unchanged. First translate the complete English-dominant Stage 1 prompt ` +
-        `meaning-for-meaning into Chinese without compacting or dropping detail. Then call ` +
-        `${TOOL_PREPARE_PROMPT_DALLE3} with this prompt_session_id and that translation as ` +
-        `provider_prompt; do not resend prompt. Only compact the ` +
-        "Chinese translation if a later preparation result says it is still over the limit.";
-    } else {
-      status = "chinese_compaction_required";
-      nextAction =
-        `Keep the staged source unchanged. Compact the Chinese-dominant Stage 1 wording toward ` +
-        `${policy.target_chars} characters without truncating, summarizing, or changing meaning, then call ` +
-        `${TOOL_PREPARE_PROMPT_DALLE3} with this prompt_session_id and the result as provider_prompt; ` +
-        "do not resend prompt.";
-    }
-  } else if (providerPromptChars > policy.max_chars) {
-    const excessCharacters = providerPromptChars - policy.max_chars;
-    const translationStillRequired =
-      policy.overflow_strategy === "language_aware_compact" &&
-      sourceLanguage.dominant_language === "english_dominant" &&
-      providerPromptLanguage.dominant_language !== "chinese_dominant";
-    const translatedChineseStillTooLong =
-      policy.overflow_strategy === "language_aware_compact" &&
-      sourceLanguage.dominant_language === "english_dominant" &&
-      providerPromptLanguage.dominant_language === "chinese_dominant";
-    if (translationStillRequired) {
-      status = "english_translation_required";
-      nextAction =
-        `Keep the staged source unchanged. provider_prompt is still English-dominant and exceeds the limit by ` +
-        `${excessCharacters} characters. Translate it meaning-for-meaning into Chinese before any ` +
-        `compaction, preserving every detail, then call ${TOOL_PREPARE_PROMPT_DALLE3} again with this ` +
-        `prompt_session_id and the revised provider_prompt only. Only compact ` +
-        "the Chinese translation if it remains over the limit.";
-    } else if (translatedChineseStillTooLong) {
-      status = "translated_chinese_compaction_required";
-      nextAction =
-        `Keep prompt unchanged. The Chinese translation still exceeds the limit by ${excessCharacters} ` +
-        `characters; now compact that translated Chinese toward ${policy.target_chars} without truncating, ` +
-        `summarizing, or changing meaning, then call ${TOOL_PREPARE_PROMPT_DALLE3} again with this ` +
-        "prompt_session_id and the revised provider_prompt only.";
-    } else {
-      status = "chinese_compaction_required";
-      nextAction =
-        `Keep prompt unchanged. The Chinese-dominant provider_prompt exceeds the limit by ` +
-        `${excessCharacters} characters; compact it toward ${policy.target_chars} without truncating, ` +
-        `summarizing, or changing meaning, then call ${TOOL_PREPARE_PROMPT_DALLE3} again with this ` +
-        "prompt_session_id and the revised provider_prompt only.";
-    }
-  } else if (
-    policy.overflow_strategy === "language_aware_compact" &&
-    sourceLanguage.dominant_language === "english_dominant" &&
-    providerPromptLanguage.dominant_language !== "chinese_dominant"
-  ) {
-    status = "english_translation_required";
-    nextAction =
-      `Keep prompt unchanged. The English-dominant provider_prompt is within the character limit, ` +
-      "but the required first transformation is still a meaning-for-meaning Chinese translation, not " +
-      `English compaction. Translate it without dropping detail, then call ${TOOL_PREPARE_PROMPT_DALLE3} ` +
-      "again with this prompt_session_id and the revised provider_prompt only. Only compact the Chinese " +
-      "translation if it is over the limit.";
-  } else {
-    status = "ready_transport_valid";
-    promptResolution = {
-      sourcePrompt,
-      submittedPrompt: providerPrompt,
-      sourcePromptChars,
-      submittedPromptChars: providerPromptChars,
-      promptPolicy: policy,
-      promptPolicyApplied: true,
-    };
-    nextAction =
-      `Call the matching ${context.providerName} image tool once with only this prompt_check_id plus ` +
-      "the image and output parameters; do not resend prompt or provider_prompt.";
-  }
-
-  const staged = promptResolution
-    ? stageReadyDalle3Prompt(promptResolution, context, pending)
-    : stagePendingDalle3Prompt(
-        sourcePrompt,
-        sourcePromptChars,
-        sourceLanguage,
-        policy,
-        context,
-        pending,
-      );
-
-  return {
-    status,
-    ready: Boolean(promptResolution),
-    provider_request_sent: false,
-    provider: context.providerName,
-    source_prompt_chars: sourcePromptChars,
-    source_language: sourceLanguage,
-    provider_prompt_chars: providerPromptChars,
-    provider_prompt_language: providerPromptLanguage ?? undefined,
-    max_chars: policy.max_chars,
-    target_chars: policy.target_chars,
-    prompt_session_id: promptResolution ? undefined : staged.id,
-    prompt_check_id: promptResolution ? staged.id : undefined,
-    preparation_call_count: promptResolution
-      ? staged.promptResolution.promptPreparation.preparation_call_count
-      : staged.preparationCallCount,
-    stage_expires_in_seconds: DALLE3_PROMPT_STAGE_TTL_MS / 1000,
-    next_action: nextAction,
-  };
 }
 
 function stripJsonBom(value) {
@@ -526,21 +123,8 @@ function resolveConfigDirectory(value, fallback) {
   return directory ? resolve(configBaseDir(), directory) : fallback;
 }
 
-function isPixConversationStoragePath(value) {
-  const normalized = resolve(value).replaceAll("\\", "/").replace(/\/+$/, "");
-  return /(?:^|\/)Pix\/conversations(?:\/|$)/i.test(normalized);
-}
-
 function outputDirectoryOverride(args) {
-  const requested = nonEmptyString(args.output_dir);
-  if (!requested) return null;
-
-  // Pix runs project-less conversations from Documents/Pix/conversations.
-  // That host cwd is session storage, not a user-selected artifact directory.
-  // Ignore only this known host-derived path; explicit custom output folders
-  // continue to work as before.
-  const resolved = resolveConfigDirectory(requested, requested);
-  return isPixConversationStoragePath(resolved) ? null : requested;
+  return nonEmptyString(args.output_dir);
 }
 
 function configuredGlobalCacheRoot() {
@@ -791,7 +375,7 @@ function shouldExposeWarnings(result, { verbose = false } = {}) {
   if (verbose) return true;
 
   // A completed image can still have an actionable requested-vs-returned
-  // dimension mismatch. Keep that warning visible to hosts such as Pi/Pix.
+  // dimension mismatch. Keep that warning visible to the caller.
   if (warnings.some((warning) => /requested\s+\d+x\d+|dimensions|size/i.test(warning))) {
     return true;
   }
@@ -941,13 +525,15 @@ async function resolveProvider(requestedProvider, requireKey = true) {
     throw new Error(`Provider "${providerName}" does not exist in ${CONFIG_PATH}.`);
   }
 
-  for (const legacyField of ["compatibility", "compatibility_profile"]) {
-    if (Object.prototype.hasOwnProperty.call(raw, legacyField)) {
-      throw new Error(
-        `Provider "${providerName}" uses unsupported legacy field "${legacyField}". ` +
-          `Use prompt_profile: "${PROMPT_PROFILE_DALLE3}" instead.`,
-      );
-    }
+  const removedPromptFields = ["compatibility", "compatibility_profile", "prompt_profile", "prompt_policy"];
+  const configuredRemovedPromptFields = removedPromptFields.filter((field) =>
+    Object.prototype.hasOwnProperty.call(raw, field),
+  );
+  if (configuredRemovedPromptFields.length) {
+    throw new Error(
+      `Provider "${providerName}" uses removed prompt-preparation fields: ` +
+        `${configuredRemovedPromptFields.join(", ")}. Remove them from ${CONFIG_PATH}.`,
+    );
   }
   const configuredTransport = nonEmptyString(raw.transport);
   const transport = configuredTransport;
@@ -956,15 +542,6 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   const model = nonEmptyString(raw.model);
   const apiKeyEnv = nonEmptyString(raw.api_key_env);
   const apiKey = nonEmptyString(raw.api_key) || (apiKeyEnv ? nonEmptyString(process.env[apiKeyEnv]) : null);
-  const promptProfile = normalizePromptProfile(raw.prompt_profile);
-  const dalle3PromptProfile = promptProfile === PROMPT_PROFILE_DALLE3;
-  const promptPolicy = dalle3PromptProfile
-    ? normalizePromptPolicy(
-        raw.prompt_policy == null ? DALLE3_DEFAULT_PROMPT_POLICY : raw.prompt_policy,
-        `providers.${providerName}.prompt_policy`,
-      )
-    : null;
-
   if (!transport || !TRANSPORTS[transport]) {
     throw new Error(
       `Provider "${providerName}" has unsupported transport "${configuredTransport ?? ""}". ` +
@@ -974,12 +551,6 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   if (transportProfile && transport !== TRANSPORT_OPENAI_IMAGES) {
     throw new Error(
       `Provider "${providerName}" transport_profile "${transportProfile}" requires transport ` +
-        `"${TRANSPORT_OPENAI_IMAGES}".`,
-    );
-  }
-  if (promptProfile === PROMPT_PROFILE_DALLE3 && transport !== TRANSPORT_OPENAI_IMAGES) {
-    throw new Error(
-      `Provider "${providerName}" prompt_profile "${PROMPT_PROFILE_DALLE3}" currently requires transport ` +
         `"${TRANSPORT_OPENAI_IMAGES}".`,
     );
   }
@@ -1038,14 +609,11 @@ async function resolveProvider(requestedProvider, requireKey = true) {
     name: providerName,
     transport,
     transportProfile,
-    promptProfile,
     baseUrl,
     model,
     apiKey,
     apiKeyConfigured: Boolean(apiKey),
     apiKeySource: nonEmptyString(raw.api_key) ? "external_config" : apiKey ? `environment:${apiKeyEnv}` : "missing",
-    dalle3PromptProfile,
-    promptPolicy,
     openaiImages808,
     ezaiBanana,
     config,
@@ -1269,26 +837,109 @@ function openaiImages808Arguments(args, promptFile, provider) {
 }
 
 function defaultQualityForProvider(provider) {
-  const model = nonEmptyString(provider?.model)?.toLowerCase() ?? "";
-  return model.startsWith("gpt-image-2") ? "high" : "medium";
+  return "high";
+}
+
+const RESOLUTION_TOKEN_PATTERN = String.raw`(?:\b\d+(?:\.\d+)?\s*k\b|\b\d{3,5}\s*[x×]\s*\d{3,5}\b)`;
+const RESOLUTION_VISUAL_QUALIFIER_PATTERN =
+  String.raw`(?:超高(?:清晰度|分辨率)|超高清|高分辨率|画质|画面品质|图像质量|视觉效果|细节|质感|级画质|ultra[-\s]?high(?:[-\s]?definition)?(?:[-\s]?resolution)?|high[-\s]?resolution|high[-\s]?quality|visual quality)`;
+
+function promptUsesResolutionAsVisualQuality(prompt) {
+  const text = nonEmptyString(prompt);
+  if (!text) return false;
+  const tokenBeforeQualifier = new RegExp(
+    `${RESOLUTION_TOKEN_PATTERN}\\s*${RESOLUTION_VISUAL_QUALIFIER_PATTERN}`,
+    "iu",
+  );
+  const qualifierBeforeToken = new RegExp(
+    `${RESOLUTION_VISUAL_QUALIFIER_PATTERN}\\s*${RESOLUTION_TOKEN_PATTERN}`,
+    "iu",
+  );
+  return tokenBeforeQualifier.test(text) || qualifierBeforeToken.test(text);
+}
+
+function promptHasExplicitResolutionDeliveryRequest(prompt) {
+  const text = nonEmptyString(prompt);
+  if (!text) return false;
+  const deliveryPrefix = String.raw`(?:输出(?:尺寸)?|生成(?:尺寸)?|导出(?:尺寸)?|交付(?:尺寸)?|保存(?:尺寸)?|画布(?:尺寸)?|尺寸|像素|长边|短边)`;
+  const explicitResolutionPrefix = String.raw`分辨率\s*(?:为|设为|设置为|是|到|:|=)`;
+  const deliverySuffix = String.raw`(?:输出|导出|交付|output|export|deliver|render)`;
+  const englishDeliveryPrefix = String.raw`(?:output(?:\s+size)?|export(?:\s+size)?|delivery(?:\s+size)?|render(?:\s+size)?|canvas(?:\s+size)?|size|pixels?)`;
+  const englishResolutionPrefix = String.raw`resolution\s*(?:is|set\s+to|at|:|=)`;
+  return new RegExp(
+    `(?:${deliveryPrefix}\s*(?:为|设为|设置为|是|到|:|=)?|${explicitResolutionPrefix})\s*${RESOLUTION_TOKEN_PATTERN}`,
+    "iu",
+  ).test(text) || new RegExp(
+    `(?:${englishDeliveryPrefix}\s*(?:is|to|at|set\s+to|:|=)?|${englishResolutionPrefix})\s*${RESOLUTION_TOKEN_PATTERN}`,
+    "iu",
+  ).test(text) || new RegExp(
+    `${RESOLUTION_TOKEN_PATTERN}\s*${deliverySuffix}`,
+    "iu",
+  ).test(text);
+}
+
+function visualResolutionPolicyWarning(args = {}) {
+  if (args.resolution_user_requested !== true) return null;
+  const resolution = nonEmptyString(args.resolution);
+  const size = nonEmptyString(args.size);
+  if (!resolution && !size) return null;
+  const prompt = nonEmptyString(args.prompt);
+  if (!prompt || !promptUsesResolutionAsVisualQuality(prompt)) return null;
+  if (promptHasExplicitResolutionDeliveryRequest(prompt)) return null;
+
+  const ignored = [
+    resolution ? `resolution="${resolution}"` : null,
+    size ? `size="${size}"` : null,
+  ].filter(Boolean).join(" and ");
+  return (
+    `Ignored ${ignored} because the prompt uses resolution wording as visual-quality language ` +
+    "rather than an explicit output-size request. Keep phrases such as `8K超高分辨率` in the prompt; " +
+    "pass an explicit delivery resolution or exact WIDTHxHEIGHT size when a parameter override is intended."
+  );
 }
 
 function enforceQualityPolicy(args = {}) {
   const requestedQuality = nonEmptyString(args.quality);
-  if (!requestedQuality || requestedQuality === "medium" || args.quality_user_requested === true) {
+  if (
+    !requestedQuality ||
+    requestedQuality === "high" ||
+    requestedQuality === "medium" ||
+    args.quality_user_requested === true
+  ) {
     return args;
   }
   return {
     ...args,
-    quality: "medium",
+    quality: "high",
     _quality_policy_warning:
-      `Ignored quality="${requestedQuality}" because quality_user_requested was not true; using medium.`,
+      `Ignored quality="${requestedQuality}" because quality_user_requested was not true; using high.`,
+  };
+}
+
+function enforceOutputFormatPolicy(args = {}) {
+  const requestedFormat = nonEmptyString(args.output_format)?.toLowerCase();
+  if (!requestedFormat || requestedFormat === "png" || args.output_format_user_requested === true) {
+    return args;
+  }
+  return {
+    ...args,
+    output_format: "png",
+    _output_format_policy_warning:
+      `Ignored output_format="${requestedFormat}" because output_format_user_requested was not true; using png.`,
   };
 }
 
 function enforceResolutionPolicy(args = {}) {
   const requestedResolution = nonEmptyString(args.resolution);
   const requestedSize = nonEmptyString(args.size);
+  const visualWarning = visualResolutionPolicyWarning(args);
+  if (visualWarning) {
+    const result = { ...args };
+    delete result.resolution;
+    delete result.size;
+    result._resolution_policy_warning = visualWarning;
+    return result;
+  }
   if ((!requestedResolution && !requestedSize) || args.resolution_user_requested === true) {
     return args;
   }
@@ -1305,7 +956,7 @@ function enforceResolutionPolicy(args = {}) {
 }
 
 function enforceDeliveryPolicy(args = {}) {
-  return enforceResolutionPolicy(enforceQualityPolicy(args));
+  return enforceResolutionPolicy(enforceOutputFormatPolicy(enforceQualityPolicy(args)));
 }
 
 function bananaModelCapability(provider) {
@@ -1541,15 +1192,7 @@ function compactImageResultForResponse(result, args = {}) {
   return compact;
 }
 
-function compactDalle3ImageResultForResponse(result, args = {}) {
-  const compact = compactImageResultForResponse(result, args);
-  if (args.verbose || result?.dry_run) return compact;
-  delete compact.revised_prompt_source;
-  delete compact.revised_prompts_source;
-  return compact;
-}
-
-async function enrichResult(result, revisedPrompt, provider, promptResolution = null) {
+async function enrichResult(result, revisedPrompt, provider) {
   const displayImages = Array.isArray(result?.images)
     ? result.images.map(normalizeDisplayPath).filter(Boolean)
     : [];
@@ -1564,26 +1207,13 @@ async function enrichResult(result, revisedPrompt, provider, promptResolution = 
     provider: provider.name,
     provider_transport: provider.transport,
     ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
-    ...(provider.promptProfile ? { prompt_profile: provider.promptProfile } : {}),
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
     revised_prompt_submitted: revisedPrompt,
     prompt_provenance: normalizePromptProvenance({}, {
-      source: promptResolution?.sourcePrompt,
       submitted: revisedPrompt,
     }),
   };
-
-  if (promptResolution) {
-    Object.assign(enriched, {
-      revised_prompt_source: promptResolution.sourcePrompt,
-      source_prompt_chars: promptResolution.sourcePromptChars,
-      submitted_prompt_chars: promptResolution.submittedPromptChars,
-      prompt_policy: promptResolution.promptPolicy,
-      prompt_policy_applied: promptResolution.promptPolicyApplied,
-      prompt_preparation: promptResolution.promptPreparation,
-    });
-  }
 
   const manifestPath = nonEmptyString(result?.manifest);
   if (manifestPath) {
@@ -1595,7 +1225,6 @@ async function enrichResult(result, revisedPrompt, provider, promptResolution = 
         manifest.response_metadata?.data_revised_prompts?.[0] ??
         null;
       enriched.prompt_provenance = normalizePromptProvenance(manifest.prompt_provenance, {
-        source: promptResolution?.sourcePrompt,
         submitted: revisedPrompt,
         providerRevised: legacyProviderRevisedPrompt,
       });
@@ -1795,15 +1424,6 @@ async function writeImageManifestSidecars(cacheDir, result) {
     delete manifest.revised_prompt_submitted;
     delete manifest.provider_revised_prompt;
     delete manifest.revised_prompt_source;
-    if (result.prompt_policy) {
-      Object.assign(manifest, {
-        source_prompt_chars: result.source_prompt_chars,
-        submitted_prompt_chars: result.submitted_prompt_chars,
-        prompt_policy: result.prompt_policy,
-        prompt_policy_applied: result.prompt_policy_applied,
-        prompt_preparation: result.prompt_preparation,
-      });
-    }
     await writeFile(sidecarPath, JSON.stringify(manifest, null, 2), "utf8");
     sidecars.push(sidecarPath);
   }
@@ -1944,23 +1564,6 @@ function batchJobs(args) {
       throw new Error(`jobs[${index}].prompt must contain one complete Codex-revised image prompt.`);
     }
     return { ...job, prompt };
-  });
-}
-
-function dalle3BatchJobs(args) {
-  const jobs = Array.isArray(args.jobs) ? args.jobs : [];
-  if (!jobs.length) throw new Error("jobs must contain at least one image job.");
-  if (jobs.length > 10) throw new Error("jobs may contain at most 10 image jobs.");
-  return jobs.map((job, index) => {
-    if (!job || typeof job !== "object" || Array.isArray(job)) {
-      throw new Error(`jobs[${index}] must be an object.`);
-    }
-    if (!nonEmptyString(job.prompt) && !nonEmptyString(job.prompt_check_id)) {
-      throw new Error(
-        `jobs[${index}] must contain an initial prompt or a staged prompt_check_id.`,
-      );
-    }
-    return { ...job };
   });
 }
 
@@ -2125,10 +1728,6 @@ async function writeBatchManifest(root, batchRoot, result) {
     requested_size: result.requested_size,
     prompt_provenance: result.prompt_provenance,
     prompt_provenances: result.prompt_provenances,
-    source_prompt_char_counts: result.source_prompt_char_counts,
-    submitted_prompt_char_counts: result.submitted_prompt_char_counts,
-    prompt_policies_applied: result.prompt_policies_applied,
-    prompt_preparations: result.prompt_preparations,
     provider_response_metadata: result.provider_response_metadata,
     provider_response_metadata_items: result.provider_response_metadata_items,
     images: result.images,
@@ -2157,9 +1756,6 @@ async function combineBatchResults({
   batchRoot,
   settledResults,
 }) {
-  const promptResolutions = args._dalle3_prompt_policy && Array.isArray(jobs)
-    ? jobs.map((job) => job._prompt_resolution ?? resolveProviderPrompt(job, provider))
-    : null;
   const fulfilled = settledResults
     .filter((item) => item?.status === "fulfilled")
     .map((item) => item.value);
@@ -2197,7 +1793,7 @@ async function combineBatchResults({
         jobs: jobs.map((job, index) =>
           sanitizeRequest({
             model: provider.model,
-            prompt: promptResolutions?.[index]?.submittedPrompt ?? job.prompt,
+            prompt: job.prompt,
             size: job.size,
             aspect: job.aspect,
             resolution: job.resolution,
@@ -2245,12 +1841,9 @@ async function combineBatchResults({
     })
     .filter(Boolean);
   const promptProvenances = settledResults.map((item, index) => {
-    const resolution = promptResolutions?.[index];
-    const jobPrompt = resolution?.submittedPrompt ?? jobs?.[index]?.prompt ?? prompt;
-    const sourcePrompt = resolution?.sourcePrompt ?? jobs?.[index]?.prompt ?? prompt;
+    const jobPrompt = jobs?.[index]?.prompt ?? prompt;
     const childResult = item?.status === "fulfilled" ? item.value : null;
     return normalizePromptProvenance(childResult?.prompt_provenance, {
-      source: sourcePrompt,
       submitted: jobPrompt,
       providerRevised: childResult?.provider_revised_prompt,
       providerRevisedPrompts: childResult?.provider_revised_prompts,
@@ -2284,7 +1877,6 @@ async function combineBatchResults({
     provider: provider.name,
     provider_transport: provider.transport,
     ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
-    ...(provider.promptProfile ? { prompt_profile: provider.promptProfile } : {}),
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
     revised_prompt_submitted: prompt,
@@ -2319,19 +1911,6 @@ async function combineBatchResults({
         : undefined,
   };
 
-  if (promptResolutions) {
-    Object.assign(result, {
-      revised_prompt_source: prompt,
-      revised_prompt_submitted: prompt ? promptResolutions[0]?.submittedPrompt : undefined,
-      revised_prompts_source: promptResolutions.map((item) => item.sourcePrompt),
-      revised_prompts_submitted: promptResolutions.map((item) => item.submittedPrompt),
-      source_prompt_char_counts: promptResolutions.map((item) => item.sourcePromptChars),
-      submitted_prompt_char_counts: promptResolutions.map((item) => item.submittedPromptChars),
-      prompt_policies_applied: promptResolutions.map((item) => item.promptPolicyApplied),
-      prompt_preparations: promptResolutions.map((item) => item.promptPreparation),
-    });
-  }
-
   if (!args.dry_run) {
     result.manifest = childManifests[0];
     result.display_manifest = normalizeDisplayPath(result.manifest);
@@ -2346,21 +1925,6 @@ async function combineBatchResults({
 async function runImageCommand(command, args) {
   args = enforceDeliveryPolicy(args);
   const provider = await resolveProvider(args.provider, !args.dry_run);
-  if (isDalle3PromptPolicyProvider(provider)) {
-    const routed = routeDalle3ImageArgs(args, provider);
-    if (!routed.ready) return routed.result;
-    args = {
-      ...routed.args,
-      provider: provider.name,
-      _dalle3_prompt_policy: true,
-      _dalle3_prompt_check_required: true,
-    };
-  } else if (nonEmptyString(args.prompt_check_id)) {
-    throw new Error(
-      `prompt_check_id can be used only with a provider configured with prompt_profile ` +
-        `"${PROMPT_PROFILE_DALLE3}".`,
-    );
-  }
   const count = requestedImageCount(args);
   if (count > 1) {
     return submitBatchImageTask(command, args, count);
@@ -2370,155 +1934,19 @@ async function runImageCommand(command, args) {
 
 async function runBatchImageCommand(command, args) {
   const provider = await resolveProvider(args.provider, !args.dry_run);
-  const jobs = isDalle3PromptPolicyProvider(provider) ? dalle3BatchJobs(args) : batchJobs(args);
-  if (!isDalle3PromptPolicyProvider(provider)) {
-    if (jobs.some((job) => nonEmptyString(job.prompt_check_id))) {
-      throw new Error(
-        `prompt_check_id can be used only with a provider configured with prompt_profile ` +
-          `"${PROMPT_PROFILE_DALLE3}".`,
-      );
-    }
-    return submitBatchJobs(command, { ...args, provider: provider.name }, jobs);
-  }
-
-  const routedJobs = jobs.map((job) => routeDalle3ImageArgs(job, provider, { consume: false }));
-  if (routedJobs.some((item) => !item.ready)) {
-    return dalle3BatchPreparationResult(routedJobs, provider.name);
-  }
-  for (const item of routedJobs) {
-    if (item.stagedId) dalle3PromptStages.delete(item.stagedId);
-  }
-  return submitBatchJobs(
-    command,
-    {
-      ...args,
-      provider: provider.name,
-      _dalle3_prompt_policy: true,
-      _dalle3_prompt_check_required: true,
-    },
-    routedJobs.map((item) => item.args),
-  );
-}
-
-function routeDalle3ImageArgs(args, provider, { consume = true } = {}) {
-  if (!isDalle3PromptPolicyProvider(provider)) {
-    throw new Error(`Provider "${provider?.name ?? ""}" does not use prompt_profile "${PROMPT_PROFILE_DALLE3}".`);
-  }
-  if (nonEmptyString(args.provider_prompt)) {
-    throw new Error(
-      `Provider "${provider.name}" uses prompt_profile "${PROMPT_PROFILE_DALLE3}"; do not provide ` +
-        `provider_prompt to the base image tool. Submit the complete source prompt first, then ` +
-        `continue through ${TOOL_PREPARE_PROMPT_DALLE3} only if preparation is required.`,
-    );
-  }
-
-  const promptCheckId = nonEmptyString(args.prompt_check_id);
-  if (promptCheckId) {
-    if (nonEmptyString(args.prompt) || nonEmptyString(args.provider_prompt)) {
-      throw new Error(
-        "Use prompt_check_id by itself; do not resend prompt or provider_prompt.",
-      );
-    }
-    const { id, stage } = getDalle3PromptStage(promptCheckId, "ready");
-    if (stage.promptResolution.providerName !== provider.name) {
-      throw new Error(
-        `This prompt_check_id belongs to provider "${stage.promptResolution.providerName}", not ` +
-          `"${provider.name}". No provider request has been sent.`,
-      );
-    }
-    if (JSON.stringify(stage.promptResolution.promptPolicy) !== JSON.stringify(provider.promptPolicy)) {
-      dalle3PromptStages.delete(id);
-      throw new Error(
-        `The ${provider.name} prompt policy changed after preparation. ` +
-          "No provider request has been sent; prepare the prompt again.",
-      );
-    }
-    if (consume) dalle3PromptStages.delete(id);
-    return {
-      ready: true,
-      args: {
-        ...args,
-        prompt: stage.promptResolution.sourcePrompt,
-        _prompt_resolution: stage.promptResolution,
-      },
-      stagedId: id,
-    };
-  }
-
-  const prompt = nonEmptyString(args.prompt);
-  if (!prompt) {
-    throw new Error(
-      `Provide the complete unrestricted prompt for the initial ${provider.name} call, ` +
-        `or provide prompt_check_id after an over-limit preparation.`,
-    );
-  }
-  if (unicodeCharacterCount(prompt) <= provider.promptPolicy.max_chars) {
-    return { ready: true, args };
-  }
-  return {
-    ready: false,
-    result: prepareDalle3ProviderPrompt({ prompt }, provider),
-  };
-}
-
-function dalle3BatchPreparationResult(routedJobs, providerName) {
-  return {
-    status: "prompt_preparation_required",
-    ready: false,
-    provider_request_sent: false,
-    provider: providerName,
-    jobs: routedJobs.map((item, index) => ({
-      job_index: index + 1,
-      ready: item.ready,
-      ...(item.ready
-        ? { status: "ready_for_submission" }
-        : item.result),
-    })),
-    next_action:
-      `No provider requests were sent. Continue only the jobs with ready=false through ` +
-      `${TOOL_PREPARE_PROMPT_DALLE3}, then call the same base batch tool with prompt_check_id for those jobs.`,
-  };
-}
-
-function isDalle3PreparationResult(result) {
-  return result?.ready === false && result?.provider_request_sent === false;
-}
-
-function dalle3PreparationText(result) {
-  if (Array.isArray(result?.jobs)) {
-    return (
-      `Prompt preparation status: ${result.status}. ready=false. ` +
-      `Provider request sent: false. ${result.next_action}`
-    );
-  }
-  return (
-    `Prompt preparation status: ${result.status}. ready=${result.ready}. ` +
-    `Source characters: ${result.source_prompt_chars}. Provider candidate characters: ` +
-    `${result.provider_prompt_chars ?? "not supplied"}. Provider request sent: false. ` +
-    result.next_action
-  );
+  return submitBatchJobs(command, { ...args, provider: provider.name }, batchJobs(args));
 }
 
 async function submitBatchImageTask(command, args, count) {
   const prompt = nonEmptyString(args.prompt);
   if (!prompt) throw new Error("The prompt argument must contain one complete Codex-revised image prompt.");
-  const jobs = Array.from({ length: count }, () =>
-    args._dalle3_prompt_policy
-      ? {
-          prompt,
-          _prompt_resolution: args._prompt_resolution,
-        }
-      : { prompt },
-  );
+  const jobs = Array.from({ length: count }, () => ({ prompt }));
   return submitBatchJobs(command, { ...args, jobs, return_when: args.return_when ?? "submitted" }, jobs, prompt);
 }
 
 async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
   const returnWhen = args.dry_run ? "completed" : batchReturnWhen(args);
   const provider = await resolveProvider(args.provider, !args.dry_run);
-  if (isDalle3PromptPolicyProvider(provider) && !args._dalle3_prompt_policy) {
-    args = { ...args, provider: provider.name, _dalle3_prompt_policy: true };
-  }
   const root = transportOutputRoot(args, provider);
   const outputDir = finalOutputRoot(args, provider);
   const taskId = createTaskId(`${command}_batch`);
@@ -2538,9 +1966,6 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
       jobArgs.images = [...images, ...latestImages];
       jobArgs.use_latest = false;
     }
-    if (args._dalle3_prompt_policy) {
-      jobArgs._prompt_resolution = resolveProviderPrompt(jobArgs, provider);
-    }
     return jobArgs;
   });
   const submittedDate = new Date();
@@ -2551,7 +1976,7 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     jobs: normalizedJobs.map((job) =>
       sanitizeRequest({
         model: provider.model,
-        prompt: job._prompt_resolution?.submittedPrompt ?? job.prompt,
+        prompt: job.prompt,
         size: job.size,
         aspect: job.aspect,
         resolution: job.resolution,
@@ -2581,7 +2006,6 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     provider: provider.name,
     provider_transport: provider.transport,
     ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
-    ...(provider.promptProfile ? { prompt_profile: provider.promptProfile } : {}),
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
     requested_count: normalizedJobs.length,
@@ -2605,20 +2029,6 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
       task_submitted_at: submittedAt,
     },
   };
-  if (args._dalle3_prompt_policy) {
-    Object.assign(task, {
-      revised_prompt_source: legacyPrompt,
-      revised_prompt_submitted: legacyPrompt
-        ? normalizedJobs[0]?._prompt_resolution.submittedPrompt
-        : undefined,
-      revised_prompts_source: normalizedJobs.map((job) => job._prompt_resolution.sourcePrompt),
-      revised_prompts_submitted: normalizedJobs.map((job) => job._prompt_resolution.submittedPrompt),
-      source_prompt_char_counts: normalizedJobs.map((job) => job._prompt_resolution.sourcePromptChars),
-      submitted_prompt_char_counts: normalizedJobs.map((job) => job._prompt_resolution.submittedPromptChars),
-      prompt_policies_applied: normalizedJobs.map((job) => job._prompt_resolution.promptPolicyApplied),
-      prompt_preparations: normalizedJobs.map((job) => job._prompt_resolution.promptPreparation),
-    });
-  }
   await writeTaskState(task);
 
   const execute = async () => {
@@ -2783,17 +2193,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     output_timestamp: nonEmptyString(args.output_timestamp) || timestampForPath(),
     output_sequence: positiveInteger(args.output_sequence, 1),
   };
-  if (isDalle3PromptPolicyProvider(provider) && !args._dalle3_prompt_policy) {
-    args = { ...args, provider: provider.name, _dalle3_prompt_policy: true };
-  }
-  const promptResolution = args._dalle3_prompt_policy ? resolveProviderPrompt(args, provider) : null;
-  if (promptResolution?.promptPreparation) {
-    promptResolution.promptPreparation = {
-      ...promptResolution.promptPreparation,
-      image_call_started_at: singleStartedAt,
-    };
-  }
-  const submittedPrompt = promptResolution?.submittedPrompt ?? prompt;
+  const submittedPrompt = prompt;
   const scriptPath = providerTransportScript(provider);
   const tempDir = await mkdtemp(join(tmpdir(), "fmage-"));
   const promptFile = join(tempDir, "revised-prompt.txt");
@@ -2841,11 +2241,17 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
       helperEnvironment,
       { timeoutSeconds: helperTimeoutSeconds },
     );
-    const enriched = await enrichResult(result, submittedPrompt, provider, promptResolution);
+    const enriched = await enrichResult(result, submittedPrompt, provider);
     if (args._quality_policy_warning) {
       enriched.warnings = [
         ...normalizedStringArray(enriched.warnings),
         args._quality_policy_warning,
+      ];
+    }
+    if (args._output_format_policy_warning) {
+      enriched.warnings = [
+        ...normalizedStringArray(enriched.warnings),
+        args._output_format_policy_warning,
       ];
     }
     if (args._resolution_policy_warning) {
@@ -2875,73 +2281,8 @@ function revisedPromptProperty(editing = false) {
   return {
     type: "string",
     description: editing
-      ? "One complete provider-appropriate image prompt revised by the active Codex model. Identify each input image by index and role, state change-only and keep-unchanged invariants, and quote required text verbatim."
-      : "One complete provider-appropriate image prompt revised by the active Codex model. Shape it for the image use case, preserve the requested composition and style, and quote required text verbatim.",
-  };
-}
-
-function configuredDalle3PolicyContext(requestedProvider = null) {
-  try {
-    const config = readConfigForPaths();
-    if (!config?.providers || typeof config.providers !== "object") return null;
-    const activeProviders = configuredActiveProviders(config);
-    const requested = nonEmptyString(requestedProvider);
-    const candidates = requested ? activeProviders.filter((name) => name === requested) : activeProviders;
-    const providerName = candidates.find((name) => {
-      const raw = config.providers[name];
-      return (
-        raw &&
-        typeof raw === "object" &&
-        nonEmptyString(raw.prompt_profile) === PROMPT_PROFILE_DALLE3
-      );
-    });
-    if (!providerName) return null;
-    const raw = config.providers[providerName];
-    if (!raw || typeof raw !== "object") return null;
-    const configuredTransport = nonEmptyString(raw.transport);
-    const transport = configuredTransport;
-    const transportProfile = normalizeTransportProfile(raw.transport_profile);
-    const policy = normalizePromptPolicy(
-      raw.prompt_policy == null ? DALLE3_DEFAULT_PROMPT_POLICY : raw.prompt_policy,
-      `providers.${providerName}.prompt_policy`,
-    );
-    if (!policy) return null;
-    return {
-      providerName,
-      name: providerName,
-      transport,
-      transportProfile,
-      promptProfile: PROMPT_PROFILE_DALLE3,
-      policy,
-      isDefault: activeProviders[0] === providerName,
-      hasOtherActiveProviders: activeProviders.some((name) => name !== providerName),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function configuredProviderRoutingGuidance() {
-  const context = configuredDalle3PolicyContext();
-  const guidance = [];
-  if (context) {
-    guidance.push(
-      "The selected provider may apply a prompt profile automatically. Keep the complete source prompt " +
-        "unchanged before provider adaptation. If this tool returns ready=false with " +
-        "provider_request_sent=false, follow its next_action through prepare_prompt_dalle3, then call this " +
-        "same image tool with prompt_check_id only.",
-    );
-  }
-  return guidance.length ? ` ${guidance.join(" ")}` : "";
-}
-
-function dalle3ProviderPromptProperty() {
-  return {
-    type: "string",
-    minLength: 1,
-    description:
-      `Stage 2 transport candidate for prompt_profile "${PROMPT_PROFILE_DALLE3}", used only with prompt_session_id after the initial image tool reports an over-limit source. ` +
-      "Follow the latest preparation result's next_action exactly. Never replace or rewrite the staged source value, and never truncate or reduce the transport candidate to a summary. Preserve exact required text, names, counts, identities, spatial relationships, composition, edit invariants, camera, materials, lighting, style, and key avoid constraints.",
+      ? "Final image prompt after one concise understanding-and-expansion pass. Identify each input image by index and role, state only the necessary change/keep invariants, and quote required text verbatim. Do not include analysis or a planning preamble."
+      : "Final image prompt after one concise understanding-and-expansion pass. Preserve the requested subject, composition, and style, add only missing visual constraints, and quote required text verbatim. Do not include analysis or a planning preamble.",
   };
 }
 
@@ -2964,12 +2305,12 @@ function commonProperties(editing = false) {
     resolution: {
       type: "string",
       description:
-        "Provider-supported resolution tier, such as 512px, 1k, 2k, 3k, or 4k. Pass only when the user explicitly selected a tier, and also set resolution_user_requested=true. Banana models are validated against their model-specific capability list.",
+        "Explicit delivery tier, such as 512px, 1k, 2k, 3k, or 4k. Keep visual wording such as 8K超高分辨率 or 8K画质 in prompt; do not map it here. Set resolution_user_requested=true for this field. Banana models validate supported tiers.",
     },
     resolution_user_requested: {
       type: "boolean",
       description:
-        "True when the user explicitly requested a resolution tier or exact WIDTHxHEIGHT size, or selected an explicit preset such as draft quality that requires a resolution override.",
+        "True only for an explicit delivery tier, exact WIDTHxHEIGHT size, or preset requiring an override; not for visual wording such as 8K超高分辨率.",
     },
     thinking_level: {
       type: "string",
@@ -3008,6 +2349,10 @@ function commonProperties(editing = false) {
       enum: ["png", "jpeg", "webp"],
       description: "Optional output format.",
     },
+    output_format_user_requested: {
+      type: "boolean",
+      description: "True only when PNG/JPEG/WebP was explicitly requested by the user.",
+    },
     output_compression: {
       type: "integer",
       minimum: 0,
@@ -3020,7 +2365,7 @@ function commonProperties(editing = false) {
     },
     output_dir: {
       type: "string",
-      description: "Explicit user-selected save folder only; omit Pix conversation storage.",
+      description: "Explicit user-selected save folder.",
     },
     timeout: {
       type: "integer",
@@ -3046,17 +2391,6 @@ function commonProperties(editing = false) {
       description: "Embed image bytes when auto; default is never.",
     },
   };
-  if (configuredDalle3PolicyContext()) {
-    properties.prompt_check_id = {
-      type: "string",
-      minLength: 64,
-      maxLength: 64,
-      pattern: "^[0-9a-f]{64}$",
-      description:
-        `Short-lived one-time readiness ID returned by ${TOOL_PREPARE_PROMPT_DALLE3}. ` +
-        "Use it instead of prompt after an over-limit prompt-profile preparation.",
-    };
-  }
   return properties;
 }
 
@@ -3086,8 +2420,6 @@ function jobProperties(editing = false) {
 function batchProperties(editing = false) {
   const properties = { ...commonProperties(editing) };
   delete properties.prompt;
-  delete properties.prompt_check_id;
-  const supportsPromptProfile = Boolean(configuredDalle3PolicyContext());
   properties.jobs = {
     type: "array",
     minItems: 1,
@@ -3096,9 +2428,7 @@ function batchProperties(editing = false) {
     items: {
       type: "object",
       properties: jobProperties(editing),
-      ...(supportsPromptProfile
-        ? { anyOf: [{ required: ["prompt"] }, { required: ["prompt_check_id"] }] }
-        : { required: ["prompt"] }),
+      required: ["prompt"],
       additionalProperties: false,
     },
   };
@@ -3119,10 +2449,8 @@ function batchProperties(editing = false) {
 }
 
 function toolDefinitions() {
-  const dalle3Context = configuredDalle3PolicyContext();
   const standardImageToolNames = [TOOL_GENERATE, TOOL_GENERATE_BATCH, TOOL_EDIT, TOOL_EDIT_BATCH];
   const imageToolNames = [...standardImageToolNames];
-  const promptProfileHint = dalle3Context ? configuredProviderRoutingGuidance() : "";
   const tools = [
     {
       name: TOOL_REGRESS,
@@ -3198,15 +2526,31 @@ function toolDefinitions() {
       },
     },
     {
-      name: TOOL_GENERATE,
-      title: "Generate Image with Fmage",
-      description: `Generate one image from a complete revised prompt.${promptProfileHint}`,
+      name: TOOL_PROBE,
+      title: "Probe Fmage Image Generation",
+      description:
+        "Run one image-generation request with a compact probe record containing the prompt, resolved provider/model, delivery parameters, and result summary.",
       inputSchema: {
         type: "object",
         properties: commonProperties(false),
-        ...(dalle3Context
-          ? { anyOf: [{ required: ["prompt"] }, { required: ["prompt_check_id"] }] }
-          : { required: ["prompt"] }),
+        required: ["prompt"],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    {
+      name: TOOL_GENERATE,
+      title: "Generate Image with Fmage",
+      description: "Generate one image from a complete revised prompt.",
+      inputSchema: {
+        type: "object",
+        properties: commonProperties(false),
+        required: ["prompt"],
         additionalProperties: false,
       },
       annotations: {
@@ -3219,7 +2563,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_BATCH,
       title: "Generate Image Batch with Fmage",
-      description: `Generate multiple independent images in one batch call.${promptProfileHint}`,
+      description: "Generate multiple independent images in one batch call.",
       inputSchema: {
         type: "object",
         properties: batchProperties(false),
@@ -3236,7 +2580,7 @@ function toolDefinitions() {
     {
       name: TOOL_EDIT,
       title: "Edit Image with Fmage",
-      description: `Edit reference images with one complete revised prompt.${promptProfileHint}`,
+      description: "Edit reference images with one complete revised prompt.",
       inputSchema: {
         type: "object",
         properties: {
@@ -3251,9 +2595,7 @@ function toolDefinitions() {
             description: "Use latest output when no reference is supplied.",
           },
         },
-        ...(dalle3Context
-          ? { anyOf: [{ required: ["prompt"] }, { required: ["prompt_check_id"] }] }
-          : { required: ["prompt"] }),
+        required: ["prompt"],
         additionalProperties: false,
       },
       annotations: {
@@ -3266,7 +2608,7 @@ function toolDefinitions() {
     {
       name: TOOL_EDIT_BATCH,
       title: "Edit Image Batch with Fmage",
-      description: `Edit multiple independent image jobs in one batch call.${promptProfileHint}`,
+      description: "Edit multiple independent image jobs in one batch call.",
       inputSchema: {
         type: "object",
         properties: batchProperties(true),
@@ -3337,40 +2679,6 @@ function toolDefinitions() {
       },
     },
   ];
-
-  if (dalle3Context) {
-    const { providerName } = dalle3Context;
-    tools.push({
-      name: TOOL_PREPARE_PROMPT_DALLE3,
-      title: `Prepare Prompt for Fmage (${providerName})`,
-      description:
-        `After an image tool using the ${providerName} prompt profile returns ready=false, validate its Stage 2 ` +
-        "provider_prompt with prompt_session_id; it sends no provider request. When ready=true, call " +
-        "the same base image tool with prompt_check_id only.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          prompt_session_id: {
-            type: "string",
-            minLength: 64,
-            maxLength: 64,
-            pattern: "^[0-9a-f]{64}$",
-            description:
-              "Short-lived session ID returned when an initial image tool or this preparation tool reports ready=false.",
-          },
-          provider_prompt: dalle3ProviderPromptProperty(),
-        },
-        required: ["prompt_session_id", "provider_prompt"],
-        additionalProperties: false,
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-    });
-  }
 
   return tools;
 }
@@ -3558,14 +2866,8 @@ async function providerStatus(requestedProvider) {
     selected_provider: provider.name,
     transport: provider.transport,
     ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
-    ...(provider.promptProfile ? { prompt_profile: provider.promptProfile } : {}),
     base_url: provider.baseUrl,
     model: provider.model,
-    ...(provider.dalle3PromptProfile
-      ? {
-          prompt_policy: provider.promptPolicy,
-        }
-      : {}),
     api_key_configured: provider.apiKeyConfigured,
     api_key_source: provider.apiKeySource,
     available_providers: Object.keys(provider.config.providers),
@@ -3616,16 +2918,39 @@ async function handleToolCall(id, params) {
     return;
   }
 
+  if (params?.name === TOOL_PROBE) {
+    const request = params.arguments ?? {};
+    const result = await runImageCommand("generate", request);
+    const responseResult = compactImageResultForResponse(result, request);
+    const provider = await resolveProvider(request.provider, false);
+    const probe = {
+      probe_type: TOOL_PROBE,
+      created_at: isoNow(),
+      prompt: request.prompt,
+      provider: provider.name,
+      model: provider.model,
+      transport: provider.transport,
+      resolution: request.resolution ?? null,
+      quality: request.quality ?? null,
+      output_format: request.output_format ?? "png",
+      succeeded: !responseResult.error,
+      image_count: Array.isArray(responseResult.images) ? responseResult.images.length : 0,
+    };
+    const probedResult = { ...responseResult, probe };
+    sendResult(id, {
+      content: await imageContent(probedResult, {
+        embedImages: shouldEmbedImages(request.embed_images, false),
+        verbose: Boolean(request.verbose),
+        includeProviderMetadata: Boolean(request.include_provider_metadata),
+      }),
+      structuredContent: probedResult,
+    });
+    return;
+  }
+
   if (params?.name === TOOL_GENERATE) {
     const result = await runImageCommand("generate", params.arguments ?? {});
-    if (isDalle3PreparationResult(result)) {
-      sendResult(id, {
-        content: [{ type: "text", text: dalle3PreparationText(result) }],
-        structuredContent: result,
-      });
-      return;
-    }
-    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
+    const responseResult = compactImageResultForResponse(result, params.arguments ?? {});
     sendResult(id, {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
@@ -3639,14 +2964,7 @@ async function handleToolCall(id, params) {
 
   if (params?.name === TOOL_GENERATE_BATCH) {
     const result = await runBatchImageCommand("generate", params.arguments ?? {});
-    if (isDalle3PreparationResult(result)) {
-      sendResult(id, {
-        content: [{ type: "text", text: dalle3PreparationText(result) }],
-        structuredContent: result,
-      });
-      return;
-    }
-    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
+    const responseResult = compactImageResultForResponse(result, params.arguments ?? {});
     sendResult(id, {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
@@ -3658,25 +2976,9 @@ async function handleToolCall(id, params) {
     return;
   }
 
-  if (params?.name === TOOL_PREPARE_PROMPT_DALLE3) {
-    const result = prepareDalle3ProviderPrompt(params.arguments ?? {});
-    sendResult(id, {
-      content: [{ type: "text", text: dalle3PreparationText(result) }],
-      structuredContent: result,
-    });
-    return;
-  }
-
   if (params?.name === TOOL_EDIT) {
     const result = await runImageCommand("edit", params.arguments ?? {});
-    if (isDalle3PreparationResult(result)) {
-      sendResult(id, {
-        content: [{ type: "text", text: dalle3PreparationText(result) }],
-        structuredContent: result,
-      });
-      return;
-    }
-    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
+    const responseResult = compactImageResultForResponse(result, params.arguments ?? {});
     sendResult(id, {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
@@ -3690,14 +2992,7 @@ async function handleToolCall(id, params) {
 
   if (params?.name === TOOL_EDIT_BATCH) {
     const result = await runBatchImageCommand("edit", params.arguments ?? {});
-    if (isDalle3PreparationResult(result)) {
-      sendResult(id, {
-        content: [{ type: "text", text: dalle3PreparationText(result) }],
-        structuredContent: result,
-      });
-      return;
-    }
-    const responseResult = compactDalle3ImageResultForResponse(result, params.arguments ?? {});
+    const responseResult = compactImageResultForResponse(result, params.arguments ?? {});
     sendResult(id, {
       content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
@@ -3736,7 +3031,6 @@ async function handleToolCall(id, params) {
             `Default provider: ${status.default_provider ?? ""}\n` +
             `Selected provider: ${status.selected_provider}\n` +
             `Model: ${status.model}\n` +
-            (status.prompt_policy ? `Prompt policy: ${JSON.stringify(status.prompt_policy)}\n` : "") +
             `Base URL: ${status.base_url}\n` +
             `API key configured: ${status.api_key_configured}\n` +
             `Config: ${status.config_path}`,
@@ -3761,7 +3055,7 @@ async function handleRequest(message) {
         name: SERVER_NAME,
         version: SERVER_VERSION,
       },
-      instructions: BASE_INITIALIZE_INSTRUCTIONS + configuredProviderRoutingGuidance(),
+      instructions: BASE_INITIALIZE_INSTRUCTIONS,
     });
     return;
   }

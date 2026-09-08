@@ -78,13 +78,15 @@ class MigrateLocalConfigTests(unittest.TestCase):
         self.assertNotIn("808-MJ", payload["active_providers"])
         self.assertTrue(any('removed provider "808-MJ"' in change for change in changes))
 
-    def test_migrates_legacy_transport_and_compatibility_fields(self) -> None:
+    def test_migrates_legacy_transport_and_removes_prompt_preparation_fields(self) -> None:
         payload = {
             "active_providers": ["legacy"],
             "providers": {
                 "legacy": {
                     "transport": "808-openai-images",
                     "compatibility": "dall-e3",
+                    "prompt_profile": "dall-e3",
+                    "prompt_policy": {"max_chars": 4000},
                     "base_url": "https://example.invalid/v1",
                     "model": "gpt-image-2",
                     "api_key": "keep-this-secret",
@@ -97,9 +99,35 @@ class MigrateLocalConfigTests(unittest.TestCase):
         legacy = payload["providers"]["legacy"]
         self.assertEqual(legacy["transport"], "openai-images")
         self.assertEqual(legacy["transport_profile"], "808")
-        self.assertEqual(legacy["prompt_profile"], "dall-e3")
         self.assertNotIn("compatibility", legacy)
+        self.assertNotIn("prompt_profile", legacy)
+        self.assertNotIn("prompt_policy", legacy)
         self.assertNotIn("808-MJ", payload["providers"])
+
+    def test_removes_dalle_provider_and_active_entries(self) -> None:
+        payload = {
+            "active_providers": ["Dall-image-2", "normal"],
+            "providers": {
+                "Dall-image-2": {
+                    "transport": "openai-images",
+                    "base_url": "https://example.invalid/v1",
+                    "model": "gpt-image-2",
+                    "api_key": "remove-this-secret",
+                },
+                "normal": {
+                    "transport": "openai-images",
+                    "base_url": "https://example.invalid/v1",
+                    "model": "gpt-image-2",
+                    "api_key": "keep-this-secret",
+                },
+            },
+        }
+
+        changes = migrate_payload(payload)
+
+        self.assertNotIn("Dall-image-2", payload["providers"])
+        self.assertEqual(payload["active_providers"], ["normal"])
+        self.assertTrue(any('removed provider "Dall-image-2"' in change for change in changes))
 
     def test_check_mode_does_not_write(self) -> None:
         payload = {

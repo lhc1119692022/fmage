@@ -1,6 +1,6 @@
 ---
 name: fmage-config
-description: Locate, show, open, create, or edit the local Fmage providers.json. Use when explicitly invoked alone, when the user asks where the config is, or when updating active providers, transports, transport/prompt profiles, models, provider names, or provider keys.
+description: Locate, show, open, create, or edit the local Fmage providers.json. Use when explicitly invoked alone, when the user asks where the config is, or when updating active providers, transports, models, provider names, or provider keys.
 ---
 
 # Fmage Config
@@ -31,9 +31,9 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
 - Before editing, inspect the file and preserve existing providers.
 - If missing and creation is requested, copy from plugin `config/providers.example.json`.
 - Edit non-secret fields normally: `active_providers`, legacy `active_provider`, `transport`,
-  `transport_profile`, `prompt_profile`, `base_url`, `model`, `response_format`, `timeout`,
-  `prompt_policy`, and provider names. `transport: "808-openai-images"`, `compatibility`, and
-  `compatibility_profile` are unsupported; migrate them to the explicit profile fields before use.
+  `transport_profile`, `base_url`, `model`, `response_format`, `timeout`, and provider names.
+  `transport: "808-openai-images"`, `compatibility`, `compatibility_profile`, `prompt_profile`,
+  and `prompt_policy` are obsolete; remove them before use.
 - The primary transports are `openai-images`, `ezai-banana-images`,
   `gemini-generate-content`, and `zenmux-vertex`. Use `gemini-generate-content` for providers that
   expose Google's native `/v1beta/models/{model}:generateContent` protocol; it supports generation
@@ -41,9 +41,5 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
   `transport_profile: "808"` may be attached only to `openai-images` and supplies the relay-specific
   asynchronous submission and polling contract.
   `response_format: "url"`, and `timeout: 600`. Preserve the existing `api_key` or `api_key_env`.
-- Every provider, including one named `DE3限制版-image-2`, must explicitly set `prompt_profile: "dall-e3"` to opt in.
-  This prompt profile currently requires `openai-images` and is independent of the
-  optional `808` transport profile. When `prompt_policy` is omitted, it defaults to a 4000-character
-  limit with a 3900-character target. Providers without this prompt profile, including
-  `ezai-image-2`, always use the normal prompt path.
+- Providers use the normal direct prompt path. Do not configure prompt-profile or prompt-preparation fields.
 - Never print existing API keys or ask the user to paste keys into chat; tell them to edit keys directly in `providers.json`.

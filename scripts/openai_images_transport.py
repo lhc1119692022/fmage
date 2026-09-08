@@ -42,6 +42,7 @@ PROVIDER_API_KEY = ""
 PROVIDER_BASE_URL = ""
 PROVIDER_IMAGE_MODEL = ""
 DEFAULT_RESOLUTION = "2k"
+CLIENT_USER_AGENT = "Fmage/0.1.0 (OpenAI-compatible image transport)"
 
 MULTIPLE = 16
 MAX_EDGE = 3840
@@ -444,7 +445,12 @@ def clean_base_url(base_url: str) -> str:
 
 
 def endpoint(base_url: str, path: str) -> str:
-    return clean_base_url(base_url) + path
+    base = clean_base_url(base_url)
+    # OpenAI-compatible providers may configure either the host root or a
+    # versioned `/v1` base URL. Image endpoints always live under `/v1`.
+    if path.startswith("/images/") and not re.search(r"/v1$", base, re.IGNORECASE):
+        base += "/v1"
+    return base + path
 
 
 def pending_status(response: dict[str, Any]) -> tuple[str, str] | None:
@@ -479,6 +485,8 @@ def json_request(
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": CLIENT_USER_AGENT,
     }
     if extra_headers:
         headers.update(extra_headers)
@@ -498,6 +506,7 @@ def json_get(url: str, api_key: str, timeout: int) -> dict[str, Any]:
         headers={
             "Authorization": f"Bearer {api_key}",
             "Accept": "application/json",
+            "User-Agent": CLIENT_USER_AGENT,
         },
     )
     return perform_request(request, timeout)
@@ -541,6 +550,8 @@ def multipart_request(
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": f"multipart/form-data; boundary={boundary}",
+        "Accept": "application/json",
+        "User-Agent": CLIENT_USER_AGENT,
     }
     if extra_headers:
         headers.update(extra_headers)
@@ -736,6 +747,7 @@ def save_response_images(
         timeout,
         preferred_format=output_format,
         base64_keys=("b64_json",),
+        user_agent=CLIENT_USER_AGENT,
     )
 
 
@@ -1011,7 +1023,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--size", help="Explicit WIDTHxHEIGHT or auto.")
     parser.add_argument("--aspect", help="Aspect ratio such as 1:1, 16:9, 3:4.")
     parser.add_argument("--resolution", help="Resolution tier such as 1k, 2k, 3k, 4k, or a long edge in px.")
-    parser.add_argument("--quality", choices=["low", "medium", "high", "auto"], default="medium")
+    parser.add_argument("--quality", choices=["low", "medium", "high", "auto"], default="high")
     parser.add_argument("--moderation", choices=["low", "auto"], default="low")
     parser.add_argument("--background", choices=["auto", "opaque", "transparent"], default="auto")
     parser.add_argument("--output-format", choices=["png", "jpeg", "webp"], default="png")

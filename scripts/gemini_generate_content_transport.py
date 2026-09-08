@@ -445,7 +445,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--size")
     parser.add_argument("--aspect")
     parser.add_argument("--resolution")
-    parser.add_argument("--quality", choices=["low", "medium", "high", "auto"], default="medium")
+    parser.add_argument("--quality", choices=["low", "medium", "high", "auto"], default="high")
     parser.add_argument("--thinking-level", choices=["minimal", "high"])
     parser.add_argument("--output-format", choices=["png", "jpeg", "webp"], default="png")
     parser.add_argument("--base-url", required=True)

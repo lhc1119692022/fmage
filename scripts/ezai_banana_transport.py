@@ -449,7 +449,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--size", help="Exact WIDTHxHEIGHT request mapped to EzAI resolution and aspect ratio.")
     parser.add_argument("--aspect", help="Aspect ratio such as 1:1, 16:9, or 9:16.")
     parser.add_argument("--resolution", help="Model-supported resolution tier: 512px, 1k, 2k, or 4k.")
-    parser.add_argument("--quality", choices=["low", "medium", "high", "auto"], default="medium")
+    parser.add_argument("--quality", choices=["low", "medium", "high", "auto"], default="high")
     parser.add_argument("--response-format", choices=sorted(SUPPORTED_RESPONSE_FORMATS), default=DEFAULT_RESPONSE_FORMAT)
     parser.add_argument(
         "--thinking-level",
