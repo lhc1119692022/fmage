@@ -290,16 +290,28 @@ def api_key(args: argparse.Namespace) -> str:
     return value
 
 
-def json_request(url: str, body: dict[str, Any], api_key_value: str, timeout: int) -> dict[str, Any]:
+def json_request(
+    url: str,
+    body: dict[str, Any],
+    api_key_value: str,
+    timeout: int,
+    auth_scheme: str = "x-goog-api-key",
+) -> dict[str, Any]:
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    if auth_scheme == "bearer":
+        headers["Authorization"] = f"Bearer {api_key_value}"
+    elif auth_scheme == "x-goog-api-key":
+        headers["x-goog-api-key"] = api_key_value
+    else:
+        raise ValueError(f"Unsupported auth scheme: {auth_scheme}")
     request = urllib.request.Request(
         url,
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         method="POST",
-        headers={
-            "x-goog-api-key": api_key_value,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -399,7 +411,7 @@ def run_request(args: argparse.Namespace, references: list[str]) -> dict[str, An
     run_dir.mkdir(parents=True, exist_ok=True)
     timing["output_dir_created_at"] = iso_now()
     timing["provider_request_started_at"] = iso_now()
-    response = json_request(url, payload, api_key(args), args.timeout)
+    response = json_request(url, payload, api_key(args), args.timeout, args.auth_scheme)
     timing["provider_response_completed_at"] = iso_now()
     timing["download_started_at"] = iso_now()
     images = save_response_images_from_data(
@@ -451,6 +463,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--api-key-env", default="PROVIDER_API_KEY")
+    parser.add_argument("--auth-scheme", choices=["x-goog-api-key", "bearer"], default="x-goog-api-key")
     parser.add_argument("--output-dir")
     parser.add_argument("--timeout", type=int, default=240)
     parser.add_argument("--pending-total-timeout", type=int, default=0, help=argparse.SUPPRESS)

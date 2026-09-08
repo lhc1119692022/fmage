@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +74,62 @@ def call_server(config: dict[str, object], tool_name: str, tool_arguments: dict[
 
 
 class EndpointAndPayloadTests(unittest.TestCase):
+    def test_preview_aliases_preserve_wire_ids_and_share_capabilities(self) -> None:
+        for original, canonical in (
+            ("gemini-3.1-flash-image", "nano-banana-2"),
+            ("gemini-3-pro-image", "nano-banana-pro"),
+        ):
+            with self.subTest(model=original):
+                preview = original + "-preview"
+                expected = transport.banana_models.resolve_model(transport.TRANSPORT_NAME, original)
+                actual = transport.banana_models.resolve_model(transport.TRANSPORT_NAME, preview)
+                self.assertEqual(actual["wire_model"], preview)
+                self.assertEqual(actual["canonical_model"], canonical)
+                self.assertEqual(
+                    {key: value for key, value in actual.items() if key != "wire_model"},
+                    {key: value for key, value in expected.items() if key != "wire_model"},
+                )
+                with tempfile.TemporaryDirectory() as directory:
+                    args = arguments("generate", Path(directory), "--dry-run", model=preview)
+                    result = transport.run_request(args, [])
+                    self.assertTrue(result["endpoint"].endswith(f"/{preview}:generateContent"))
+                    args.resolution = "512px"
+                    if canonical == "nano-banana-pro":
+                        with self.assertRaisesRegex(ValueError, "does not support resolution"):
+                            transport.resolve_shape(args, [])
+                    else:
+                        self.assertEqual(transport.resolve_shape(args, [])[1], "512px")
+
+    def test_unknown_model_is_still_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            args = arguments("generate", Path(directory), "--dry-run", model="unknown-image")
+            with self.assertRaisesRegex(ValueError, "accepts only"):
+                transport.run_request(args, [])
+
+    def test_http_authentication_headers(self) -> None:
+        for scheme in ("x-goog-api-key", "bearer"):
+            with self.subTest(scheme=scheme), mock.patch.object(transport.urllib.request, "urlopen") as opening:
+                opening.return_value.__enter__.return_value.read.return_value = b'{}'
+                transport.json_request("https://api.808relay.com/test", {}, "dummy-test-key", 30, scheme)
+                request = opening.call_args.args[0]
+                headers = {key.lower(): value for key, value in request.header_items()}
+                if scheme == "bearer":
+                    self.assertEqual(headers["authorization"], "Bearer dummy-test-key")
+                    self.assertNotIn("x-goog-api-key", headers)
+                else:
+                    self.assertEqual(headers["x-goog-api-key"], "dummy-test-key")
+                    self.assertNotIn("authorization", headers)
+
+    def test_run_request_forwards_authentication_scheme(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            args = arguments("generate", Path(directory), "--auth-scheme", "bearer")
+            with mock.patch.object(transport, "api_key", return_value="dummy-test-key"), mock.patch.object(
+                transport, "json_request", side_effect=RuntimeError("stop before saving")
+            ) as request:
+                with self.assertRaisesRegex(RuntimeError, "stop before saving"):
+                    transport.run_request(args, [])
+            self.assertEqual(request.call_args.args[-1], "bearer")
+
     def test_endpoint_uses_native_v1beta_generate_content(self) -> None:
         self.assertEqual(
             transport.generate_content_endpoint(
@@ -246,6 +303,40 @@ class ServerRoutingTests(unittest.TestCase):
         self.assertEqual(result["provider_transport"], "gemini-generate-content")
         self.assertEqual(result["provider_model"], "gemini-3-pro-image")
         self.assertEqual(result["request"]["prompt"], "edit image")
+
+    def test_808_preview_model_uses_nano_banana_2_capabilities(self) -> None:
+        result = call_server(
+            {
+                "active_providers": ["808-nano"],
+                "providers": {
+                    "808-nano": {
+                        "transport": "gemini-generate-content",
+                        "base_url": "https://api.808relay.com",
+                        "model": "gemini-3.1-flash-image-preview",
+                        "transport_profile": "808",
+                        "timeout": 600,
+                        "api_key": "",
+                    }
+                },
+            },
+            "generate_image",
+            {
+                "provider": "808-nano",
+                "prompt": "test image",
+                "resolution": "2k",
+                "resolution_user_requested": True,
+                "aspect": "16:9",
+                "dry_run": True,
+                "verbose": True,
+            },
+        )
+
+        self.assertEqual(result["provider_model"], "gemini-3.1-flash-image-preview")
+        self.assertEqual(
+            result["endpoint"],
+            "https://api.808relay.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
+        )
+        self.assertEqual(result["request"]["generation_config"]["imageConfig"]["imageSize"], "2K")
 
 
 if __name__ == "__main__":

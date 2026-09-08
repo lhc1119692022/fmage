@@ -38,8 +38,14 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
   `gemini-generate-content`, and `zenmux-vertex`. Use `gemini-generate-content` for providers that
   expose Google's native `/v1beta/models/{model}:generateContent` protocol; it supports generation
   and edits through text and inline image parts.
-  `transport_profile: "808"` may be attached only to `openai-images` and supplies the relay-specific
-  asynchronous submission and polling contract.
+  Gemini authentication defaults to `x-goog-api-key`; the 808 profile uses the provider's
+  documented `Authorization: Bearer` header internally, without an extra config field.
+  `gemini-3.1-flash-image-preview` and `gemini-3.1-flash-image` share Nano Banana 2
+  capabilities; `gemini-3-pro-image-preview` and `gemini-3-pro-image` share Pro capabilities.
+  Keep the configured wire model ID unchanged. The `808-nano` example uses the Flash preview ID,
+  `https://api.808relay.com`, `transport_profile: "808"`, and `timeout: 600`. The profile uses
+  async submission and polling only for `openai-images`; Gemini keeps its native generateContent
+  request/response flow while sharing the 808 authentication and timeout policy.
   `response_format: "url"`, and `timeout: 600`. Preserve the existing `api_key` or `api_key_env`.
 - Providers use the normal direct prompt path. Do not configure prompt-profile or prompt-preparation fields.
 - Never print existing API keys or ask the user to paste keys into chat; tell them to edit keys directly in `providers.json`.

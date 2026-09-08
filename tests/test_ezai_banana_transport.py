@@ -284,7 +284,7 @@ class BananaModelRuleTests(unittest.TestCase):
             self.assertEqual(zenmux[key], ezai[key])
 
     def test_provider_wire_model_ids_cannot_cross_contracts(self) -> None:
-        with self.assertRaisesRegex(ValueError, "does not accept Nano Banana wire model ID"):
+        with self.assertRaisesRegex(ValueError, "belongs to provider contract"):
             banana_models.resolve_model(
                 zenmux_transport.TRANSPORT_NAME,
                 "gemini-3.1-flash-image-preview",

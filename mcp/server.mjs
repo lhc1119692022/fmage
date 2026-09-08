@@ -548,7 +548,7 @@ async function resolveProvider(requestedProvider, requireKey = true) {
         `Use one of: ${Object.keys(TRANSPORTS).join(", ")}.`,
     );
   }
-  if (transportProfile && transport !== TRANSPORT_OPENAI_IMAGES) {
+  if (transportProfile && ![TRANSPORT_OPENAI_IMAGES, TRANSPORT_GEMINI_GENERATE_CONTENT].includes(transport)) {
     throw new Error(
       `Provider "${providerName}" transport_profile "${transportProfile}" requires transport ` +
         `"${TRANSPORT_OPENAI_IMAGES}".`,
@@ -559,28 +559,28 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   }
   let openaiImages808 = null;
   if (transportProfile === TRANSPORT_PROFILE_808) {
-    if (!OPENAI_IMAGES_808_SUPPORTED_MODELS.has(model)) {
+    if (transport === TRANSPORT_OPENAI_IMAGES && !OPENAI_IMAGES_808_SUPPORTED_MODELS.has(model)) {
       throw new Error(
         `Provider "${providerName}" model "${model}" is not supported by transport_profile ` +
           `"${TRANSPORT_PROFILE_808}". ` +
           `Use gpt-image-2 or gpt-image-2-token.`,
       );
     }
+    const configuredTimeout = raw.timeout;
+    if (configuredTimeout !== undefined && positiveInteger(configuredTimeout, 0) === 0) {
+      throw new Error(`Provider "${providerName}" timeout must be a positive integer.`);
+    }
     const responseFormat = nonEmptyString(raw.response_format) || OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT;
-    if (!["url", "b64_json"].includes(responseFormat)) {
+    if (transport === TRANSPORT_OPENAI_IMAGES && !["url", "b64_json"].includes(responseFormat)) {
       throw new Error(
         `Provider "${providerName}" has unsupported response_format "${responseFormat}". ` +
           `Use "url" or "b64_json".`,
       );
     }
-    const configuredTimeout = raw.timeout;
-    if (configuredTimeout !== undefined && positiveInteger(configuredTimeout, 0) === 0) {
-      throw new Error(`Provider "${providerName}" timeout must be a positive integer.`);
-    }
-    openaiImages808 = {
+    openaiImages808 = transport === TRANSPORT_OPENAI_IMAGES ? {
       responseFormat,
       timeoutSeconds: positiveInteger(configuredTimeout, OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS),
-    };
+    } : null;
   }
   let ezaiBanana = null;
   if (transport === TRANSPORT_EZAI_BANANA_IMAGES) {
@@ -766,6 +766,11 @@ function commonArguments(args, promptFile, provider) {
   } else if (provider.transport === TRANSPORT_GEMINI_GENERATE_CONTENT) {
     appendOption(argv, "--output-format", args.output_format ?? "png");
     appendOption(argv, "--thinking-level", args.thinking_level);
+    appendOption(
+      argv,
+      "--auth-scheme",
+      provider.transportProfile === TRANSPORT_PROFILE_808 ? "bearer" : "x-goog-api-key",
+    );
   } else if (provider.transport === "zenmux-vertex") {
     appendOption(argv, "--output-format", args.output_format ?? "png");
     appendOption(argv, "--output-compression", args.output_compression);
@@ -795,7 +800,7 @@ function openaiImages808PendingTimeoutSeconds(args, provider) {
 }
 
 function providerTransportScript(provider) {
-  if (provider.transportProfile) {
+  if (provider.transportProfile && provider.transport === TRANSPORT_OPENAI_IMAGES) {
     const script = TRANSPORT_PROFILE_SCRIPTS[provider.transportProfile];
     if (!script) {
       throw new Error(
@@ -837,7 +842,8 @@ function openaiImages808Arguments(args, promptFile, provider) {
 }
 
 function defaultQualityForProvider(provider) {
-  return "high";
+  const model = nonEmptyString(provider?.model)?.toLowerCase();
+  return model === "gpt-image-2" ? "high" : "medium";
 }
 
 const RESOLUTION_TOKEN_PATTERN = String.raw`(?:\b\d+(?:\.\d+)?\s*k\b|\b\d{3,5}\s*[x×]\s*\d{3,5}\b)`;
@@ -2201,7 +2207,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
 
   try {
     const transportArguments =
-      provider.transportProfile === TRANSPORT_PROFILE_808
+      provider.transportProfile === TRANSPORT_PROFILE_808 && provider.transport === TRANSPORT_OPENAI_IMAGES
         ? openaiImages808Arguments(args, promptFile, provider)
         : commonArguments(args, promptFile, provider);
     const argv = [scriptPath, command, ...transportArguments];
@@ -2220,9 +2226,9 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     }
 
     const helperTimeoutSeconds =
-      provider.transportProfile === TRANSPORT_PROFILE_808
+      provider.transportProfile === TRANSPORT_PROFILE_808 && provider.transport === TRANSPORT_OPENAI_IMAGES
         ? openaiImages808PendingTimeoutSeconds(args, provider)
-        : args.timeout;
+        : positiveInteger(provider.raw.timeout, args.timeout);
     const helperEnvironment = {
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",

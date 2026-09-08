@@ -24,6 +24,14 @@
       "model": "gemini-3-pro-image",
       "api_key": ""
     },
+    "808-nano": {
+      "transport": "gemini-generate-content",
+      "transport_profile": "808",
+      "base_url": "https://api.808relay.com",
+      "model": "gemini-3.1-flash-image-preview",
+      "timeout": 600,
+      "api_key": ""
+    },
     "808-image-2": {
       "transport": "openai-images",
       "transport_profile": "808",
