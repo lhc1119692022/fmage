@@ -16,6 +16,24 @@ from typing import Any
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_NAME = "fmage"
 DEFAULT_MARKETPLACE = "personal"
+MAX_DEFAULT_PROMPTS = 3
+EXPECTED_MCP_TOOL_NAMES = {
+    "regress_image",
+    "trace_image_job_plan",
+    "probe_image_generation",
+    "generate_image",
+    "generate_image_batch",
+    "edit_image",
+    "edit_image_batch",
+    "get_image_task_status",
+    "get_provider_status",
+}
+REQUIRED_SKILLS = {
+    "fmage": True,
+    "fmage-config": True,
+    "fmage-direct": False,
+    "fmage-image-regression": True,
+}
 
 
 def run_command(command: list[str], *, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
@@ -103,7 +121,143 @@ def plugin_list(cli: Path) -> dict[str, Any]:
     return payload
 
 
-def verify_plugin(cli: Path, marketplace: str) -> None:
+def cache_path_for_version(marketplace: str, version: str) -> Path:
+    return (
+        Path.home()
+        / ".codex"
+        / "plugins"
+        / "cache"
+        / marketplace
+        / PLUGIN_NAME
+        / version
+    )
+
+
+def verify_mcp_handshake(server_path: Path) -> None:
+    node = shutil.which("node")
+    if node is None:
+        raise RuntimeError("Node.js is required to verify the Fmage MCP server.")
+    requests = "\n".join(
+        [
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-11-25",
+                        "capabilities": {},
+                        "clientInfo": {"name": "fmage-runtime-check", "version": "1"},
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/initialized",
+                    "params": {},
+                }
+            ),
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/list",
+                    "params": {},
+                }
+            ),
+        ]
+    ) + "\n"
+    try:
+        result = subprocess.run(
+            [node, str(server_path)],
+            cwd=server_path.parents[1],
+            input=requests,
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(f"Fmage MCP handshake timed out: {server_path}") from error
+    if result.returncode != 0:
+        raise RuntimeError(f"Fmage MCP server exited with code {result.returncode}: {server_path}")
+
+    responses: dict[int, dict[str, Any]] = {}
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(message, dict) and isinstance(message.get("id"), int):
+            responses[message["id"]] = message
+
+    initialize = responses.get(1, {}).get("result")
+    server_info = initialize.get("serverInfo") if isinstance(initialize, dict) else None
+    if not isinstance(server_info, dict) or server_info.get("name") != "Fmage":
+        raise RuntimeError(f"Fmage MCP initialize response is invalid: {server_path}")
+
+    tools_result = responses.get(2, {}).get("result")
+    tools = tools_result.get("tools") if isinstance(tools_result, dict) else None
+    tool_names = {tool.get("name") for tool in tools if isinstance(tool, dict)} if isinstance(tools, list) else set()
+    if tool_names != EXPECTED_MCP_TOOL_NAMES:
+        raise RuntimeError(
+            f"Fmage MCP tool list mismatch: expected {sorted(EXPECTED_MCP_TOOL_NAMES)}, got {sorted(tool_names)}"
+        )
+
+
+def verify_cached_plugin(cache_path: Path) -> None:
+    required_files = [
+        cache_path / ".codex-plugin" / "plugin.json",
+        cache_path / ".mcp.json",
+        cache_path / "mcp" / "server.mjs",
+        cache_path / "scripts" / "gemini_generate_content_transport.py",
+    ]
+    for skill_name in REQUIRED_SKILLS:
+        required_files.extend(
+            [
+                cache_path / "skills" / skill_name / "SKILL.md",
+                cache_path / "skills" / skill_name / "agents" / "openai.yaml",
+            ]
+        )
+    for required_file in required_files:
+        if not required_file.is_file():
+            raise RuntimeError(f"Installed plugin cache is missing {required_file}.")
+
+    try:
+        manifest = json.loads((cache_path / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        mcp_config = json.loads((cache_path / ".mcp.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Installed plugin cache metadata is invalid: {cache_path}") from error
+
+    if manifest.get("mcpServers") != "./.mcp.json":
+        raise RuntimeError(f"Installed plugin manifest does not point to ./.mcp.json: {cache_path}")
+    if manifest.get("skills") != "./skills/":
+        raise RuntimeError(f"Installed plugin manifest does not point to ./skills/: {cache_path}")
+    default_prompts = manifest.get("interface", {}).get("defaultPrompt")
+    if not isinstance(default_prompts, list) or len(default_prompts) > MAX_DEFAULT_PROMPTS:
+        raise RuntimeError(
+            f"Installed plugin has more than {MAX_DEFAULT_PROMPTS} supported default prompts: {cache_path}"
+        )
+    server = mcp_config.get("mcpServers", {}).get("Fmage")
+    if server != {"command": "node", "args": ["./mcp/server.mjs"], "cwd": "."}:
+        raise RuntimeError(f"Installed Fmage MCP registration is invalid: {cache_path / '.mcp.json'}")
+
+    for skill_name, allow_implicit in REQUIRED_SKILLS.items():
+        metadata_path = cache_path / "skills" / skill_name / "agents" / "openai.yaml"
+        metadata = metadata_path.read_text(encoding="utf-8")
+        expected_value = "true" if allow_implicit else "false"
+        if f"allow_implicit_invocation: {expected_value}" not in metadata:
+            raise RuntimeError(f"Skill {skill_name} has an unexpected invocation policy: {metadata_path}")
+
+    verify_mcp_handshake(cache_path / "mcp" / "server.mjs")
+
+
+def verify_plugin(cli: Path, marketplace: str) -> Path:
     payload = plugin_list(cli)
     expected_id = f"{PLUGIN_NAME}@{marketplace}"
     records = payload.get("installed")
@@ -122,29 +276,20 @@ def verify_plugin(cli: Path, marketplace: str) -> None:
         )
     if record.get("installed") is not True or record.get("enabled") is not True:
         raise RuntimeError(f"Plugin {expected_id} is not both installed and enabled.")
-    cache_path = (
-        Path.home()
-        / ".codex"
-        / "plugins"
-        / "cache"
-        / marketplace
-        / PLUGIN_NAME
-        / expected_version
-    )
-    required_files = [
-        cache_path / "scripts" / "gemini_generate_content_transport.py",
-    ]
-    for required_file in required_files:
-        if not required_file.is_file():
-            raise RuntimeError(f"Installed plugin cache is missing {required_file}.")
+    cache_path = cache_path_for_version(marketplace, expected_version)
+    verify_cached_plugin(cache_path)
+    return cache_path
 
 
 def refresh_plugin(*, check_only: bool) -> None:
     cli = resolve_codex_cli()
     marketplace = read_marketplace_name()
     if check_only:
-        verify_plugin(cli, marketplace)
-        print(f"Plugin is current and enabled: {PLUGIN_NAME}@{marketplace} {source_version()}")
+        cache_path = verify_plugin(cli, marketplace)
+        print(
+            f"Plugin is current, enabled, and MCP-verified: {PLUGIN_NAME}@{marketplace} "
+            f"{source_version()} ({cache_path})"
+        )
         return
 
     validator = Path.home() / ".codex" / "tools" / "validate-plugin.ps1"
@@ -162,8 +307,12 @@ def refresh_plugin(*, check_only: bool) -> None:
 
     install = run_command([str(cli), "plugin", "add", f"{PLUGIN_NAME}@{marketplace}"])
     require_success(install, "reinstalling plugin")
-    verify_plugin(cli, marketplace)
-    print(f"Plugin refreshed and verified: {PLUGIN_NAME}@{marketplace} {source_version()}")
+    cache_path = verify_plugin(cli, marketplace)
+    print(
+        f"Plugin refreshed, enabled, and MCP-verified: {PLUGIN_NAME}@{marketplace} "
+        f"{source_version()} ({cache_path})"
+    )
+    print("Start a new Codex task so Desktop reloads the updated skill and MCP catalogs.")
 
 
 def refresh_config(*, config: str | None, check_only: bool) -> None:

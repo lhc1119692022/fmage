@@ -20,3 +20,19 @@ The plugin exposes four independent skills while sharing one MCP server and one 
 - `Fmage 图片退步` (`fmage-image-regression`) runs the fixed local regression pipeline.
 
 The selected image entry is request-local and must be chosen before prompt interpretation or attachment inspection. Image task results use neutral fields such as `prompt_submitted`, `prompts_submitted`, and `prompt_mode`; legacy `revised_*` fields remain readable for older manifests.
+
+## Local Runtime Refresh
+
+After changing the plugin manifest, skills, MCP server, or local transport code, refresh the installed cache and run the keyless MCP handshake:
+
+```text
+python scripts/refresh_local_runtime.py
+```
+
+Use `python scripts/refresh_local_runtime.py --check` for a read-only verification. The host keeps skill and MCP catalogs per task, so start a new Codex task after a refresh; this does not resubmit any image request.
+
+The plugin card supports at most three `interface.defaultPrompt` entries. Those card actions are separate from the four skill entry points above, which are declared by each skill's `agents/openai.yaml`. To prevent a missing Fmage MCP catalog from silently falling back to native image generation, keep the generic image skill disabled and disable the host feature as well:
+
+```text
+codex features disable image_generation
+```

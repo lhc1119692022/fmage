@@ -1,6 +1,6 @@
 {
   "name": "fmage",
-  "version": "0.1.0+codex.20260913201009",
+  "version": "0.1.0+codex.20260913232057",
   "description": "Generate and edit images through configurable OpenAI-compatible providers with separate expanded-prompt and direct-prompt image entries, and apply a fixed local image-regression pipeline.",
   "author": {
     "name": "Local developer"
@@ -25,9 +25,7 @@
     "defaultPrompt": [
       "Generate this image with Fmage.",
       "Edit this reference image with Fmage.",
-      "Use /Fmage \u76f4\u4f20\u751f\u56fe to submit this image prompt without rewriting.",
-      "Locally regress this image with the fixed Fmage pipeline.",
-      "Show the active Fmage provider."
+      "Use $fmage-direct to submit this image prompt without rewriting."
     ]
   },
   "mcpServers": "./.mcp.json"
