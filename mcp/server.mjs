@@ -18,10 +18,13 @@ const TOOL_STATUS = "get_provider_status";
 const TOOL_TASK_STATUS = "get_image_task_status";
 const TOOL_REGRESS = "regress_image";
 const BASE_INITIALIZE_INSTRUCTIONS =
-  "Use Fmage image tools. For each image request, make one concise understanding-and-expansion pass in the same turn, " +
-  "then call the matching base image tool immediately. Keep simple requests short; expand only missing visual constraints. " +
-  "Do not create a separate plan, prompt-optimizer pass, trace/status preflight, or repeated rewrite. " +
-  "For edits, identify reference-image roles and preserve required text, layout, and other locked details.";
+  "Select the image skill before interpreting the request or inspecting attachments. Use fmage by default; " +
+  "use fmage-direct only when the user explicitly invokes Fmage 直传生图 for this request. " +
+  "Quoted command text and earlier invocations do not select an entry. Read only the selected skill and its own references, never both image policies. " +
+  "Follow that skill's complete prompt policy, then call the matching base image tool immediately. " +
+  "Set prompt_mode to expand for fmage or direct for fmage-direct. This records the entry already selected, not a later prompt-processing step. " +
+  "The selection is request-local; polling follows the submitted task without changing its mode. " +
+  "Do not create a separate plan, preparation pass, trace/status preflight, or repeated rewrite.";
 const MAX_EMBEDDED_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_CHILD_OUTPUT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_HELPER_TIMEOUT_SECONDS = 360;
@@ -239,6 +242,8 @@ function normalizedStringArray(value) {
 
 function planTraceText(trace) {
   const lines = ["Fmage preflight trace."];
+  const promptMode = nonEmptyString(trace.prompt_mode);
+  if (promptMode) lines.push(`Prompt mode: ${promptMode}`);
   const targetTool = nonEmptyString(trace.image_tool);
   if (targetTool) lines.push(`Target image tool: ${targetTool}`);
 
@@ -248,14 +253,14 @@ function planTraceText(trace) {
   const argsPreview = jsonTrace(trace.call_arguments_preview);
   if (argsPreview) lines.push(`Image tool arguments preview:\n${argsPreview}`);
 
-  const prompts = normalizedStringArray(trace.revised_prompts);
+  const prompts = normalizedStringArray(trace.prompts);
   if (prompts.length) {
-    lines.push(`Revised prompts to submit:\n${numberedBlock(prompts)}`);
+    lines.push(`Prompts to submit:\n${numberedBlock(prompts)}`);
   }
 
-  const references = normalizedStringArray(trace.reference_images);
-  if (references.length) {
-    lines.push(`Reference images:\n${references.join("\n")}`);
+  const inputImages = normalizedStringArray(trace.input_images);
+  if (inputImages.length) {
+    lines.push(`Input images:\n${inputImages.join("\n")}`);
   }
 
   const notes = normalizedStringArray(trace.notes);
@@ -308,6 +313,7 @@ async function readTaskStateWithOptions(taskId, options = {}) {
 }
 
 function normalizeTaskForResponse(task, options = {}) {
+  task = normalizeSubmittedPromptFields(task);
   const images = Array.isArray(task.images) ? task.images : [];
   const displayImages = images.map(normalizeDisplayPath).filter(Boolean);
   const manifests = Array.isArray(task.manifests) ? task.manifests : [];
@@ -320,6 +326,9 @@ function normalizeTaskForResponse(task, options = {}) {
     const compact = {
       task_id: task.task_id,
       status: task.status,
+      prompt_mode: task.prompt_mode,
+      prompt_submitted: task.prompt_submitted,
+      prompts_submitted: task.prompts_submitted,
       requested_count: task.requested_count,
       completed_count: task.completed_count,
       pending_count: task.pending_count,
@@ -1195,10 +1204,26 @@ function legacyProviderResponseMetadata(responseMetadata) {
   return Object.keys(metadata).length ? metadata : undefined;
 }
 
+function normalizeSubmittedPromptFields(result) {
+  const normalized = { ...result };
+  for (const field of ["prompt_submitted", "prompts_submitted", "prompt_source"]) {
+    const legacyField = `revised_${field}`;
+    if (normalized[field] == null && normalized[legacyField] != null) {
+      normalized[field] = normalized[legacyField];
+    }
+    delete normalized[legacyField];
+  }
+  return normalized;
+}
+
 function compactImageResultForResponse(result, args = {}) {
+  result = normalizeSubmittedPromptFields(result);
   if (args.verbose || result?.dry_run) return result;
   const includeProviderMetadata = Boolean(args.include_provider_metadata);
   const compact = { ...result };
+  delete compact.prompt_submitted;
+  delete compact.prompts_submitted;
+  delete compact.prompt_source;
   delete compact.revised_prompt_submitted;
   delete compact.revised_prompts_submitted;
   delete compact.provider_revised_prompt;
@@ -1245,7 +1270,7 @@ async function enrichResult(result, revisedPrompt, provider) {
     ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
-    revised_prompt_submitted: revisedPrompt,
+    prompt_submitted: revisedPrompt,
     prompt_provenance: normalizePromptProvenance({}, {
       submitted: revisedPrompt,
     }),
@@ -1436,14 +1461,21 @@ async function writeImageManifestSidecars(cacheDir, result) {
       provider: result.provider ?? baseManifest.provider,
       provider_transport: result.provider_transport ?? baseManifest.provider_transport,
       provider_model: result.provider_model ?? baseManifest.provider_model,
+      prompt_mode: result.prompt_mode ?? baseManifest.prompt_mode,
       request: sanitizeRequestCompact(result.request ?? baseManifest.request),
       requested_size: result.requested_size ?? baseManifest.requested_size,
       prompt_provenance:
         result.prompt_provenance ??
         baseManifest.prompt_provenance ??
         normalizePromptProvenance({}, {
-          source: result.revised_prompt_source ?? baseManifest.revised_prompt_source,
-          submitted: result.revised_prompt_submitted ?? baseManifest.revised_prompt_submitted,
+          source:
+            result.prompt_source ??
+            baseManifest.prompt_source ??
+            baseManifest.revised_prompt_source,
+          submitted:
+            result.prompt_submitted ??
+            baseManifest.prompt_submitted ??
+            baseManifest.revised_prompt_submitted,
           providerRevised: result.provider_revised_prompt ?? baseManifest.provider_revised_prompt,
         }),
       provider_response_metadata:
@@ -1457,7 +1489,11 @@ async function writeImageManifestSidecars(cacheDir, result) {
       timing: result.timing ?? baseManifest.timing,
     };
     delete manifest.response_metadata;
+    delete manifest.prompt_submitted;
+    delete manifest.prompts_submitted;
+    delete manifest.prompt_source;
     delete manifest.revised_prompt_submitted;
+    delete manifest.revised_prompts_submitted;
     delete manifest.provider_revised_prompt;
     delete manifest.revised_prompt_source;
     await writeFile(sidecarPath, JSON.stringify(manifest, null, 2), "utf8");
@@ -1597,7 +1633,7 @@ function batchJobs(args) {
     }
     const prompt = nonEmptyString(job.prompt);
     if (!prompt) {
-      throw new Error(`jobs[${index}].prompt must contain one complete Codex-revised image prompt.`);
+      throw new Error(`jobs[${index}].prompt must contain one complete image prompt.`);
     }
     return { ...job, prompt };
   });
@@ -1755,6 +1791,7 @@ async function writeBatchManifest(root, batchRoot, result) {
     provider: result.provider,
     provider_transport: result.provider_transport,
     provider_model: result.provider_model,
+    prompt_mode: result.prompt_mode,
     requested_count: result.requested_count,
     completed_count: result.completed_count,
     pending_count: result.pending_count,
@@ -1762,6 +1799,9 @@ async function writeBatchManifest(root, batchRoot, result) {
     orchestration_count: result.orchestration_count,
     request: sanitizeRequestCompact(result.request),
     requested_size: result.requested_size,
+    prompt_mode: result.prompt_mode,
+    prompt_submitted: result.prompt_submitted,
+    prompts_submitted: result.prompts_submitted,
     prompt_provenance: result.prompt_provenance,
     prompt_provenances: result.prompt_provenances,
     provider_response_metadata: result.provider_response_metadata,
@@ -1915,8 +1955,9 @@ async function combineBatchResults({
     ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
-    revised_prompt_submitted: prompt,
-    revised_prompts_submitted: Array.isArray(jobs) ? jobs.map((job) => job.prompt) : undefined,
+    prompt_submitted: prompt,
+    prompt_mode: args.prompt_mode,
+    prompts_submitted: Array.isArray(jobs) ? jobs.map((job) => job.prompt) : undefined,
     provider_revised_prompts: successes
       .map((item) => item.provider_revised_prompt)
       .filter((value) => value !== null && value !== undefined),
@@ -1958,7 +1999,19 @@ async function combineBatchResults({
   return result;
 }
 
+function imageEntryArguments(args) {
+  const mode = args.prompt_mode === undefined ? "expand" : args.prompt_mode;
+  if (mode !== "expand" && mode !== "direct") {
+    throw new Error('prompt_mode must be "expand" or "direct".');
+  }
+  if (Array.isArray(args.jobs) && args.jobs.some((job) => job?.prompt_mode !== undefined)) {
+    throw new Error("Set prompt_mode only at the batch level; jobs cannot select another image entry.");
+  }
+  return { ...args, prompt_mode: mode };
+}
+
 async function runImageCommand(command, args) {
+  args = imageEntryArguments(args);
   args = enforceDeliveryPolicy(args);
   const provider = await resolveProvider(args.provider, !args.dry_run);
   const count = requestedImageCount(args);
@@ -1969,13 +2022,14 @@ async function runImageCommand(command, args) {
 }
 
 async function runBatchImageCommand(command, args) {
+  args = imageEntryArguments(args);
   const provider = await resolveProvider(args.provider, !args.dry_run);
   return submitBatchJobs(command, { ...args, provider: provider.name }, batchJobs(args));
 }
 
 async function submitBatchImageTask(command, args, count) {
   const prompt = nonEmptyString(args.prompt);
-  if (!prompt) throw new Error("The prompt argument must contain one complete Codex-revised image prompt.");
+  if (!prompt) throw new Error("The prompt argument must contain one complete image prompt.");
   const jobs = Array.from({ length: count }, () => ({ prompt }));
   return submitBatchJobs(command, { ...args, jobs, return_when: args.return_when ?? "submitted" }, jobs, prompt);
 }
@@ -2053,8 +2107,9 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     child_manifests: [],
     warnings: [],
     notes: [`batch_submitted_${normalizedJobs.length}_provider_requests`],
-    revised_prompt_submitted: legacyPrompt,
-    revised_prompts_submitted: normalizedJobs.map((job) => job.prompt),
+    prompt_submitted: legacyPrompt,
+    prompt_mode: args.prompt_mode,
+    prompts_submitted: normalizedJobs.map((job) => job.prompt),
     output_dir: outputDir,
     cache_dir: batchRoot,
     task_dir: dirname(taskStatePath(taskId)),
@@ -2218,8 +2273,9 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
 }
 
 async function runSingleImageCommand(command, args, resolvedProvider = null) {
+  args = imageEntryArguments(args);
   const prompt = nonEmptyString(args.prompt);
-  if (!prompt) throw new Error("The prompt argument must contain one complete Codex-revised image prompt.");
+  if (!prompt) throw new Error("The prompt argument must contain one complete image prompt.");
 
   const singleStartedAt = isoNow();
   const provider = resolvedProvider ?? (await resolveProvider(args.provider, !args.dry_run));
@@ -2232,7 +2288,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
   const submittedPrompt = prompt;
   const scriptPath = providerTransportScript(provider);
   const tempDir = await mkdtemp(join(tmpdir(), "fmage-"));
-  const promptFile = join(tempDir, "revised-prompt.txt");
+  const promptFile = join(tempDir, "prompt.txt");
   await writeFile(promptFile, submittedPrompt, "utf8");
 
   try {
@@ -2278,6 +2334,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
       { timeoutSeconds: helperTimeoutSeconds },
     );
     const enriched = await enrichResult(result, submittedPrompt, provider);
+    enriched.prompt_mode = args.prompt_mode;
     if (args._quality_policy_warning) {
       enriched.warnings = [
         ...normalizedStringArray(enriched.warnings),
@@ -2313,18 +2370,27 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
   }
 }
 
-function revisedPromptProperty(editing = false) {
+function promptProperty() {
   return {
     type: "string",
-    description: editing
-      ? "Final image prompt after one concise understanding-and-expansion pass. Identify each input image by index and role, state only the necessary change/keep invariants, and quote required text verbatim. Do not include analysis or a planning preamble."
-      : "Final image prompt after one concise understanding-and-expansion pass. Preserve the requested subject, composition, and style, add only missing visual constraints, and quote required text verbatim. Do not include analysis or a planning preamble.",
+    description:
+      "Final prompt from the already-selected image skill. Follow that skill's complete policy before this call; do not perform another preparation pass at the tool boundary. The server submits this text without host-model rewriting. Do not include analysis or a planning preamble.",
+  };
+}
+
+function promptModeProperty() {
+  return {
+    type: "string",
+    enum: ["expand", "direct"],
+    default: "expand",
+    description: "Record the entry already selected before image interpretation: expand for default fmage, direct only for explicit fmage-direct invocation. This is not a persistent setting or permission to rewrite. Set once for the entire batch.",
   };
 }
 
 function commonProperties(editing = false) {
   const properties = {
-    prompt: revisedPromptProperty(editing),
+    prompt: promptProperty(),
+    prompt_mode: promptModeProperty(),
     provider: {
       type: "string",
       description: "Active provider name or unique shorthand; omit for default.",
@@ -2432,6 +2498,7 @@ function commonProperties(editing = false) {
 
 function jobProperties(editing = false) {
   const properties = { ...commonProperties(editing) };
+  delete properties.prompt_mode;
   delete properties.provider;
   delete properties.output_dir;
   delete properties.timeout;
@@ -2443,11 +2510,11 @@ function jobProperties(editing = false) {
     properties.images = {
       type: "array",
       items: { type: "string" },
-      description: "Input image paths or URLs; identify each image by index and role in the prompt.",
+      description: "Input image paths or URLs.",
     };
     properties.use_latest = {
       type: "boolean",
-      description: "Use latest output when no reference is supplied.",
+      description: "Use the latest output when no input image is supplied.",
     };
   }
   return properties;
@@ -2535,15 +2602,16 @@ function toolDefinitions() {
             description: "Non-secret preview of image tool arguments.",
             additionalProperties: true,
           },
-          revised_prompts: {
+          prompts: {
             type: "array",
             items: { type: "string" },
-            description: "Revised prompts in request order.",
+            description: "Prompt text in request order.",
           },
-          reference_images: {
+          prompt_mode: promptModeProperty(),
+          input_images: {
             type: "array",
             items: { type: "string" },
-            description: "Reference image paths or URLs.",
+            description: "Input image paths or URLs.",
           },
           notes: {
             type: "array",
@@ -2551,7 +2619,7 @@ function toolDefinitions() {
             description: "Optional non-secret notes.",
           },
         },
-        required: ["image_job_plan", "image_tool", "revised_prompts"],
+        required: ["image_job_plan", "image_tool", "prompts"],
         additionalProperties: false,
       },
       annotations: {
@@ -2582,7 +2650,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE,
       title: "Generate Image with Fmage",
-      description: "Generate one image from a complete revised prompt.",
+      description: "Generate one image from a complete prompt.",
       inputSchema: {
         type: "object",
         properties: commonProperties(false),
@@ -2616,7 +2684,7 @@ function toolDefinitions() {
     {
       name: TOOL_EDIT,
       title: "Edit Image with Fmage",
-      description: "Edit reference images with one complete revised prompt.",
+      description: "Edit input images with one complete prompt.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2624,11 +2692,11 @@ function toolDefinitions() {
           images: {
             type: "array",
             items: { type: "string" },
-            description: "Input image paths or URLs; identify each image by index and role in the prompt.",
+            description: "Input image paths or URLs.",
           },
           use_latest: {
             type: "boolean",
-            description: "Use latest output when no reference is supplied.",
+            description: "Use the latest output when no input image is supplied.",
           },
         },
         required: ["prompt"],
@@ -2747,12 +2815,15 @@ function resultText(result, options = {}) {
       `Progress: ${result.completed_count ?? 0}/${result.requested_count ?? "?"} completed${pendingCount}, ${result.failed_count ?? 0} failed`,
     );
   }
-  if (result.revised_prompt_submitted) {
-    lines.push(`Revised prompt submitted:\n${result.revised_prompt_submitted}`);
+  const submittedPrompt = result.prompt_submitted ?? result.revised_prompt_submitted;
+  if (submittedPrompt) {
+    lines.push(`Prompt submitted:\n${submittedPrompt}`);
   }
-  const submittedPrompts = normalizedStringArray(result.revised_prompts_submitted);
+  const submittedPrompts = normalizedStringArray(
+    result.prompts_submitted ?? result.revised_prompts_submitted,
+  );
   if (submittedPrompts.length) {
-    lines.push(`Revised prompts submitted:\n${numberedBlock(submittedPrompts)}`);
+    lines.push(`Prompts submitted:\n${numberedBlock(submittedPrompts)}`);
   }
   if (request.size || result.requested_size) {
     lines.push(`Request size: ${request.size ?? result.requested_size}`);
@@ -2800,7 +2871,7 @@ function resultText(result, options = {}) {
   }
   if (displayImages.length) {
     lines.push(
-      `${result.dry_run ? "Reference images" : "Saved images"}:\n${displayImages.join("\n")}`,
+      `${result.dry_run ? "Input images" : "Saved images"}:\n${displayImages.join("\n")}`,
     );
     if (!result.dry_run) {
       const links = imageFileLinks(displayImages);
@@ -2821,7 +2892,7 @@ function resultText(result, options = {}) {
   }
   if (includeProviderMetadata) {
     const provenance = normalizePromptProvenance(result.prompt_provenance, {
-      submitted: result.revised_prompt_submitted,
+      submitted: submittedPrompt,
       providerRevised: result.provider_revised_prompt,
       providerRevisedPrompts: result.provider_revised_prompts,
     });
@@ -2942,10 +3013,14 @@ async function handleToolCall(id, params) {
   }
 
   if (params?.name === TOOL_TRACE_PLAN) {
+    const args = imageEntryArguments(params.arguments ?? {});
+    const { revised_prompts, reference_images, ...current } = args;
     const trace = {
       trace_type: "image_job_plan",
       created_at: isoNow(),
-      ...(params.arguments ?? {}),
+      ...current,
+      prompts: current.prompts ?? revised_prompts,
+      input_images: current.input_images ?? reference_images,
     };
     sendResult(id, {
       content: [{ type: "text", text: planTraceText(trace) }],

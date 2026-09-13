@@ -1,0 +1,7 @@
+interface:
+  display_name: "Fmage 直传生图"
+  short_description: "仅显式调用，保留原文与参数边界，不扩写、不翻译、不润色生图提示词"
+  default_prompt: "Use $fmage-direct to generate or edit this image without rewriting my prompt."
+
+policy:
+  allow_implicit_invocation: false

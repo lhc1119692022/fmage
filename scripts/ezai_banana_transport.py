@@ -444,7 +444,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def add_common_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--prompt", help="Complete revised prompt text.")
+    parser.add_argument("--prompt", help="Complete prompt text.")
     parser.add_argument("--prompt-file", help="Path to a UTF-8 prompt file.")
     parser.add_argument("--size", help="Exact WIDTHxHEIGHT request mapped to EzAI resolution and aspect ratio.")
     parser.add_argument("--aspect", help="Aspect ratio such as 1:1, 16:9, or 9:16.")

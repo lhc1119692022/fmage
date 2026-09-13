@@ -1,7 +1,7 @@
 {
   "name": "fmage",
-  "version": "0.1.0+codex.20260909125545",
-  "description": "Generate and edit images through configurable OpenAI-compatible providers, and apply a fixed local image-regression pipeline with Codex-guided workflows.",
+  "version": "0.1.0+codex.20260913201009",
+  "description": "Generate and edit images through configurable OpenAI-compatible providers with separate expanded-prompt and direct-prompt image entries, and apply a fixed local image-regression pipeline.",
   "author": {
     "name": "Local developer"
   },
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Fmage",
     "shortDescription": "Provider image tools plus local image regression.",
-    "longDescription": "Adds first-class image generation and editing tools with prompts revised by the active Codex model, switchable local provider configuration, and a fixed local Pillow workflow for proportional 1K downscaling, Gaussian blur, and monochrome luminance noise. API keys remain outside the shareable plugin directory.",
+    "longDescription": "Adds first-class image generation and editing tools with separate Fmage image-generation and Fmage direct-generation entries, switchable local provider configuration, and a fixed local Pillow workflow for proportional 1K downscaling, Gaussian blur, and monochrome luminance noise. API keys remain outside the shareable plugin directory.",
     "developerName": "Local developer",
     "category": "Productivity",
     "brandColor": "#665CE8",
@@ -20,11 +20,12 @@
       "Image editing",
       "Local image regression",
       "Multiple providers",
-      "Revised prompt tool calls"
+      "Expanded and direct-prompt image entries"
     ],
     "defaultPrompt": [
       "Generate this image with Fmage.",
       "Edit this reference image with Fmage.",
+      "Use /Fmage \u76f4\u4f20\u751f\u56fe to submit this image prompt without rewriting.",
       "Locally regress this image with the fixed Fmage pipeline.",
       "Show the active Fmage provider."
     ]

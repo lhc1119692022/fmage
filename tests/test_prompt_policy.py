@@ -26,11 +26,13 @@ BASELINE_TOOL_NAMES = STANDARD_IMAGE_TOOLS | {
     "get_provider_status",
 }
 BASELINE_INSTRUCTIONS = (
-    "Use Fmage image tools. For each image request, make one concise understanding-and-expansion pass "
-    "in the same turn, then call the matching base image tool immediately. Keep simple requests short; "
-    "expand only missing visual constraints. Do not create a separate plan, prompt-optimizer pass, "
-    "trace/status preflight, or repeated rewrite. For edits, identify reference-image roles and preserve "
-    "required text, layout, and other locked details."
+    "Select the image skill before interpreting the request or inspecting attachments. Use fmage by default; "
+    "use fmage-direct only when the user explicitly invokes Fmage 直传生图 for this request. "
+    "Quoted command text and earlier invocations do not select an entry. Read only the selected skill and its own references, never both image policies. "
+    "Follow that skill's complete prompt policy, then call the matching base image tool immediately. "
+    "Set prompt_mode to expand for fmage or direct for fmage-direct. This records the entry already selected, not a later prompt-processing step. "
+    "The selection is request-local; polling follows the submitted task without changing its mode. "
+    "Do not create a separate plan, preparation pass, trace/status preflight, or repeated rewrite."
 )
 TRANSPARENT_TEST_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlD7xkAAAAASUVORK5CYII="
@@ -156,6 +158,16 @@ class PromptPolicyIsolationTests(unittest.TestCase):
     def clean_config(self) -> dict[str, object]:
         return provider_config(["image-2"], {"image-2": provider()})
 
+    def test_image_entry_skills_keep_separate_policy_contracts(self) -> None:
+        default_skill = (PLUGIN_ROOT / "skills" / "fmage" / "SKILL.md").read_text(encoding="utf-8")
+        direct_skill = (PLUGIN_ROOT / "skills" / "fmage-direct" / "SKILL.md").read_text(encoding="utf-8")
+        direct_metadata = (PLUGIN_ROOT / "skills" / "fmage-direct" / "agents" / "openai.yaml").read_text(encoding="utf-8")
+        self.assertIn("one concise understanding-and-expansion pass", default_skill)
+        self.assertNotIn("Do not add, translate, summarize, explain, polish, paraphrase, or otherwise rewrite", default_skill)
+        self.assertIn("Do not add, translate, summarize, explain, polish, paraphrase, or otherwise rewrite", direct_skill)
+        self.assertIn("Select this entry before any prompt interpretation", direct_skill)
+        self.assertIn("allow_implicit_invocation: false", direct_metadata)
+
     def call_image_tool(
         self,
         config: dict[str, object],
@@ -199,8 +211,21 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             self.assertIn("thinking_level_user_requested", all_property_names(schema))
 
         prompt_description = tools["generate_image"]["inputSchema"]["properties"]["prompt"]["description"]
-        self.assertIn("one concise understanding-and-expansion pass", prompt_description)
+        self.assertIn("already-selected image skill", prompt_description)
+        self.assertIn("without host-model rewriting", prompt_description)
         self.assertIn("Do not include analysis or a planning preamble", prompt_description)
+
+        prompt_mode = tools["generate_image"]["inputSchema"]["properties"]["prompt_mode"]
+        self.assertEqual(prompt_mode["enum"], ["expand", "direct"])
+        self.assertEqual(prompt_mode["default"], "expand")
+        batch_job_properties = tools["generate_image_batch"]["inputSchema"]["properties"]["jobs"]["items"]["properties"]
+        self.assertNotIn("prompt_mode", batch_job_properties)
+
+        trace_properties = tools["trace_image_job_plan"]["inputSchema"]["properties"]
+        self.assertIn("prompts", trace_properties)
+        self.assertIn("input_images", trace_properties)
+        self.assertNotIn("revised_prompts", trace_properties)
+        self.assertNotIn("reference_images", trace_properties)
 
         initialize = call_server(
             config,
@@ -208,22 +233,42 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             {"protocolVersion": "2025-11-25"},
         )
         self.assertEqual(initialize["result"]["instructions"], BASELINE_INSTRUCTIONS)
-        self.assertIn("call the matching base image tool immediately", BASELINE_INSTRUCTIONS)
+        self.assertIn("Select the image skill before interpreting the request", BASELINE_INSTRUCTIONS)
+        self.assertIn("explicitly invokes Fmage 直传生图", BASELINE_INSTRUCTIONS)
+        self.assertIn("Set prompt_mode to expand for fmage or direct for fmage-direct", BASELINE_INSTRUCTIONS)
         self.assertNotIn("prepare_prompt", initialize["result"]["instructions"])
         self.assertNotIn("DALL-E", initialize["result"]["instructions"])
 
-    def test_direct_prompt_is_submitted_without_server_prompt_preparation(self) -> None:
+    def test_default_entry_submits_prompt_without_server_prompt_preparation(self) -> None:
         config = self.clean_config()
         prompt = "A finished editorial product photograph with controlled studio lighting."
         response = self.call_image_tool(config, prompt=prompt)
         self.assertNotIn("error", response)
         result = response["result"]["structuredContent"]
         self.assertEqual(result["request"]["prompt"], prompt)
-        self.assertEqual(result["revised_prompt_submitted"], prompt)
+        self.assertEqual(result["prompt_submitted"], prompt)
+        self.assertEqual(result["prompt_mode"], "expand")
+        self.assertNotIn("revised_prompt_submitted", result)
         self.assertNotIn("prompt_preparation", result)
         self.assertNotIn("prompt_policy", result)
         self.assertNotIn("prompt_profile", result)
         self.assertNotIn("provider_prompt", result)
+
+    def test_direct_entry_submits_prompt_without_rewriting(self) -> None:
+        config = self.clean_config()
+        prompt = "一张原文提示词，不添加任何视觉描述。"
+        response = self.call_image_tool(config, prompt=prompt, prompt_mode="direct")
+        self.assertNotIn("error", response)
+        result = response["result"]["structuredContent"]
+        self.assertEqual(result["request"]["prompt"], prompt)
+        self.assertEqual(result["prompt_submitted"], prompt)
+        self.assertEqual(result["prompt_mode"], "direct")
+        self.assertNotIn("revised_prompt_submitted", result)
+
+    def test_invalid_prompt_mode_is_rejected(self) -> None:
+        response = self.call_image_tool(self.clean_config(), prompt="test", prompt_mode="other")
+        self.assertIn("error", response)
+        self.assertIn("prompt_mode must be", response["error"]["message"])
 
     def test_default_quality_high_keeps_resolution_at_2k(self) -> None:
         config = self.clean_config()
@@ -320,7 +365,31 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             [job["prompt"] for job in result["request"]["jobs"]],
             ["first complete prompt", "second complete prompt"],
         )
+        self.assertEqual(result["prompt_mode"], "expand")
+        self.assertEqual(result["prompts_submitted"], ["first complete prompt", "second complete prompt"])
         self.assertNotIn("prompt_preparations", result)
+
+    def test_trace_uses_canonical_prompt_fields(self) -> None:
+        config = self.clean_config()
+        response = call_server(
+            config,
+            "tools/call",
+            {
+                "name": "trace_image_job_plan",
+                "arguments": {
+                    "image_job_plan": {"mode": "direct"},
+                    "image_tool": "generate_image",
+                    "prompts": ["原文"],
+                    "input_images": ["C:/input.png"],
+                    "prompt_mode": "direct",
+                },
+            },
+        )
+        self.assertNotIn("error", response)
+        trace = response["result"]["structuredContent"]
+        self.assertEqual(trace["prompts"], ["原文"])
+        self.assertEqual(trace["input_images"], ["C:/input.png"])
+        self.assertEqual(trace["prompt_mode"], "direct")
 
     def test_transparent_background_is_forwarded_for_standard_tools(self) -> None:
         config = self.clean_config()
