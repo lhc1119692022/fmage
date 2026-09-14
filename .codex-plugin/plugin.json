@@ -1,6 +1,6 @@
 {
   "name": "fmage",
-  "version": "0.1.0+codex.20260913232057",
+  "version": "0.1.0+codex.20260914141608",
   "description": "Generate and edit images through configurable OpenAI-compatible providers with separate expanded-prompt and direct-prompt image entries, and apply a fixed local image-regression pipeline.",
   "author": {
     "name": "Local developer"

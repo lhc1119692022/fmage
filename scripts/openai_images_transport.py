@@ -338,6 +338,30 @@ def size_from_aspect(aspect: float, resolution: str | None) -> tuple[str, list[s
     return f"{width}x{height}", notes
 
 
+def normalize_edit_reference(path: Path, target_size: str, output_dir: Path) -> tuple[Path, list[str]]:
+    dimensions = image_dimensions(path)
+    target = parse_size(target_size)
+    if not dimensions or not target or dimensions == target:
+        return path, []
+    from PIL import Image
+    width, height = dimensions
+    target_width, target_height = target
+    scale = min(1.0, target_width / width, target_height / height)
+    resized = (max(1, int(width * scale)), max(1, int(height * scale)))
+    notes = []
+    if resized != dimensions:
+        notes.append("reference_image_scaled_without_cropping")
+    if resized != target:
+        notes.append("reference_image_padded_without_cropping")
+    with Image.open(path) as source:
+        source = source.convert("RGBA").resize(resized, Image.Resampling.LANCZOS)
+        canvas = Image.new("RGBA", target, (0, 0, 0, 0))
+        canvas.paste(source, ((target_width-resized[0])//2, (target_height-resized[1])//2), source)
+        output = output_dir / f"{path.stem}-normalized.png"
+        canvas.save(output, format="PNG")
+    return output, notes
+
+
 def infer_aspect_from_prompt(prompt: str) -> tuple[float | None, str | None]:
     text = prompt.lower()
     rules: list[tuple[float, str, tuple[str, ...]]] = [
@@ -371,7 +395,7 @@ def infer_resolution_from_quality(
     return None, None
 
 
-def resolve_size(args: argparse.Namespace, image_paths: list[Path]) -> tuple[str, list[str]]:
+def resolve_size(args: argparse.Namespace, image_paths: list[Path], primary_index: int = 0) -> tuple[str, list[str]]:
     if args.size:
         if args.size.lower() == "auto":
             return "auto", ["explicit_auto_size"]
@@ -389,10 +413,10 @@ def resolve_size(args: argparse.Namespace, image_paths: list[Path]) -> tuple[str
                 notes.append(aspect_note)
 
     if aspect is None and args.command == "edit" and image_paths:
-        dimensions = image_dimensions(image_paths[0])
+        dimensions = image_dimensions(image_paths[primary_index])
         if dimensions:
             aspect = dimensions[0] / dimensions[1]
-            if not args.resolution and not is_image_2_model(args.model):
+            if not args.resolution:
                 width, height, notes = normalize_padding(dimensions[0], dimensions[1])
                 return f"{width}x{height}", ["from_first_reference_image"] + notes
 
@@ -853,7 +877,6 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = root / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
     timing["output_dir_created_at"] = iso_now()
-
     key = api_key(args)
     url = endpoint(args.base_url, "/images/generations")
     timing["provider_request_started_at"] = iso_now()
@@ -924,7 +947,10 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     if missing:
         raise FileNotFoundError(f"Reference image not found: {missing}")
 
-    size, size_notes = resolve_size(args, image_paths)
+    primary_index = getattr(args, "primary_image_index", 0)
+    if primary_index < 0 or primary_index >= len(image_paths):
+        raise ValueError("primary_image_index is outside the supplied image list.")
+    size, size_notes = resolve_size(args, image_paths, primary_index)
     payload = common_payload(args, prompt, size)
     image_field = resolve_image_field(args.image_field, len(image_paths))
 
@@ -941,6 +967,10 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = root / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
     timing["output_dir_created_at"] = iso_now()
+    if not args.size and not args.aspect:
+        output, notes = normalize_edit_reference(image_paths[primary_index], size, run_dir)
+        image_paths[primary_index] = output
+        size_notes.extend(notes)
 
     key = api_key(args)
     url = endpoint(args.base_url, "/images/edits")
@@ -1056,6 +1086,7 @@ def build_parser() -> argparse.ArgumentParser:
     edit = subparsers.add_parser("edit", help="Edit images using one or more references.")
     add_common_arguments(edit)
     edit.add_argument("--image", action="append", help="Reference image path. Repeat for multiple images.")
+    edit.add_argument("--primary-image-index", type=int, default=0, help="Zero-based index of the image being edited.")
     edit.add_argument("--use-latest", action="store_true", help="Use latest image saved by this skill.")
     edit.add_argument(
         "--image-field",

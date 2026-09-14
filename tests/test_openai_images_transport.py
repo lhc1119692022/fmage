@@ -54,12 +54,27 @@ class Image2DefaultResolutionTests(unittest.TestCase):
             self.assertEqual(size, "2048x2048")
             self.assertIn("fallback_2k_square", notes)
 
-    def test_image_2_edit_uses_2k_with_reference_aspect(self) -> None:
+    def test_edit_uses_primary_image_dimensions_without_resolution(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             image_path = Path(temp_dir) / "reference.png"
             Image.new("RGB", (2048, 1024), (1, 2, 3)).save(image_path)
-            openai_size, _ = transport.resolve_size(shape_args("gpt-image-2-token", "edit"), [image_path])
-            self.assertGreater(transport.parse_size(openai_size)[0] * transport.parse_size(openai_size)[1], 2048 * 2048)
+            openai_size, notes = transport.resolve_size(shape_args("gpt-image-2-token", "edit"), [image_path])
+            self.assertEqual(openai_size, "2048x1024")
+            self.assertIn("from_first_reference_image", notes)
+
+    def test_edit_resolution_keeps_primary_image_aspect(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            images = []
+            for index, dimensions in enumerate(((1024, 1024), (1600, 800))):
+                path = Path(temp_dir) / f"image-{index}.png"
+                Image.new("RGB", dimensions, (1, 2, 3)).save(path)
+                images.append(path)
+            args = shape_args("gpt-image-2-token", "edit")
+            args.resolution = "1k"
+            size, _ = transport.resolve_size(args, images, primary_index=1)
+            width, height = transport.parse_size(size)
+            self.assertGreater(width / height, 1.9)
+            self.assertLessEqual(width * height, 1_048_576)
 
     def test_explicit_resolution_still_overrides_image_2_default(self) -> None:
         args = shape_args("gpt-image-2")

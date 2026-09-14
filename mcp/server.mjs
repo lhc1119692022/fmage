@@ -2306,6 +2306,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
         const imagePath = nonEmptyString(image);
         if (imagePath) appendOption(argv, "--image", imagePath);
       }
+      if (Number.isInteger(args.primary_image_index)) appendOption(argv, "--primary-image-index", args.primary_image_index);
       if (images.length === 0) {
         throw new Error("Editing requires at least one image path/URL or use_latest=true.");
       }
@@ -2512,6 +2513,7 @@ function jobProperties(editing = false) {
       items: { type: "string" },
       description: "Input image paths or URLs.",
     };
+    properties.primary_image_index = { type: "integer", minimum: 0, description: "Zero-based index of the image being edited." };
     properties.use_latest = {
       type: "boolean",
       description: "Use the latest output when no input image is supplied.",
