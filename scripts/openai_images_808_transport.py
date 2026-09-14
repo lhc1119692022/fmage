@@ -435,7 +435,10 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     if missing:
         raise FileNotFoundError(f"Reference image not found: {missing}")
 
-    size, size_notes = openai.resolve_size(args, image_paths)
+    primary_index = getattr(args, "primary_image_index", 0)
+    if primary_index < 0 or primary_index >= len(image_paths):
+        raise ValueError("primary_image_index is outside the supplied image list.")
+    size, size_notes = openai.resolve_size(args, image_paths, primary_index)
     payload = common_payload(args, prompt, size)
     image_field = "image[]"
     url = submission_endpoint(args.base_url, "edit")
@@ -541,6 +544,7 @@ def build_parser() -> argparse.ArgumentParser:
     edit = subparsers.add_parser("edit", help="Edit local images using one or more references.")
     add_808_arguments(edit)
     edit.add_argument("--image", action="append", help="Reference image path. Repeat for multiple images.")
+    edit.add_argument("--primary-image-index", type=int, default=0, help="Zero-based index of the image being edited.")
     edit.add_argument("--use-latest", action="store_true", help="Use latest image saved by this skill.")
 
     return parser

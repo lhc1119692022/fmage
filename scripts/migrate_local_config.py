@@ -26,6 +26,7 @@ REMOVED_PROMPT_FIELDS = (
     "prompt_profile",
     "prompt_policy",
 )
+REMOVED_TRANSPORTS = {"zenmux-vertex"}
 
 
 def resolve_config_path(explicit: str | None = None) -> Path:
@@ -93,6 +94,11 @@ def migrate_payload(payload: dict[str, Any]) -> list[str]:
             providers.pop(provider_name, None)
             removed_provider_names.add(name)
             changes.append(f'removed provider "{name}"')
+            continue
+        if _is_mapping(provider) and provider.get("transport") in REMOVED_TRANSPORTS:
+            providers.pop(provider_name, None)
+            removed_provider_names.add(name)
+            changes.append(f'removed provider "{name}" with retired transport')
             continue
         if _is_mapping(provider):
             _normalize_legacy_fields(provider, name, changes)

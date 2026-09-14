@@ -34,8 +34,8 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
   `transport_profile`, `base_url`, `model`, `response_format`, `timeout`, and provider names.
   `transport: "808-openai-images"`, `compatibility`, `compatibility_profile`, `prompt_profile`,
   and `prompt_policy` are obsolete; remove them before use.
-- The primary transports are `openai-images`, `ezai-banana-images`,
-  `gemini-generate-content`, and `zenmux-vertex`. Use `gemini-generate-content` for providers that
+- The primary transports are `openai-images`, `ezai-banana-images`, and
+  `gemini-generate-content`. Use `gemini-generate-content` for providers that
   expose Google's native `/v1beta/models/{model}:generateContent` protocol; it supports generation
   and edits through text and inline image parts.
   Gemini authentication defaults to `x-goog-api-key`; the 808 profile uses the provider's

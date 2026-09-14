@@ -78,6 +78,31 @@ class MigrateLocalConfigTests(unittest.TestCase):
         self.assertNotIn("808-MJ", payload["active_providers"])
         self.assertTrue(any('removed provider "808-MJ"' in change for change in changes))
 
+    def test_removes_provider_with_retired_transport_and_active_entry(self) -> None:
+        payload = {
+            "active_providers": ["retired", "normal"],
+            "providers": {
+                "retired": {
+                    "transport": "zenmux-vertex",
+                    "base_url": "https://example.invalid",
+                    "model": "google/gemini-3.1-flash-image",
+                    "api_key": "remove-this-secret",
+                },
+                "normal": {
+                    "transport": "gemini-generate-content",
+                    "base_url": "https://example.invalid",
+                    "model": "gemini-3.1-flash-image",
+                    "api_key": "keep-this-secret",
+                },
+            },
+        }
+
+        changes = migrate_payload(payload)
+
+        self.assertNotIn("retired", payload["providers"])
+        self.assertEqual(payload["active_providers"], ["normal"])
+        self.assertTrue(any("retired transport" in change for change in changes))
+
     def test_migrates_legacy_transport_and_removes_prompt_preparation_fields(self) -> None:
         payload = {
             "active_providers": ["legacy"],

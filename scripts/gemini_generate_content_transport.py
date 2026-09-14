@@ -19,6 +19,7 @@ import urllib.request
 
 import banana_models
 from transport_common import (
+    primary_reference,
     build_prompt_provenance,
     collect_image_metadata,
     download_image,
@@ -160,6 +161,7 @@ def resolve_shape(
     args: argparse.Namespace,
     references: list[str],
 ) -> tuple[str, str, str, list[str]]:
+    primary = primary_reference(references, getattr(args, "primary_image_index", 0)) if args.command == "edit" else None
     notes: list[str] = []
     dimensions = parse_size(args.size)
     if dimensions:
@@ -175,7 +177,7 @@ def resolve_shape(
     else:
         aspect = ""
         if args.command == "edit" and references:
-            first = references[0]
+            first = primary
             if not is_url(first):
                 first_dimensions = image_dimensions(Path(first))
                 if first_dimensions:
@@ -184,7 +186,7 @@ def resolve_shape(
                         args.model,
                         first_dimensions[0] / first_dimensions[1],
                     )
-                    notes.append("aspect_from_first_reference_image")
+                    notes.append("aspect_from_primary_reference_image" if getattr(args, "primary_image_index", 0) else "aspect_from_first_reference_image")
         if not aspect:
             inferred, note = infer_aspect_from_prompt(read_prompt(args))
             if inferred:
@@ -263,10 +265,11 @@ def build_payload(
             args.thinking_level,
         )
         generation_config["thinkingConfig"] = {"thinkingLevel": thinking_level.upper()}
-    return {
+    payload = {
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": generation_config,
     }
+    return payload
 
 
 def sanitize_payload(value: Any) -> Any:
@@ -481,6 +484,7 @@ def build_parser() -> argparse.ArgumentParser:
     edit = subparsers.add_parser("edit")
     add_common_arguments(edit)
     edit.add_argument("--image", action="append")
+    edit.add_argument("--primary-image-index", type=int, default=0, help="Zero-based index of the image being edited.")
     return parser
 
 

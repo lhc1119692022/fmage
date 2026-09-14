@@ -69,7 +69,11 @@ const TRANSPORTS = {
     "scripts",
     "gemini_generate_content_transport.py",
   ),
-  "zenmux-vertex": join(PLUGIN_ROOT, "scripts", "zenmux_vertex_transport.py"),
+};
+const EDIT_ARGUMENT_MAPPINGS = {
+  [TRANSPORT_OPENAI_IMAGES]: { primaryImageIndex: "--primary-image-index" },
+  [TRANSPORT_EZAI_BANANA_IMAGES]: { primaryImageIndex: "--primary-image-index" },
+  [TRANSPORT_GEMINI_GENERATE_CONTENT]: { primaryImageIndex: "--primary-image-index" },
 };
 const TRANSPORT_PROFILE_SCRIPTS = {
   [TRANSPORT_PROFILE_808]: join(PLUGIN_ROOT, "scripts", "openai_images_808_transport.py"),
@@ -786,9 +790,6 @@ function commonArguments(args, promptFile, provider) {
       "--auth-scheme",
       provider.transportProfile === TRANSPORT_PROFILE_808 ? "bearer" : "x-goog-api-key",
     );
-  } else if (provider.transport === "zenmux-vertex") {
-    appendOption(argv, "--output-format", args.output_format ?? "png");
-    appendOption(argv, "--output-compression", args.output_compression);
   }
 
   appendOption(argv, "--pending-total-timeout", args._pending_total_timeout);
@@ -825,6 +826,16 @@ function providerTransportScript(provider) {
     return script;
   }
   return TRANSPORTS[provider.transport];
+}
+
+function appendEditArguments(argv, args, provider) {
+  const mapping = EDIT_ARGUMENT_MAPPINGS[provider.transport];
+  if (Number.isInteger(args.primary_image_index)) {
+    if (!mapping?.primaryImageIndex) {
+      throw new Error(`Transport "${provider.transport}" does not support primary_image_index.`);
+    }
+    appendOption(argv, mapping.primaryImageIndex, args.primary_image_index);
+  }
 }
 
 function openaiImages808Arguments(args, promptFile, provider) {
@@ -1029,12 +1040,12 @@ function enforceModelCapabilityPolicy(args = {}, provider) {
     provider.transport === TRANSPORT_OPENAI_IMAGES &&
     /^gpt-image-2\.5(?:$|-)/iu.test(nonEmptyString(provider.model) || "");
   if (["xhigh", "max"].includes(quality) && !supportsExtendedQuality) {
-    throw new Error(
-      `quality "${quality}" is not supported by provider "${provider.name}" model "${provider.model}" ` +
-        `(transport "${provider.transport}"). xhigh and max require a gpt-image-2.5 series model ` +
-        "with the openai-images transport. Supported values: low, medium, high, auto. " +
-        "No transport was started; choose a supported quality or explicitly select a compatible provider.",
-    );
+    const result = { ...args, quality: "high" };
+    result._model_capability_policy_warning =
+      `Mapped quality="${quality}" to "high" for provider "${provider.name}" ` +
+      `model "${provider.model}" (transport "${provider.transport}") because the selected ` +
+      "transport does not expose extended quality tiers.";
+    args = result;
   }
   const thinkingLevel = nonEmptyString(args.thinking_level)?.toLowerCase();
   if (!thinkingLevel) return args;
@@ -2317,7 +2328,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
         const imagePath = nonEmptyString(image);
         if (imagePath) appendOption(argv, "--image", imagePath);
       }
-      if (Number.isInteger(args.primary_image_index)) appendOption(argv, "--primary-image-index", args.primary_image_index);
+      appendEditArguments(argv, args, provider);
       if (images.length === 0) {
         throw new Error("Editing requires at least one image path/URL or use_latest=true.");
       }
@@ -2440,7 +2451,7 @@ function commonProperties(editing = false) {
       type: "string",
       enum: ["low", "medium", "high", "xhigh", "max", "auto"],
       description:
-        "Delivery tier. xhigh and max are exclusive to gpt-image-2.5 series models using openai-images, not Nano Banana or other models/transports. This shared enum is not a capability list for every provider. Incompatible explicit tiers are rejected before transport execution; never silently downgrade or switch providers. Otherwise supported tiers are low, medium, high, and auto. Always pass an explicitly requested tier.",
+        "Delivery tier. xhigh and max are native to gpt-image-2.5 series models using openai-images. This shared enum is not a capability list for every provider: when the selected transport does not expose an extended tier, the server maps xhigh/max to high, keeps the provider and model unchanged, and records the mapping in warnings. Otherwise supported values are low, medium, high, and auto. Always pass an explicitly requested tier.",
     },
     quality_user_requested: {
       type: "boolean",

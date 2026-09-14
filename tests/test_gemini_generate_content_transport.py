@@ -233,6 +233,19 @@ class EndpointAndPayloadTests(unittest.TestCase):
         self.assertEqual(normalized["data"][0]["mimeType"], "image/png")
         self.assertEqual(base64.b64decode(normalized["data"][0]["b64_json"]), PNG_BYTES)
 
+    def test_common_saver_deduplicates_identical_images(self) -> None:
+        from transport_common import save_response_images_from_data
+
+        encoded = base64.b64encode(PNG_BYTES).decode("ascii")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            images = save_response_images_from_data(
+                {"data": [{"b64_json": encoded}, {"b64_json": encoded}]},
+                Path(temporary_directory),
+                30,
+            )
+
+        self.assertEqual(len(images), 1)
+
     def test_common_prompt_provenance_reads_native_contents(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             args = arguments("generate", Path(temporary_directory))

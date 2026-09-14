@@ -342,34 +342,42 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertIn("8K超高分辨率", resolution_description)
         self.assertIn("do not map it here", resolution_description)
 
-    def test_extended_quality_is_rejected_before_transport(self) -> None:
+    def test_extended_quality_is_mapped_before_transport(self) -> None:
         for model, transport in (
             ("gpt-image-2", "openai-images"),
             ("gemini-3.1-flash-image-preview", "gemini-generate-content"),
-            ("gemini-3.1-flash-image-preview", "ezai-banana-images"),
-            ("gemini-3.1-flash-image-preview", "zenmux-vertex"),
-            ("gpt-image-2.5", "gemini-generate-content"),
+            ("nano-banana-2", "ezai-banana-images"),
             ("gpt-image-2.50", "openai-images"),
         ):
             config = provider_config(["test"], {"test": provider(model, transport)})
             for quality in ("xhigh", "max"):
-                for name in (*sorted(STANDARD_IMAGE_TOOLS), "probe_image_generation"):
-                    with self.subTest(model=model, transport=transport, quality=quality, tool=name):
-                        arguments = {"quality": quality, "quality_user_requested": True}
-                        if name.endswith("_batch"):
-                            arguments["jobs"] = [{"prompt": "first"}, {"prompt": "second"}]
-                        else:
-                            arguments["prompt"] = "test image"
-                        response = self.call_image_tool(config, name=name, **arguments)
-                        self.assertIn("No transport was started", json.dumps(response))
-                        self.assertIn("Supported values: low, medium, high, auto", json.dumps(response))
+                with self.subTest(model=model, transport=transport, quality=quality):
+                    response = self.call_image_tool(
+                        config,
+                        prompt="test image",
+                        quality=quality,
+                        quality_user_requested=True,
+                    )
+                    self.assertNotIn("error", response)
+                    structured = response["result"]["structuredContent"]
+                    request = structured["request"]
+                    if transport == "openai-images":
+                        self.assertEqual(request["quality"], "high")
+                    else:
+                        self.assertEqual(structured["requested_resolution"], "4K")
+                    self.assertIn("Mapped quality=", json.dumps(response))
 
-    def test_batch_quality_override_is_validated_before_submission(self) -> None:
+    def test_batch_quality_override_is_mapped_per_job_before_submission(self) -> None:
         response = self.call_image_tool(
-            self.clean_config(), name="generate_image_batch", quality="high",
-            jobs=[{"prompt": "valid"}, {"prompt": "invalid", "quality": "max", "quality_user_requested": True}],
+            provider_config(["test"], {"test": provider("gpt-image-2", "openai-images")}),
+            name="generate_image_batch",
+            quality="high",
+            jobs=[{"prompt": "valid"}, {"prompt": "mapped", "quality": "max", "quality_user_requested": True}],
         )
-        self.assertIn("No transport was started", json.dumps(response))
+        self.assertNotIn("error", response)
+        jobs = response["result"]["structuredContent"]["request"]["jobs"]
+        self.assertEqual([job["quality"] for job in jobs], ["high", "high"])
+        self.assertIn("Mapped quality=", json.dumps(response))
 
     def test_image_2_5_preserves_explicit_extended_quality(self) -> None:
         for model in ("gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):

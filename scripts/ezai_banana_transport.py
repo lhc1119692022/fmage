@@ -16,6 +16,7 @@ import uuid
 import banana_models
 import ezai_banana_support as support
 from transport_common import (
+    primary_reference,
     build_prompt_provenance,
     collect_image_metadata,
     image_dimensions,
@@ -110,6 +111,7 @@ def resolve_shape(
     args: argparse.Namespace,
     references: list[str],
 ) -> tuple[str, str, str, list[str]]:
+    primary = primary_reference(references, getattr(args, "primary_image_index", 0)) if args.command == "edit" else None
     notes: list[str] = []
     explicit_dimensions = parse_size(args.size)
 
@@ -125,12 +127,12 @@ def resolve_shape(
     else:
         aspect = ""
         if args.command == "edit" and references:
-            first = references[0]
+            first = primary
             if not is_url(first):
                 dimensions = image_dimensions(Path(first))
                 if dimensions:
                     aspect, remapped = closest_reference_aspect(args.model, *dimensions)
-                    notes.append("aspect_from_first_reference_image")
+                    notes.append("aspect_from_primary_reference_image" if getattr(args, "primary_image_index", 0) else "aspect_from_first_reference_image")
                     if remapped:
                         notes.extend(
                             [
@@ -480,6 +482,7 @@ def build_parser() -> argparse.ArgumentParser:
     edit = subparsers.add_parser("edit", help="Edit images using URL or local-file references.")
     add_common_arguments(edit)
     edit.add_argument("--image", action="append", help="Reference image path or URL. Repeat for multiple references.")
+    edit.add_argument("--primary-image-index", type=int, default=0, help="Zero-based index of the image being edited.")
     edit.add_argument("--use-latest", action="store_true", help="Use latest locally saved image output.")
 
     return parser

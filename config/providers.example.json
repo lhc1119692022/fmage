@@ -40,12 +40,6 @@
       "response_format": "url",
       "timeout": 600,
       "api_key": ""
-    },
-    "zenmux-vertex-image": {
-      "transport": "zenmux-vertex",
-      "base_url": "https://zenmux.ai/api/vertex-ai",
-      "model": "google/gemini-3.1-flash-image",
-      "api_key": ""
     }
   }
 }

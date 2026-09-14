@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,14 @@ import urllib.request
 
 
 DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+
+
+def primary_reference(references: list[str], index: int = 0) -> str:
+    if index < 0 or index >= len(references):
+        raise ValueError("primary_image_index is outside the supplied image list.")
+    return references[index]
+
+
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 ALLOWED_IMAGE_CONTENT_TYPES = {
     "application/octet-stream",
@@ -382,6 +391,7 @@ def save_response_images_from_data(
         raise RuntimeError(f"API response does not contain a data list: {json.dumps(response)[:1000]}")
 
     saved: list[Path] = []
+    seen_digests: set[str] = set()
     for index, item in enumerate(data, start=1):
         if not isinstance(item, dict):
             continue
@@ -396,6 +406,12 @@ def save_response_images_from_data(
 
         if not image_bytes:
             continue
+
+        if len(data) > 1:
+            digest = hashlib.sha256(image_bytes).hexdigest()
+            if digest in seen_digests:
+                continue
+            seen_digests.add(digest)
 
         ext = sniff_extension(image_bytes, preferred_format)
         direct_output_dir = os.environ.get("FMAGE_DIRECT_OUTPUT_DIR", "").strip()

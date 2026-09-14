@@ -18,7 +18,6 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 import banana_models
 import ezai_banana_transport as transport
-import zenmux_vertex_transport as zenmux_transport
 
 
 PNG_BYTES = base64.b64decode(
@@ -264,67 +263,6 @@ class EndpointAndPayloadTests(unittest.TestCase):
 
 
 class BananaModelRuleTests(unittest.TestCase):
-    def test_provider_wire_models_share_capability_without_being_interchangeable(self) -> None:
-        ezai = banana_models.resolve_model(transport.TRANSPORT_NAME, "nano-banana-2")
-        zenmux = banana_models.resolve_model(
-            zenmux_transport.TRANSPORT_NAME,
-            "google/gemini-3.1-flash-image",
-        )
-
-        self.assertEqual(ezai["canonical_model"], "nano-banana-2")
-        self.assertEqual(zenmux["canonical_model"], "nano-banana-2")
-        self.assertEqual(ezai["wire_model"], "nano-banana-2")
-        self.assertEqual(zenmux["wire_model"], "google/gemini-3.1-flash-image")
-        for key in (
-            "resolutions",
-            "aspect_ratios",
-            "thinking_levels",
-            "default_thinking_level",
-        ):
-            self.assertEqual(zenmux[key], ezai[key])
-
-    def test_provider_wire_model_ids_cannot_cross_contracts(self) -> None:
-        with self.assertRaisesRegex(ValueError, "belongs to provider contract"):
-            banana_models.resolve_model(
-                zenmux_transport.TRANSPORT_NAME,
-                "gemini-3.1-flash-image-preview",
-            )
-
-    def test_zenmux_transport_preserves_its_wire_model_and_nano_tokens(self) -> None:
-        args = zenmux_transport.build_parser().parse_args(
-            [
-                "generate",
-                "--prompt",
-                "test",
-                "--base-url",
-                "https://zenmux.ai/api/vertex-ai",
-                "--model",
-                "google/gemini-3.1-flash-image",
-                "--resolution",
-                "512px",
-                "--aspect",
-                "21:9",
-                "--dry-run",
-            ]
-        )
-
-        result = zenmux_transport.run_generate(args)
-        parameters = result["request"]["parameters"]
-
-        self.assertEqual(parameters["aspectRatio"], "21:9")
-        self.assertEqual(parameters["sampleImageSize"], "512")
-        self.assertIn("/publishers/google/models/gemini-3.1-flash-image:predict", result["endpoint"])
-
-    def test_512_wire_serialization_is_scoped_to_each_nano_contract(self) -> None:
-        self.assertEqual(
-            zenmux_transport.zenmux_resolution_value("google/gemini-3.1-flash-image", "512px"),
-            "512",
-        )
-        self.assertEqual(
-            zenmux_transport.zenmux_resolution_value("vendor/custom-image-model", "512px"),
-            "512px",
-        )
-
     def test_ezai_transport_does_not_import_image_series_transport(self) -> None:
         source = (SCRIPTS_DIR / "ezai_banana_transport.py").read_text(encoding="utf-8")
         self.assertNotIn("openai_images_transport", source)
