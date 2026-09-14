@@ -1024,6 +1024,18 @@ function bananaModelCapability(provider) {
 }
 
 function enforceModelCapabilityPolicy(args = {}, provider) {
+  const quality = nonEmptyString(args.quality);
+  const supportsExtendedQuality =
+    provider.transport === TRANSPORT_OPENAI_IMAGES &&
+    /^gpt-image-2\.5(?:$|-)/iu.test(nonEmptyString(provider.model) || "");
+  if (["xhigh", "max"].includes(quality) && !supportsExtendedQuality) {
+    throw new Error(
+      `quality "${quality}" is not supported by provider "${provider.name}" model "${provider.model}" ` +
+        `(transport "${provider.transport}"). xhigh and max require a gpt-image-2.5 series model ` +
+        "with the openai-images transport. Supported values: low, medium, high, auto. " +
+        "No transport was started; choose a supported quality or explicitly select a compatible provider.",
+    );
+  }
   const thinkingLevel = nonEmptyString(args.thinking_level)?.toLowerCase();
   if (!thinkingLevel) return args;
 
@@ -2041,10 +2053,6 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
   const outputDir = finalOutputRoot(args, provider);
   const taskId = createTaskId(`${command}_batch`);
   const batchRoot = join(root, taskId);
-  if (!args.dry_run) {
-    await mkdir(batchRoot, { recursive: true });
-  }
-
   const needsLatestImages =
     command === "edit" && (args.use_latest || jobs.some((job) => Boolean(job.use_latest)));
   const latestImages = needsLatestImages ? await loadLatestImages(provider.config) : [];
@@ -2058,6 +2066,9 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     }
     return jobArgs;
   });
+  if (!args.dry_run) {
+    await mkdir(batchRoot, { recursive: true });
+  }
   const submittedDate = new Date();
   const submittedAt = submittedDate.toISOString();
   const outputTimestamp = timestampForPath(submittedDate);
@@ -2429,7 +2440,7 @@ function commonProperties(editing = false) {
       type: "string",
       enum: ["low", "medium", "high", "xhigh", "max", "auto"],
       description:
-        "Delivery tier. gpt-image-2.5 series models support low, medium, high, xhigh, max, and auto; older image models support low, medium, high, and auto. Always pass an explicitly requested tier.",
+        "Delivery tier. xhigh and max are exclusive to gpt-image-2.5 series models using openai-images, not Nano Banana or other models/transports. This shared enum is not a capability list for every provider. Incompatible explicit tiers are rejected before transport execution; never silently downgrade or switch providers. Otherwise supported tiers are low, medium, high, and auto. Always pass an explicitly requested tier.",
     },
     quality_user_requested: {
       type: "boolean",
