@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
@@ -18,6 +19,7 @@ PLUGIN_NAME = "fmage"
 DEFAULT_MARKETPLACE = "personal"
 MAX_DEFAULT_PROMPTS = 3
 EXPECTED_MCP_TOOL_NAMES = {
+    "workflow_image",
     "regress_image",
     "trace_image_job_plan",
     "probe_image_generation",
@@ -29,6 +31,7 @@ EXPECTED_MCP_TOOL_NAMES = {
     "get_provider_status",
 }
 REQUIRED_SKILLS = {
+    "fmage-workflow": True,
     "fmage": True,
     "fmage-config": True,
     "fmage-direct": False,
@@ -215,6 +218,8 @@ def verify_cached_plugin(cache_path: Path) -> None:
         cache_path / ".codex-plugin" / "plugin.json",
         cache_path / ".mcp.json",
         cache_path / "mcp" / "server.mjs",
+        cache_path / "mcp" / "workflows.mjs",
+        cache_path / "config" / "workflows.example.json",
         cache_path / "scripts" / "gemini_generate_content_transport.py",
     ]
     for skill_name in REQUIRED_SKILLS:
@@ -304,6 +309,18 @@ def refresh_plugin(*, check_only: bool) -> None:
         [sys.executable, str(helper_path("update_plugin_cachebuster.py")), str(PLUGIN_ROOT)]
     )
     require_success(cachebuster, "updating plugin cachebuster")
+
+    records = plugin_list(cli).get("installed", [])
+    active = next((r for r in records if r.get("pluginId") == f"{PLUGIN_NAME}@{marketplace}"), {})
+    old_version = active.get("version", "")
+    old_token = old_version.rsplit(".", 1)[-1]
+    new_token = source_version().rsplit(".", 1)[-1]
+    if old_token.isdigit() and len(old_token) == 14 and new_token <= old_token:
+        next_time = max(datetime.strptime(old_token, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc) + timedelta(seconds=1), datetime.now(timezone.utc))
+        recovery = run_command([sys.executable, str(helper_path("update_plugin_cachebuster.py")), str(PLUGIN_ROOT), "--cachebuster", next_time.strftime("%Y%m%d%H%M%S")])
+        require_success(recovery, "recovering monotonic cachebuster")
+    if old_version and source_version().split("+", 1)[-1] <= old_version.split("+", 1)[-1]:
+        raise RuntimeError("Target cachebuster must be newer than the installed version.")
 
     install = run_command([str(cli), "plugin", "add", f"{PLUGIN_NAME}@{marketplace}"])
     require_success(install, "reinstalling plugin")

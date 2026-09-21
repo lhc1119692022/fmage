@@ -1,0 +1,7 @@
+interface:
+  display_name: "Fmage 工作流"
+  short_description: "附图即可运行默认工作流，无需提示词，自动取图并保存"
+  default_prompt: "Use $fmage-workflow to run the default workflow on my attached image immediately with configured defaults unless I specify overrides. No extra prompt or confirmation is needed; retrieve and show the result images."
+
+policy:
+  allow_implicit_invocation: true

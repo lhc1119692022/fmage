@@ -140,6 +140,13 @@ def migrate_file(path: Path, *, check_only: bool = False) -> list[str]:
     if not _is_mapping(payload):
         raise ValueError("Fmage configuration must contain a JSON object.")
     changes = migrate_payload(payload)
+    workflow_defaults = json.loads(
+        (PLUGIN_ROOT / "config" / "workflows.example.json").read_text(encoding="utf-8")
+    )
+    for name, value in workflow_defaults.items():
+        if name not in payload:
+            payload[name] = value
+            changes.append(f"added workflow configuration field: {name}")
     if changes and not check_only:
         path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",

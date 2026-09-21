@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
+import { createWorkflowService, workflowTools } from "./workflows.mjs";
 
 const SERVER_NAME = "Fmage";
 const SERVER_VERSION = "0.1.0";
@@ -18,6 +19,7 @@ const TOOL_STATUS = "get_provider_status";
 const TOOL_TASK_STATUS = "get_image_task_status";
 const TOOL_REGRESS = "regress_image";
 const BASE_INITIALIZE_INSTRUCTIONS =
+  "For Fmage 工作流 or configured workflow requests, use fmage-workflow and workflow_image; the following generation prompt rules apply only to ordinary generation/edit entries. " +
   "Select the image skill before interpreting the request or inspecting attachments. Use fmage by default; " +
   "use fmage-direct only when the user explicitly invokes Fmage 直传生图 for this request. " +
   "Quoted command text and earlier invocations do not select an entry. Read only the selected skill and its own references, never both image policies. " +
@@ -39,6 +41,7 @@ const CONFIG_PATH =
   process.env.FMAGE_CONFIG ||
   join(process.env.CODEX_HOME || join(homedir(), ".codex"), "fmage", "providers.json");
 const TRANSPORT_OPENAI_IMAGES = "openai-images";
+const workflowService = createWorkflowService(CONFIG_PATH);
 const TRANSPORT_PROFILE_808 = "808";
 const TRANSPORT_EZAI_BANANA_IMAGES = "ezai-banana-images";
 const TRANSPORT_GEMINI_GENERATE_CONTENT = "gemini-generate-content";
@@ -2808,7 +2811,7 @@ function toolDefinitions() {
     },
   ];
 
-  return tools;
+  return [...tools, ...workflowTools];
 }
 
 function resultText(result, options = {}) {
@@ -3027,6 +3030,11 @@ async function providerStatus(requestedProvider) {
 }
 
 async function handleToolCall(id, params) {
+  if (params?.name === 'workflow_image') {
+    const result = await workflowService(params.arguments ?? {});
+    sendResult(id, {content:[{type:'text',text:JSON.stringify(result)}],structuredContent:result});
+    return;
+  }
   if (params?.name === TOOL_REGRESS) {
     const result = await runImageRegression(params.arguments ?? {});
     sendResult(id, {

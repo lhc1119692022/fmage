@@ -19,6 +19,7 @@ STANDARD_IMAGE_TOOLS = {
     "edit_image_batch",
 }
 BASELINE_TOOL_NAMES = STANDARD_IMAGE_TOOLS | {
+    "workflow_image",
     "regress_image",
     "trace_image_job_plan",
     "probe_image_generation",
@@ -26,6 +27,7 @@ BASELINE_TOOL_NAMES = STANDARD_IMAGE_TOOLS | {
     "get_provider_status",
 }
 BASELINE_INSTRUCTIONS = (
+    "For Fmage 工作流 or configured workflow requests, use fmage-workflow and workflow_image; the following generation prompt rules apply only to ordinary generation/edit entries. "
     "Select the image skill before interpreting the request or inspecting attachments. Use fmage by default; "
     "use fmage-direct only when the user explicitly invokes Fmage 直传生图 for this request. "
     "Quoted command text and earlier invocations do not select an entry. Read only the selected skill and its own references, never both image policies. "

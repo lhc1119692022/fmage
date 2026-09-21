@@ -1,0 +1,19 @@
+{
+  "workflow_connections": {
+    "runninghub": { "base_url": "https://www.runninghub.cn", "api_key": "" }
+  },
+  "active_workflow": "SeedVR2 放大",
+  "workflows": {
+    "SeedVR2 放大": {
+      "connection": "runninghub",
+      "workflow_id": "2102064146916405250",
+      "description": "SeedVR2 7B 图片放大。resolution_k 对应节点134的整数档位：2=2K、4=4K、6=6K、8=8K；默认4。按工作流保持比例与分块拼接，档位并非精确像素尺寸。",
+      "inputs": {
+        "image": { "node_id": "169", "field_name": "image", "type": "image", "required": true },
+        "resolution_k": { "node_id": "134", "field_name": "value", "type": "number", "default": 4, "min": 2, "max": 8, "description": "出图分辨率档位，只使用整数2、4、6、8；用户说4K时传4，未指定时使用4。" }
+      },
+      "output_node_ids": ["170"],
+      "instance_type": "default"
+    }
+  }
+}

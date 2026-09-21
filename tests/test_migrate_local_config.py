@@ -15,6 +15,21 @@ from migrate_local_config import migrate_file, migrate_payload
 
 
 class MigrateLocalConfigTests(unittest.TestCase):
+    def test_workflow_defaults_are_added_once_and_existing_entries_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "providers.json"
+            payload = {"providers": {}, "workflow_connections": {"custom": {"api_key": "test-secret"}}, "workflows": {"custom": {"workflow_id": "123"}}, "active_workflow": "custom"}
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            migrate_file(path)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), payload)
+            path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
+            self.assertTrue(migrate_file(path))
+            migrated = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(migrated["workflows"]["SeedVR2 放大"]["output_node_ids"], ["170"])
+            self.assertEqual(migrated["workflows"]["SeedVR2 放大"]["inputs"]["resolution_k"]["default"], 4)
+            self.assertEqual(migrated["workflow_connections"]["runninghub"]["api_key"], "")
+            self.assertEqual(migrate_file(path), [])
+
     def test_migrates_ezai_nano_to_native_gemini_protocol(self) -> None:
         payload = {
             "active_providers": ["EzAI-nano", "808-MJ"],
