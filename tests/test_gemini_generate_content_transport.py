@@ -338,7 +338,7 @@ class ServerRoutingTests(unittest.TestCase):
                 "prompt": "test image",
                 "resolution": "2k",
                 "resolution_user_requested": True,
-                "aspect": "16:9",
+                "aspect": "2:1",
                 "dry_run": True,
                 "verbose": True,
             },
@@ -350,6 +350,8 @@ class ServerRoutingTests(unittest.TestCase):
             "https://api.808relay.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent",
         )
         self.assertEqual(result["request"]["generation_config"]["imageConfig"]["imageSize"], "2K")
+        self.assertEqual(result["request"]["generation_config"]["imageConfig"]["aspectRatio"], "16:9")
+        self.assertIn("by outpainting only", json.dumps(result["request"]))
 
 
 if __name__ == "__main__":

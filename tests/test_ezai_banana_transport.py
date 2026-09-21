@@ -188,8 +188,7 @@ class EndpointAndPayloadTests(unittest.TestCase):
                 "7:3",
                 model="nano-banana-pro",
             )
-            with self.assertRaisesRegex(ValueError, "does not support aspect ratio"):
-                transport.resolve_shape(unsupported_alias, [])
+            self.assertEqual(transport.resolve_shape(unsupported_alias, [])[1], "21:9")
 
             derived = banana_args(
                 "generate",
@@ -201,7 +200,7 @@ class EndpointAndPayloadTests(unittest.TestCase):
             _, derived_aspect, _, _ = transport.resolve_shape(derived, [])
             self.assertEqual(derived_aspect, "21:9")
 
-    def test_nano_banana_pro_rejects_512_extreme_ratio_and_thinking(self) -> None:
+    def test_nano_banana_pro_fits_extreme_ratio_but_rejects_512_and_thinking(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
             resolution_args = banana_args(
@@ -221,8 +220,9 @@ class EndpointAndPayloadTests(unittest.TestCase):
                 "8:1",
                 model="nano-banana-pro",
             )
-            with self.assertRaisesRegex(ValueError, "does not support aspect ratio"):
-                transport.resolve_shape(aspect_args, [])
+            _, aspect, _, notes = transport.resolve_shape(aspect_args, [])
+            self.assertEqual(aspect, "21:9")
+            self.assertIn("canvas_fit_outpaint_preserve_content", notes)
 
             thinking_args = banana_args(
                 "generate",

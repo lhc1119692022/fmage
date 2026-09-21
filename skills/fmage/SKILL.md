@@ -5,6 +5,8 @@ description: Use Fmage MCP tools for raster image generation/editing with the co
 
 # Fmage
 
+- For Banana/Gemini requests, pass the intended aspect ratio or size unchanged. The transport automatically fits unsupported ratios to the nearest supported canvas before the first provider request, preserving content and geometry by extending only the necessary edges. This is normal initial-request adaptation, not a failed-call retry; do not reject the ratio or ask for approval just to apply this rule. Report the actual supported output canvas and do not promise a crop back to the original ratio. Actual failed/partial calls still follow the stop rule below.
+
 - Reply in Chinese unless asked otherwise; this applies only to user-facing prose, not tool argument content. Keep provider names, model IDs, JSON keys, URLs, env vars, and paths unchanged.
 - Use Fmage MCP tools, not scripts. Choose `generate_image` or `edit_image` for one request and the matching batch tool for multiple independent requests. Provider routing is automatic after provider selection; call the selected base tool directly without enumerating or rediscovering tools.
 - Fast path for normal image work: perform exactly one concise understanding-and-expansion pass in the current turn, preserve every explicit user constraint, add only missing details needed by the image model, and call the matching base tool immediately. If the request is already complete, keep the prompt nearly unchanged. Output only the final prompt; do not write analysis, a plan, multiple candidates, a separate prompt-optimizer call, or a status/trace preflight.

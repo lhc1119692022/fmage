@@ -74,6 +74,8 @@ def closest_reference_aspect(model: str, width: int, height: int) -> tuple[str, 
 
 
 def apply_reference_aspect_fit(prompt: str, aspect: str, notes: list[str]) -> str:
+    if "canvas_fit_outpaint_preserve_content" in notes:
+        return banana_models.apply_canvas_fit(prompt, aspect, notes)
     if REFERENCE_ASPECT_REMAPPED_NOTE not in notes:
         return prompt
     return (
@@ -117,12 +119,13 @@ def resolve_shape(
 
     if explicit_dimensions:
         width, height = explicit_dimensions
-        aspect = aspect_from_dimensions(args.model, width, height)
+        aspect = banana_models.fit_canvas_aspect(TRANSPORT_NAME, args.model, f"{width}:{height}", notes)
+        notes.append(f"original_requested_size_{width}x{height}")
         notes.append("aspect_from_explicit_size")
         if args.aspect:
             notes.append("explicit_size_overrode_aspect")
     elif args.aspect:
-        aspect = normalize_aspect(args.aspect)
+        aspect = banana_models.fit_canvas_aspect(TRANSPORT_NAME, args.model, args.aspect, notes)
         notes.append("aspect_explicit")
     else:
         aspect = ""
@@ -145,7 +148,7 @@ def resolve_shape(
         if not aspect:
             inferred_aspect, inferred_note = support.infer_aspect_from_prompt(support.read_prompt(args))
             if inferred_aspect is not None:
-                aspect = normalize_aspect(str(inferred_aspect))
+                aspect = banana_models.fit_canvas_aspect(TRANSPORT_NAME, args.model, str(inferred_aspect), notes)
                 if inferred_note:
                     notes.append(inferred_note)
         if not aspect:
@@ -167,7 +170,7 @@ def resolve_shape(
 
     requested_size = (
         f"{explicit_dimensions[0]}x{explicit_dimensions[1]}"
-        if explicit_dimensions
+        if explicit_dimensions and "canvas_fit_outpaint_preserve_content" not in notes
         else f"{resolution}@{aspect}"
     )
     return resolution, aspect, requested_size, notes
@@ -307,6 +310,7 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     validate_common(args)
     prompt = support.read_prompt(args)
     resolution, aspect, requested_size, shape_notes = resolve_shape(args, [])
+    prompt = apply_reference_aspect_fit(prompt, aspect, shape_notes)
     payload = build_payload(args, prompt, resolution, aspect)
     url = endpoint(args.base_url, "generate")
 

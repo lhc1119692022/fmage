@@ -5,6 +5,8 @@ description: Explicit-only Fmage 直传生图 entry. Use Fmage MCP tools for ras
 
 # Fmage 直传生图
 
+- For Banana/Gemini requests, pass the intended aspect ratio or size unchanged. The transport automatically fits unsupported ratios to the nearest supported canvas before the first provider request and adds only the canvas-fit constraint needed to preserve content and geometry. Do not rewrite the prompt yourself for this adaptation, reject the ratio, or ask for approval just to apply it. Report the actual supported output canvas and do not promise a crop back. Actual failed/partial calls still follow the stop rule.
+
 ## Entry Selection
 
 - Use this skill only when the user explicitly invokes `/Fmage 直传生图` or `$fmage-direct` for the current image request. Select this entry before any prompt interpretation, attachment inspection, or other image-request processing. Do not load or apply the default `fmage` expansion policy for that request.

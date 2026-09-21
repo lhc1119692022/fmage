@@ -243,6 +243,43 @@ def validate_aspect(contract: str, model: str, aspect: str) -> str:
     return canonical
 
 
+def fit_canvas_aspect(contract: str, model: str, value: str, notes: list[str]) -> str:
+    """Resolve a supported canvas before submission, preserving content geometry."""
+    canonical = normalize_aspect(value)
+    left, right = (float(part) for part in canonical.split(":"))
+    if not math.isfinite(left) or not math.isfinite(right):
+        raise ValueError(f"Invalid aspect ratio '{value}'.")
+    try:
+        return match_aspect_ratio(contract, model, canonical)
+    except ValueError:
+        aspect = nearest_aspect_ratio(contract, model, canonical)
+        notes.extend([
+            "canvas_aspect_mapped_to_nearest_supported",
+            f"canvas_content_aspect_{canonical}",
+            f"canvas_aspect_target_{aspect}",
+            "canvas_fit_outpaint_preserve_content",
+        ])
+        return aspect
+
+
+def apply_canvas_fit(prompt: str, aspect: str, notes: list[str]) -> str:
+    if "canvas_fit_outpaint_preserve_content" not in notes:
+        return prompt
+    content_aspect = next(note.removeprefix("canvas_content_aspect_") for note in notes
+                          if note.startswith("canvas_content_aspect_"))
+    return (
+        f"{prompt}\n\nAutomatic canvas-fit requirement: the requested {content_aspect} "
+        f"content area must fit inside the supported {aspect} output canvas by outpainting only. "
+        "Preserve all existing visible content, subjects, objects, composition, framing, "
+        "relative geometry, typography, and original image area. For generation, compose the "
+        "requested content within its original aspect ratio and extend only the surrounding canvas. "
+        "Do not crop, stretch, squeeze, remove, or cover any original content. Extend only the "
+        "necessary canvas edges with visually coherent continuation that matches the source "
+        "perspective, lighting, colors, texture, and depth. Follow any explicit border styling "
+        "requested by the user. Deliver the supported canvas without cropping it back."
+    )
+
+
 def resolve_thinking_level(contract: str, model: str, value: str | None) -> str | None:
     capability = resolve_model(contract, model)
     configured = str(value or "").strip().lower()

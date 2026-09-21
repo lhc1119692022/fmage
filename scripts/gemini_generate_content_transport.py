@@ -165,14 +165,16 @@ def resolve_shape(
     notes: list[str] = []
     dimensions = parse_size(args.size)
     if dimensions:
-        aspect = banana_models.aspect_from_dimensions(TRANSPORT_NAME, args.model, *dimensions)
+        aspect = banana_models.fit_canvas_aspect(TRANSPORT_NAME, args.model, f"{dimensions[0]}:{dimensions[1]}", notes)
         resolution = banana_models.resolution_from_edge(max(dimensions))
-        requested_size = f"{dimensions[0]}x{dimensions[1]}"
+        requested_size = (f"{resolution}@{aspect}" if "canvas_fit_outpaint_preserve_content" in notes
+                          else f"{dimensions[0]}x{dimensions[1]}")
+        notes.append(f"original_requested_size_{dimensions[0]}x{dimensions[1]}")
         notes.extend(["aspect_from_explicit_size", f"explicit_size_mapped_to_{resolution.lower()}_tier"])
         return aspect, banana_models.validate_resolution(TRANSPORT_NAME, args.model, resolution), requested_size, notes
 
     if args.aspect:
-        aspect = banana_models.validate_aspect(TRANSPORT_NAME, args.model, parse_aspect(args.aspect))
+        aspect = banana_models.fit_canvas_aspect(TRANSPORT_NAME, args.model, args.aspect, notes)
         notes.append("aspect_explicit")
     else:
         aspect = ""
@@ -181,16 +183,17 @@ def resolve_shape(
             if not is_url(first):
                 first_dimensions = image_dimensions(Path(first))
                 if first_dimensions:
-                    aspect = banana_models.nearest_aspect_ratio(
+                    aspect = banana_models.fit_canvas_aspect(
                         TRANSPORT_NAME,
                         args.model,
-                        first_dimensions[0] / first_dimensions[1],
+                        f"{first_dimensions[0]}:{first_dimensions[1]}",
+                        notes,
                     )
                     notes.append("aspect_from_primary_reference_image" if getattr(args, "primary_image_index", 0) else "aspect_from_first_reference_image")
         if not aspect:
             inferred, note = infer_aspect_from_prompt(read_prompt(args))
             if inferred:
-                aspect = banana_models.validate_aspect(TRANSPORT_NAME, args.model, inferred)
+                aspect = banana_models.fit_canvas_aspect(TRANSPORT_NAME, args.model, inferred, notes)
                 if note:
                     notes.append(note)
         if not aspect:
@@ -396,6 +399,7 @@ def run_request(args: argparse.Namespace, references: list[str]) -> dict[str, An
     validate_common(args)
     prompt = read_prompt(args)
     aspect, resolution, requested_size, notes = resolve_shape(args, references)
+    prompt = banana_models.apply_canvas_fit(prompt, aspect, notes)
     payload = build_payload(args, prompt, references, aspect, resolution)
     url = generate_content_endpoint(args.base_url, args.model)
     if args.dry_run:
