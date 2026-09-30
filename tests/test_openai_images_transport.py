@@ -136,15 +136,15 @@ class RequestHeaderTests(unittest.TestCase):
     def test_json_request_sets_provider_compatible_headers(self) -> None:
         captured: dict[str, object] = {}
 
-        class FakeResponse:
+        class FakeResponse(BytesIO):
+            def __init__(self):
+                super().__init__(b'{"data": []}')
+
             def __enter__(self):
                 return self
 
             def __exit__(self, exc_type, exc, tb):
                 return False
-
-            def read(self):
-                return b'{"data": []}'
 
         def fake_urlopen(request, timeout):
             captured["headers"] = dict(request.headers)

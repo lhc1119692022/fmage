@@ -31,6 +31,12 @@ python scripts/refresh_local_runtime.py
 
 Use `python scripts/refresh_local_runtime.py --check` for a read-only verification. The host keeps skill and MCP catalogs per task, so start a new Codex task after a refresh; this does not resubmit any image request.
 
+Provider `timeout` and the overall image-task budget have a 600-second minimum; larger values are preserved. Reference downloads, submission, polling, and result delivery share that budget, so each HTTP operation uses only the remaining time. Status queries are capped at 30 seconds. A slowly streamed response also consumes the same budget. The helper process keeps an additional 60-second cleanup allowance. Batch foreground waits and workflow status polling windows are at most 40 seconds; a running image batch continues in the background. Completed workflow output downloads retain their 600-second request allowance. Refresh adds or raises provider `timeout` fields in the local configuration, and dry-runs/provider status report the configured request timeout.
+
+Asynchronous image tasks are queried immediately after their ID is received. Generic OpenAI-compatible polling then uses 5-second intervals for the first 120 seconds of polling and 10-second intervals thereafter; 808 keeps its 5-second interval. 808 status queries retrieve base64 results directly while preserving the configured submission response format. Provider errors do not trigger another generation/edit POST, parameter stripping, or multipart-field switching. For generic `openai-images` providers, an optional provider `image_field` setting selects `auto`, `image`, or `image[]` before the first edit submission. 808 retains its fixed `image[]` contract. Resolve compatibility before a new user-authorized request.
+
+An 808 connection can close before that timeout even when the server has accepted the task. A submission failure before the task ID arrives now records `submission_uncertain` and `remote_status=unknown` in `remote-task.json`, with stage timing preserved in batch results. No generation is resubmitted. Once the full existing task ID is known, explicitly retrieve it with `get_image_task_status({"provider":"808-image","remote_task_id":"task_..."})`; this uses GET queries and defaults to base64 results. The original prompt, model, and delivery settings are not assumed from the current provider configuration. Local Fmage task status remains available through `task_id`. Use `dry_run=true` for a keyless remote-routing check.
+
 The plugin card supports at most three `interface.defaultPrompt` entries. Those card actions are separate from the four skill entry points above, which are declared by each skill's `agents/openai.yaml`. To prevent a missing Fmage MCP catalog from silently falling back to native image generation, keep the generic image skill disabled and disable the host feature as well:
 
 ```text
@@ -61,3 +67,13 @@ PNG 结果同时返回宽高和格式，避免再执行命令读取尺寸。
 下载失败保留已保存图片和任务 ID，经用户确认后重取结果。结果链接失效或平台清理结果后，
 不能保证恢复，所以成功后应及时下载。第一版不支持视频、音频、加密工作流密码和输出重定向。
 测试使用模拟 API，不代表已对账号权限、模型环境和真实 CDN 完成验证。
+
+## VS Code adapter
+
+VS Code's MCP integration discovers Fmage tools but does not automatically load the Codex plugin manifest or its skills. Install the VS Code adapter to synchronize adapted skills and configure the local MCP server without replacing other servers:
+
+```text
+python scripts/install_vscode_adapter.py
+```
+
+Use `python scripts/install_vscode_adapter.py --check` for a read-only check. See `vscode/README.md` for the supported paths, natural-language entry points, and reload step.

@@ -20,6 +20,14 @@ import urllib.request
 import uuid
 
 from transport_common import (
+    MIN_TIMEOUT_SECONDS,
+    timeout_seconds,
+    STATUS_QUERY_TIMEOUT_SECONDS,
+    request_budget,
+    request_timeout,
+    bounded_deadline,
+    read_response_bytes,
+    with_request_budget,
     build_prompt_provenance,
     collect_image_metadata,
     image_dimensions,
@@ -594,10 +602,11 @@ def multipart_request(
 
 def perform_request(request: urllib.request.Request, timeout: int) -> dict[str, Any]:
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = response.read()
+        with urllib.request.urlopen(request, timeout=request_timeout(timeout)) as response:
+            payload = read_response_bytes(response)
     except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
+        with error:
+            body = read_response_bytes(error).decode("utf-8", errors="replace")
         raise ApiError(error.code, body) from error
     except urllib.error.URLError as error:
         raise RuntimeError(f"Network error: {error}") from error
@@ -608,6 +617,10 @@ def perform_request(request: urllib.request.Request, timeout: int) -> dict[str, 
         raise RuntimeError(f"API did not return JSON. First bytes: {payload[:200]!r}") from error
 
 
+def submit_once(call, payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    return call(payload), []
+
+
 def request_with_compat_retry(
     call,
     payload: dict[str, Any],
@@ -615,42 +628,9 @@ def request_with_compat_retry(
     abort_retry: Callable[[ApiError], bool] | None = None,
     protected_fields: set[str] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
-    retries: list[str] = []
-    last_error: ApiError | None = None
-    try:
-        return call(payload), retries
-    except ApiError as error:
-        last_error = error
-        if abort_retry and abort_retry(error):
-            raise
-        if error.status not in {400, 404, 415, 422}:
-            raise
-
-    protected = protected_fields or set()
-    trimmed = {
-        key: value
-        for key, value in payload.items()
-        if key not in OPTIONAL_FIELDS or key in protected
-    }
-    if trimmed != payload:
-        retries.append(f"{retry_label}: dropped optional fields for provider compatibility")
-        try:
-            return call(trimmed), retries
-        except ApiError as error:
-            last_error = error
-            if abort_retry and abort_retry(error):
-                raise
-            if error.status not in {400, 404, 415, 422}:
-                raise
-
-    if trimmed.get("size") == "auto":
-        without_auto_size = {key: value for key, value in trimmed.items() if key != "size"}
-        retries.append(f"{retry_label}: dropped auto size for provider compatibility")
-        return call(without_auto_size), retries
-
-    if last_error:
-        raise last_error
-    raise RuntimeError("Provider compatibility retry failed without an API error.")
+    # Preserve the helper signature for callers, but never change settings and
+    # submit another paid request after a provider error.
+    return submit_once(call, payload)
 
 
 class PendingResponse(RuntimeError):
@@ -687,34 +667,48 @@ def poll_pending_response(
     total_timeout = max(0, int(getattr(args, "pending_total_timeout", 0) or 0))
     if total_timeout <= 0:
         return None, ["remote_task_pending"], first_status, False
+    total_timeout = max(timeout_seconds(total_timeout), timeout_seconds(args.timeout))
 
     endpoints = task_status_endpoints(args.base_url, task_id, command)
-    deadline = request_started + total_timeout
-    fast_until = request_started + max(0, int(args.pending_fast_window or 0))
-    fast_interval = max(1, int(args.pending_fast_interval or 20))
-    slow_interval = max(1, int(args.pending_slow_interval or 45))
+    deadline = bounded_deadline(request_started + total_timeout)
+    fast_until = time.monotonic() + max(0, int(args.pending_fast_window or 0))
+    fast_interval = max(1, int(args.pending_fast_interval or 5))
+    slow_interval = max(1, int(args.pending_slow_interval or 10))
     selected_endpoint: str | None = None
     last_status = first_status
     notes = ["remote_task_pending"]
+    first_query = True
 
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None, notes + ["remote_task_pending_timeout"], last_status, True
 
-        interval = fast_interval if time.monotonic() < fast_until else slow_interval
-        time.sleep(min(interval, max(0.0, remaining)))
+        if not first_query:
+            interval = fast_interval if time.monotonic() < fast_until else slow_interval
+            time.sleep(min(interval, remaining))
+        first_query = False
 
         candidates = [selected_endpoint] if selected_endpoint else endpoints
         endpoint_errors: list[int] = []
         for candidate in [item for item in candidates if item]:
             try:
-                response = json_get(candidate, api_key_value, min(args.timeout, max(1, int(deadline - time.monotonic()))))
+                if time.monotonic() >= deadline:
+                    return None, notes + ["remote_task_pending_timeout"], last_status, True
+                with request_budget(min(STATUS_QUERY_TIMEOUT_SECONDS, deadline - time.monotonic())):
+                    response = json_get(candidate, api_key_value, request_timeout(args.timeout))
             except ApiError as error:
                 endpoint_errors.append(error.status)
-                if error.status in {404, 405, 410, 429, 500, 502, 503, 504}:
+                if error.status in {404, 405, 410}:
                     continue
+                if error.status in {429, 500, 502, 503, 504}:
+                    selected_endpoint = candidate
+                    break
                 raise
+            except TimeoutError:
+                return None, notes + ["remote_task_status_timeout"], last_status, time.monotonic() >= deadline
+            if time.monotonic() >= deadline:
+                return None, notes + ["remote_task_pending_timeout"], last_status, True
             selected_endpoint = candidate
             pending = pending_status(response)
             if pending:
@@ -858,6 +852,7 @@ def api_key(args: argparse.Namespace) -> str:
     return value
 
 
+@with_request_budget
 def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     timing: dict[str, Any] = {"transport_started_at": iso_now()}
     validate_common(args)
@@ -868,6 +863,7 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     if args.dry_run:
         return {
             "dry_run": True,
+            "timeout_seconds": args.timeout,
             "endpoint": endpoint(args.base_url, "/images/generations"),
             "request": payload,
             "notes": size_notes,
@@ -881,11 +877,9 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     url = endpoint(args.base_url, "/images/generations")
     timing["provider_request_started_at"] = iso_now()
     request_started = time.monotonic()
-    response, retry_notes = request_with_compat_retry(
+    response, retry_notes = submit_once(
         lambda body: json_request(url, body, key, args.timeout),
         payload,
-        "generate",
-        protected_fields=protected_output_fields(args),
     )
     timing["provider_response_completed_at"] = iso_now()
     try:
@@ -930,6 +924,7 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+@with_request_budget
 def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     timing: dict[str, Any] = {"transport_started_at": iso_now()}
     validate_common(args)
@@ -957,6 +952,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     if args.dry_run:
         return {
             "dry_run": True,
+            "timeout_seconds": args.timeout,
             "endpoint": endpoint(args.base_url, "/images/edits"),
             "request": payload,
             "images": [str(path.resolve()) for path in image_paths],
@@ -986,29 +982,9 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
             args.timeout,
         )
 
-    try:
-        timing["provider_request_started_at"] = iso_now()
-        request_started = time.monotonic()
-        response, retry_notes = request_with_compat_retry(
-            call_with_field(image_field),
-            payload,
-            "edit",
-            abort_retry=should_retry_image_field,
-            protected_fields=protected_output_fields(args),
-        )
-    except ApiError as error:
-        if not should_retry_image_field(error):
-            raise
-        fallback_field = alternate_image_field(image_field)
-        request_started = time.monotonic()
-        response, retry_notes = request_with_compat_retry(
-            call_with_field(fallback_field),
-            payload,
-            "edit_image_field",
-            abort_retry=should_retry_image_field,
-            protected_fields=protected_output_fields(args),
-        )
-        retry_notes.append(f"edit: retried multipart field name {fallback_field} instead of {image_field}")
+    timing["provider_request_started_at"] = iso_now()
+    request_started = time.monotonic()
+    response, retry_notes = submit_once(call_with_field(image_field), payload)
     timing["provider_response_completed_at"] = iso_now()
     try:
         response = resolve_pending_response(
@@ -1068,11 +1044,11 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", default=configured_value(PROVIDER_IMAGE_MODEL, "PROVIDER_IMAGE_MODEL", DEFAULT_MODEL))
     parser.add_argument("--api-key-env", default="PROVIDER_API_KEY")
     parser.add_argument("--output-dir")
-    parser.add_argument("--timeout", type=int, default=240)
+    parser.add_argument("--timeout", type=timeout_seconds, default=MIN_TIMEOUT_SECONDS)
     parser.add_argument("--pending-total-timeout", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--pending-fast-window", type=int, default=120, help=argparse.SUPPRESS)
-    parser.add_argument("--pending-fast-interval", type=int, default=20, help=argparse.SUPPRESS)
-    parser.add_argument("--pending-slow-interval", type=int, default=45, help=argparse.SUPPRESS)
+    parser.add_argument("--pending-fast-interval", type=int, default=5, help=argparse.SUPPRESS)
+    parser.add_argument("--pending-slow-interval", type=int, default=10, help=argparse.SUPPRESS)
     parser.add_argument("--dry-run", action="store_true")
 
 

@@ -6,6 +6,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createWorkflowService, workflowTools } from "./workflows.mjs";
+import { MIN_TIMEOUT_SECONDS, timeoutSeconds } from "./timeout-policy.mjs";
 
 const SERVER_NAME = "Fmage";
 const SERVER_VERSION = "0.1.0";
@@ -29,13 +30,13 @@ const BASE_INITIALIZE_INSTRUCTIONS =
   "Do not create a separate plan, preparation pass, trace/status preflight, or repeated rewrite.";
 const MAX_EMBEDDED_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_CHILD_OUTPUT_BYTES = 2 * 1024 * 1024;
-const DEFAULT_HELPER_TIMEOUT_SECONDS = 360;
+const DEFAULT_HELPER_TIMEOUT_SECONDS = MIN_TIMEOUT_SECONDS;
 const HELPER_TIMEOUT_GRACE_SECONDS = 60;
-const BATCH_FOREGROUND_WAIT_SECONDS = 240;
-const PENDING_TOTAL_TIMEOUT_SECONDS = 500;
+const BATCH_FOREGROUND_WAIT_SECONDS = 40;
+const PENDING_TOTAL_TIMEOUT_SECONDS = MIN_TIMEOUT_SECONDS;
 const PENDING_POLL_FAST_WINDOW_SECONDS = 120;
-const PENDING_POLL_FAST_INTERVAL_SECONDS = 20;
-const PENDING_POLL_SLOW_INTERVAL_SECONDS = 45;
+const PENDING_POLL_FAST_INTERVAL_SECONDS = 5;
+const PENDING_POLL_SLOW_INTERVAL_SECONDS = 10;
 const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG_PATH =
   process.env.FMAGE_CONFIG ||
@@ -48,7 +49,6 @@ const TRANSPORT_GEMINI_GENERATE_CONTENT = "gemini-generate-content";
 const BANANA_MODEL_CAPABILITY_SPEC = JSON.parse(
   readFileSync(join(PLUGIN_ROOT, "config", "banana-model-capabilities.json"), "utf8"),
 );
-const OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS = 600;
 const OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT = "url";
 const OPENAI_IMAGES_808_SUPPORTED_MODELS = new Set([
   "gpt-image-2",
@@ -140,12 +140,17 @@ function resolveConfigDirectory(value, fallback) {
 }
 
 function outputDirectoryOverride(args) {
-  return nonEmptyString(args.output_dir);
+  return args.output_dir_user_requested === true ? nonEmptyString(args.output_dir) : null;
 }
 
 function configuredGlobalCacheRoot() {
   const config = readConfigForPaths();
   return resolveConfigDirectory(config?.cache_dir, join(configBaseDir(), "cache"));
+}
+
+function configuredGlobalOutputRoot() {
+  const config = readConfigForPaths();
+  return resolveConfigDirectory(config?.output_dir, null);
 }
 
 function providerSetting(provider, key) {
@@ -155,7 +160,7 @@ function providerSetting(provider, key) {
 function finalOutputRoot(args, provider) {
   return resolveConfigDirectory(
     outputDirectoryOverride(args) || providerSetting(provider, "output_dir"),
-    join(configBaseDir(), "outputs", provider.name),
+    configuredGlobalOutputRoot() || join(configBaseDir(), "outputs", provider.name),
   );
 }
 
@@ -219,12 +224,21 @@ function errorMessage(error) {
 }
 
 function compactFailureMessage(error) {
+  if (error?.stage === "submission_uncertain") return "submission connection lost; remote generation state unknown";
   const message = errorMessage(error).replace(/\s+/g, " ").trim();
   const http = message.match(/\bHTTP\s+(\d{3})\b/i);
   if (http) return `HTTP ${http[1]}`;
   if (/timed out/i.test(message)) return "timeout";
   if (/Network error/i.test(message)) return "network_error";
   return message.length > 160 ? `${message.slice(0, 157)}...` : message;
+}
+
+function transportFailureFields(error) {
+  return Object.fromEntries(
+    ["stage", "remote_task_id", "remote_status", "checkpoint", "generation_resubmitted"]
+      .filter((key) => error?.[key] !== undefined)
+      .map((key) => [key, error[key]]),
+  );
 }
 
 function jsonTrace(value) {
@@ -601,7 +615,7 @@ async function resolveProvider(requestedProvider, requireKey = true) {
     }
     openaiImages808 = transport === TRANSPORT_OPENAI_IMAGES ? {
       responseFormat,
-      timeoutSeconds: positiveInteger(configuredTimeout, OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS),
+      timeoutSeconds: timeoutSeconds(configuredTimeout),
     } : null;
   }
   let ezaiBanana = null;
@@ -644,11 +658,7 @@ async function resolveProvider(requestedProvider, requireKey = true) {
 }
 
 function helperTimeoutMilliseconds(value) {
-  const requestedTimeout = positiveInteger(value, 0);
-  const timeoutSeconds = requestedTimeout
-    ? requestedTimeout + HELPER_TIMEOUT_GRACE_SECONDS
-    : DEFAULT_HELPER_TIMEOUT_SECONDS;
-  return timeoutSeconds * 1000;
+  return (timeoutSeconds(value, DEFAULT_HELPER_TIMEOUT_SECONDS) + HELPER_TIMEOUT_GRACE_SECONDS) * 1000;
 }
 
 function appendBoundedOutput(current, chunk, streamName, child) {
@@ -713,7 +723,18 @@ function runProcess(command, argv, extraEnv = {}, options = {}) {
         return;
       }
       if (code !== 0) {
-        rejectOnce(new Error(stderr.trim() || stdout.trim() || `Fmage helper exited with code ${code}.`));
+        const error = new Error(stderr.trim() || stdout.trim() || `Fmage helper exited with code ${code}.`);
+        try {
+          const failure = JSON.parse(stdout);
+          if (failure.failure_type === "fmage_transport_failure") {
+            error.message = failure.error;
+            Object.assign(error, transportFailureFields(failure));
+            if (failure.timing && typeof failure.timing === "object") error.timing = failure.timing;
+          }
+        } catch {
+          // Other helpers still report plain stderr on failure.
+        }
+        rejectOnce(error);
         return;
       }
       try {
@@ -732,7 +753,7 @@ async function runImageRegression(args) {
     pythonCommand(),
     [REGRESSION_SCRIPT, "--input", image],
     { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
-    { timeoutSeconds: 120 },
+    { timeoutSeconds: MIN_TIMEOUT_SECONDS },
   );
   const output = normalizeDisplayPath(result.output);
   return {
@@ -768,7 +789,7 @@ function commonArguments(args, promptFile, provider) {
   const quality = args.quality ?? defaultQualityForProvider(provider);
   appendOption(argv, "--quality", quality);
   appendOption(argv, "--output-dir", outputDir);
-  appendOption(argv, "--timeout", args.timeout);
+  appendOption(argv, "--timeout", timeoutSeconds(args.timeout, provider.raw.timeout));
 
   if (provider.transport === "openai-images") {
     appendOption(argv, "--moderation", args.moderation ?? "low");
@@ -795,7 +816,9 @@ function commonArguments(args, promptFile, provider) {
     );
   }
 
-  appendOption(argv, "--pending-total-timeout", args._pending_total_timeout);
+  appendOption(argv, "--pending-total-timeout", args._pending_total_timeout
+    ? timeoutSeconds(args._pending_total_timeout, args.timeout, provider.raw.timeout)
+    : args._pending_total_timeout);
   appendOption(argv, "--pending-fast-window", args._pending_fast_window);
   appendOption(argv, "--pending-fast-interval", args._pending_fast_interval);
   appendOption(argv, "--pending-slow-interval", args._pending_slow_interval);
@@ -805,9 +828,10 @@ function commonArguments(args, promptFile, provider) {
 }
 
 function openaiImages808RequestTimeoutSeconds(args, provider) {
-  return positiveInteger(
+  return timeoutSeconds(
     args.timeout,
-    provider.openaiImages808?.timeoutSeconds ?? OPENAI_IMAGES_808_DEFAULT_TIMEOUT_SECONDS,
+    provider.raw.timeout,
+    provider.openaiImages808?.timeoutSeconds,
   );
 }
 
@@ -833,6 +857,13 @@ function providerTransportScript(provider) {
 
 function appendEditArguments(argv, args, provider) {
   const mapping = EDIT_ARGUMENT_MAPPINGS[provider.transport];
+  if (provider.transport === TRANSPORT_OPENAI_IMAGES && provider.transportProfile !== TRANSPORT_PROFILE_808) {
+    const imageField = nonEmptyString(provider.raw.image_field);
+    if (imageField && !["auto", "image", "image[]"].includes(imageField)) {
+      throw new Error('Provider image_field must be "auto", "image", or "image[]".');
+    }
+    appendOption(argv, "--image-field", imageField);
+  }
   if (Number.isInteger(args.primary_image_index)) {
     if (!mapping?.primaryImageIndex) {
       throw new Error(`Transport "${provider.transport}" does not support primary_image_index.`);
@@ -1794,6 +1825,7 @@ function updateTaskProgressFromSettled(task, settledResults) {
           images: Array.isArray(item.value.images) ? item.value.images : [],
           image_metadata: Array.isArray(item.value.image_metadata) ? item.value.image_metadata : [],
           manifest: item.value.manifest,
+          timeout_seconds: item.value.timeout_seconds,
           timing: item.value.timing,
         };
       }
@@ -1801,6 +1833,7 @@ function updateTaskProgressFromSettled(task, settledResults) {
         job_index: index + 1,
         status: "failed",
         error: compactFailureMessage(item.reason),
+        ...transportFailureFields(item.reason),
         timing: item.reason?.timing,
       };
     })
@@ -1931,6 +1964,7 @@ async function combineBatchResults({
           images: Array.isArray(item.value.images) ? item.value.images : [],
           image_metadata: Array.isArray(item.value.image_metadata) ? item.value.image_metadata : [],
           manifest: item.value.manifest,
+          timeout_seconds: item.value.timeout_seconds,
           timing: item.value.timing,
         };
       }
@@ -1938,6 +1972,7 @@ async function combineBatchResults({
         job_index: index + 1,
         status: "failed",
         error: compactFailureMessage(item.reason),
+        ...transportFailureFields(item.reason),
         timing: item.reason?.timing,
       };
     })
@@ -2181,6 +2216,7 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
         } catch (error) {
           if (error && typeof error === "object") {
             error.timing = {
+              ...error.timing,
               mcp_request_started_at: jobStartedAt,
               mcp_request_finished_at: isoNow(),
             };
@@ -2323,7 +2359,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
         : commonArguments(args, promptFile, provider);
     const argv = [scriptPath, command, ...transportArguments];
     if (command === "edit") {
-      const images = Array.isArray(args.images) ? [...args.images] : [];
+      const images = imageInputPaths(args.images);
       if (args.use_latest) {
         images.push(...(await loadLatestImages(provider.config)));
       }
@@ -2340,7 +2376,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     const helperTimeoutSeconds =
       provider.transportProfile === TRANSPORT_PROFILE_808 && provider.transport === TRANSPORT_OPENAI_IMAGES
         ? openaiImages808PendingTimeoutSeconds(args, provider)
-        : positiveInteger(provider.raw.timeout, args.timeout);
+        : timeoutSeconds(args.timeout, provider.raw.timeout, args._pending_total_timeout);
     const helperEnvironment = {
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",
@@ -2360,6 +2396,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
       { timeoutSeconds: helperTimeoutSeconds },
     );
     const enriched = await enrichResult(result, submittedPrompt, provider);
+    enriched.timeout_seconds = timeoutSeconds(args.timeout, provider.raw.timeout);
     enriched.prompt_mode = args.prompt_mode;
     if (args._quality_policy_warning) {
       enriched.warnings = [
@@ -2396,6 +2433,39 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
   }
 }
 
+async function recoverRemoteImageTask(args) {
+  if (args.task_id || !nonEmptyString(args.provider) || !nonEmptyString(args.remote_task_id)) {
+    throw new Error("Remote result retrieval requires provider and the full remote_task_id, without task_id.");
+  }
+  const provider = await resolveProvider(args.provider, !args.dry_run);
+  if (provider.transport !== TRANSPORT_OPENAI_IMAGES || provider.transportProfile !== TRANSPORT_PROFILE_808) {
+    throw new Error("Remote result retrieval is supported only for the selected 808 OpenAI Images profile.");
+  }
+  const timeout = openaiImages808PendingTimeoutSeconds(args, provider);
+  const argv = [providerTransportScript(provider), "recover"];
+  appendOption(argv, "--remote-task-id", args.remote_task_id);
+  appendOption(argv, "--base-url", provider.baseUrl);
+  appendOption(argv, "--model", provider.model);
+  appendOption(argv, "--api-key-env", "FMAGE_ACTIVE_API_KEY");
+  appendOption(argv, "--response-format", "b64_json");
+  appendOption(argv, "--output-dir", transportOutputRoot(args, provider));
+  appendOption(argv, "--timeout", timeout);
+  appendOption(argv, "--pending-total-timeout", timeout);
+  appendFlag(argv, "--dry-run", args.dry_run);
+  const result = await runProcess(pythonCommand(), argv, {
+    PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8",
+    ...(!args.dry_run ? {
+      FMAGE_ACTIVE_API_KEY: provider.apiKey,
+      FMAGE_DIRECT_OUTPUT_DIR: finalOutputRoot(args, provider),
+      FMAGE_OUTPUT_TIMESTAMP: timestampForPath(), FMAGE_OUTPUT_SEQUENCE: "1",
+    } : {}),
+  }, { timeoutSeconds: timeout });
+  const enriched = await enrichResult(result, "", provider);
+  enriched.timeout_seconds = timeout;
+  enriched.provider_model = enriched.provider_response_metadata?.model ?? null;
+  return publishResultImages(enriched, args, provider);
+}
+
 function promptProperty() {
   return {
     type: "string",
@@ -2411,6 +2481,19 @@ function promptModeProperty() {
     default: "expand",
     description: "Record the entry already selected before image interpretation: expand for default fmage, direct only for explicit fmage-direct invocation. This is not a persistent setting or permission to rewrite. Set once for the entire batch.",
   };
+}
+
+function imageInputPaths(value) {
+  if (value === undefined || value === null) return [];
+  const values = typeof value === "string" ? [value] : value;
+  if (!Array.isArray(values)) {
+    throw new Error("images must be a path/URL string or an array of path/URL strings.");
+  }
+  const images = values.map((image) => nonEmptyString(image));
+  if (images.some((image) => !image)) {
+    throw new Error("images must contain only non-empty path/URL strings.");
+  }
+  return images;
 }
 
 function commonProperties(editing = false) {
@@ -2493,12 +2576,17 @@ function commonProperties(editing = false) {
     },
     output_dir: {
       type: "string",
-      description: "Explicit user-selected save folder.",
+      description: "Save folder explicitly requested by the user. Ignored unless output_dir_user_requested is true; never derive it from the current workspace or input image path.",
+    },
+    output_dir_user_requested: {
+      type: "boolean",
+      description: "True only when the user explicitly requested this save folder. Otherwise omit both fields to use the configured output_dir.",
     },
     timeout: {
       type: "integer",
-      minimum: 1,
-      description: "Optional timeout in seconds.",
+      minimum: MIN_TIMEOUT_SECONDS,
+      default: MIN_TIMEOUT_SECONDS,
+      description: "Timeout in seconds, at least 600. Smaller legacy values are raised to 600.",
     },
     dry_run: {
       type: "boolean",
@@ -2527,6 +2615,7 @@ function jobProperties(editing = false) {
   delete properties.prompt_mode;
   delete properties.provider;
   delete properties.output_dir;
+  delete properties.output_dir_user_requested;
   delete properties.timeout;
   delete properties.dry_run;
   delete properties.verbose;
@@ -2550,6 +2639,15 @@ function jobProperties(editing = false) {
 function batchProperties(editing = false) {
   const properties = { ...commonProperties(editing) };
   delete properties.prompt;
+  if (editing) {
+    properties.images = {
+      anyOf: [
+        { type: "string", minLength: 1 },
+        { type: "array", items: { type: "string", minLength: 1 } },
+      ],
+      description: "Reference images shared by every edit job unless overridden per job.",
+    };
+  }
   properties.jobs = {
     type: "array",
     minItems: 1,
@@ -2756,13 +2854,29 @@ function toolDefinitions() {
     {
       name: TOOL_TASK_STATUS,
       title: "Get Fmage Image Task Status",
-      description: "Read compact async task status.",
+      description: "Read local async task status, or retrieve an existing 808 remote task without resubmitting generation.",
       inputSchema: {
         type: "object",
         properties: {
           task_id: {
             type: "string",
-            description: "Task id.",
+            description: "Local Fmage task id. Omit when retrieving a remote task.",
+          },
+          remote_task_id: {
+            type: "string",
+            description: "Full existing 808 remote task ID; requires provider. Retrieves only that task's result.",
+          },
+          provider: {
+            type: "string",
+            description: "Explicit provider owning remote_task_id; required for remote retrieval.",
+          },
+          timeout: {
+            type: "integer", minimum: 1,
+            description: "Remote retrieval timeout, minimum 600 seconds.",
+          },
+          dry_run: {
+            type: "boolean",
+            description: "Validate remote retrieval routing without a provider request.",
           },
           verbose: {
             type: "boolean",
@@ -2778,14 +2892,14 @@ function toolDefinitions() {
             description: "Embed image bytes only when set to auto; default is never.",
           },
         },
-        required: ["task_id"],
+        oneOf: [{ required: ["task_id"] }, { required: ["remote_task_id", "provider"] }],
         additionalProperties: false,
       },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
-        openWorldHint: false,
+        openWorldHint: true,
       },
     },
     {
@@ -3008,6 +3122,7 @@ async function providerStatus(requestedProvider) {
     output_dir: finalOutputRoot({}, provider),
     cache_dir: transportOutputRoot({}, provider),
     task_dir: taskStoreRoot(),
+    timeout_seconds: timeoutSeconds(provider.raw.timeout),
     ...(provider.openaiImages808
       ? {
           response_format: provider.openaiImages808.responseFormat,
@@ -3016,6 +3131,7 @@ async function providerStatus(requestedProvider) {
             enabled: true,
             submission_query: { async: "true" },
             status_path: "/images/tasks/{task_id}",
+            result_response_format: "b64_json",
           },
         }
       : {}),
@@ -3148,10 +3264,13 @@ async function handleToolCall(id, params) {
   }
 
   if (params?.name === TOOL_TASK_STATUS) {
-    const result = await readTaskStateWithOptions(params.arguments?.task_id, {
-      verbose: Boolean(params.arguments?.verbose),
-      includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
-    });
+    const args = params.arguments ?? {};
+    const result = args.remote_task_id
+      ? await recoverRemoteImageTask(args)
+      : await readTaskStateWithOptions(args.task_id, {
+          verbose: Boolean(args.verbose),
+          includeProviderMetadata: Boolean(args.include_provider_metadata),
+        });
     sendResult(id, {
       content: await imageContent(result, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),

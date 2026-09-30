@@ -13,9 +13,10 @@ async function fixture(t,options={}) {
   config.workflow_connections.runninghub.api_key='test-only-secret';
   const path=join(dir,'providers.json');await writeFile(path,JSON.stringify(config));
   const image=join(dir,'input.png');await writeFile(image,png);
-  const calls=[];let failDownload=Boolean(options.failDownload);
+  const calls=[];let failDownload=Boolean(options.failDownload);let clock=0;
   const fetchImpl=async(url,init)=>{
     const endpoint=String(url).split('/').at(-1);calls.push({endpoint,init});
+    if(endpoint==='status') clock+=options.statusDelayMs||0;
     if(endpoint==='create'&&options.uncertain) throw new Error('network secret');
     if(endpoint==='image2'&&failDownload) {failDownload=false;return new Response('failed',{status:503});}
     if(endpoint.startsWith('image')) {assert.equal(init.headers,undefined);return new Response(options.html?'<!doctype html>':png);}
@@ -23,9 +24,8 @@ async function fixture(t,options={}) {
     const data={upload:{fileName:'api/input.png'},create:{taskId:'123456'},status:options.status||'SUCCESS',outputs:options.missing?[]:outputs}[endpoint];
     return Response.json({code:0,data});
   };
-  let clock=0;
-  const runtime={fetchImpl,now:()=>clock,sleep:async ms=>{clock+=ms;}};
-  return {call:createWorkflowService(path,runtime),restart:()=>createWorkflowService(path,runtime),calls,image,dir,path};
+  const runtime={fetchImpl,now:()=>clock,sleep:async ms=>{clock+=ms;},...(options.waitMs===undefined?{}:{waitMs:options.waitMs})};
+  return {call:createWorkflowService(path,runtime),restart:()=>createWorkflowService(path,runtime),calls,image,dir,path,clock:()=>clock};
 }
 test('download all configured outputs, skip previews, preserve original bytes and prevent duplicate submission',async t=>{
   const f=await fixture(t);const args={operation:'run',request_id:'job',inputs:{image:f.image,resolution_k:6}};
@@ -71,9 +71,36 @@ test('pending/failed tasks never download and input validation precedes submissi
     const f=await fixture(t,{status});await f.call({operation:'run',request_id:'pending',inputs:{image:f.image}});
     assert.equal((await f.call({operation:'status',request_id:'pending'})).status,status);
     assert(!f.calls.some(c=>c.endpoint==='outputs'));
-    assert.equal(f.calls.filter(c=>c.endpoint==='status').length,status==='FAILED'?1:5);
+    assert.equal(f.calls.filter(c=>c.endpoint==='status').length,status==='FAILED'?1:4);
+    assert.equal(f.clock(),status==='FAILED'?0:40000);
   }
   assert.throws(()=>validateInputs({inputs:{}},{unknown:1}),/Unknown/);
   assert.throws(()=>imageExtension(Buffer.from('html')),/Expected/);
   const f=await fixture(t);await assert.rejects(f.call({operation:'run',request_id:'bad',inputs:{image:f.image,resolution_k:10}}),/range/);assert.equal(f.calls.length,0);
+});
+test('submission/download timeouts remain 600 seconds while status waits use their own budget',async t=>{
+  const timeoutCalls=[];
+  t.mock.method(AbortSignal,'timeout',ms=>{timeoutCalls.push(ms);return new AbortController().signal;});
+  const complete=await fixture(t);
+  await complete.call({operation:'run',request_id:'timeouts',inputs:{image:complete.image}});
+  assert.equal((await complete.call({operation:'status',request_id:'timeouts'})).status,'completed');
+  assert.equal(timeoutCalls.length,6);
+  assert.deepEqual(timeoutCalls,[600000,600000,30000,600000,600000,600000]);
+  const pending=await fixture(t,{status:'QUEUED',waitMs:1000});
+  await pending.call({operation:'run',request_id:'waiting',inputs:{image:pending.image}});
+  assert.equal((await pending.call({operation:'status',request_id:'waiting'})).status,'QUEUED');
+  assert.equal(pending.clock(),1000);
+  assert.equal(pending.calls.filter(c=>c.endpoint==='status').length,1);
+  assert.equal(timeoutCalls.at(-1),1000);
+});
+test('slow status queries consume the same wait budget instead of extending it',async t=>{
+  const timeouts=[];
+  t.mock.method(AbortSignal,'timeout',ms=>{timeouts.push(ms);return new AbortController().signal;});
+  const f=await fixture(t,{status:'RUNNING',statusDelayMs:5000});
+  await f.call({operation:'run',request_id:'slow-status',inputs:{image:f.image}});
+  const result=await f.call({operation:'status',request_id:'slow-status'});
+  assert.equal(result.status,'RUNNING');assert.equal(result.task_id,'123456');
+  assert.equal(f.clock(),40000);
+  assert.deepEqual(timeouts.slice(2),[30000,25000,10000]);
+  assert.equal(f.calls.filter(c=>c.endpoint==='create').length,1);
 });

@@ -16,6 +16,9 @@ import uuid
 import banana_models
 import ezai_banana_support as support
 from transport_common import (
+    MIN_TIMEOUT_SECONDS,
+    timeout_seconds,
+    with_request_budget,
     primary_reference,
     build_prompt_provenance,
     collect_image_metadata,
@@ -305,6 +308,7 @@ def finish_response(
     }
 
 
+@with_request_budget
 def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     timing: dict[str, Any] = {"transport_started_at": iso_now()}
     validate_common(args)
@@ -317,6 +321,7 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     if args.dry_run:
         return {
             "dry_run": True,
+            "timeout_seconds": args.timeout,
             "endpoint": url,
             "request": payload,
             "request_headers": dry_run_headers(args),
@@ -357,6 +362,7 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+@with_request_budget
 def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     timing: dict[str, Any] = {"transport_started_at": iso_now()}
     validate_common(args)
@@ -395,6 +401,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     if args.dry_run:
         result: dict[str, Any] = {
             "dry_run": True,
+            "timeout_seconds": args.timeout,
             "endpoint": url,
             "request": payload,
             "request_headers": dry_run_headers(args),
@@ -467,7 +474,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", required=True)
     parser.add_argument("--api-key-env", default="PROVIDER_API_KEY")
     parser.add_argument("--output-dir")
-    parser.add_argument("--timeout", type=int, default=240)
+    parser.add_argument("--timeout", type=timeout_seconds, default=MIN_TIMEOUT_SECONDS)
     parser.add_argument("--pending-total-timeout", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--pending-fast-window", type=int, default=120, help=argparse.SUPPRESS)
     parser.add_argument("--pending-fast-interval", type=int, default=20, help=argparse.SUPPRESS)

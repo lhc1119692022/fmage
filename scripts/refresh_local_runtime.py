@@ -13,6 +13,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from transport_common import MIN_TIMEOUT_SECONDS
+
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_NAME = "fmage"
@@ -181,7 +183,7 @@ def verify_mcp_handshake(server_path: Path) -> None:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=30,
+            timeout=MIN_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as error:
         raise RuntimeError(f"Fmage MCP handshake timed out: {server_path}") from error

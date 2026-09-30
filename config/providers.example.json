@@ -43,18 +43,21 @@
   "providers": {
     "openai-image-2": {
       "transport": "openai-images",
+      "timeout": 600,
       "base_url": "https://api.openai.com/v1",
       "model": "gpt-image-2",
       "api_key": ""
     },
     "ezai-image-2": {
       "transport": "openai-images",
+      "timeout": 600,
       "base_url": "https://api-direct.ezaiclub.com",
       "model": "gpt-image-2",
       "api_key": ""
     },
     "ezai-nano": {
       "transport": "gemini-generate-content",
+      "timeout": 600,
       "base_url": "https://api-direct.ezaiclub.com",
       "model": "gemini-3-pro-image",
       "api_key": ""

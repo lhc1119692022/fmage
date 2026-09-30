@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import http.client
 import json
 from pathlib import Path
 import sys
+import tempfile
 import time
 from typing import Any, Callable
+import urllib.error
 import urllib.parse
 
 import openai_images_transport as openai
+from transport_common import (
+    download_image, timeout_seconds, request_budget, request_timeout,
+    STATUS_QUERY_TIMEOUT_SECONDS, with_request_budget, bounded_deadline,
+)
 
 
 TRANSPORT_NAME = "openai-images"
@@ -38,6 +46,38 @@ class RemoteTaskError(RuntimeError):
         )
         self.task_id = task_id
         self.status = normalized_status
+        self.context: dict[str, Any] = {}
+
+
+class SubmissionUncertain(RuntimeError):
+    def __init__(self, checkpoint: Path, timing: dict[str, Any], error: Exception):
+        super().__init__(
+            f"808 submission connection failed ({type(error).__name__}) before a task ID was received; "
+            "the remote generation state is unknown. Check the provider task log for the existing "
+            f"task ID before retrieving its result. Checkpoint: {checkpoint}. "
+            "No generation request was resubmitted."
+        )
+        self.context = {
+            "stage": "submission_uncertain", "remote_status": "unknown", "remote_task_id": None,
+            "checkpoint": str(checkpoint.resolve()), "generation_resubmitted": False, "timing": timing,
+        }
+
+
+def submit_request(
+    call: Callable[[dict[str, Any]], dict[str, Any]],
+    payload: dict[str, Any], command: str, args: argparse.Namespace,
+    run_dir: Path, timing: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    write_result_checkpoint(run_dir, "", "unknown", "submitting", timing)
+    try:
+        return openai.submit_once(call, payload)
+    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, ConnectionError) as error:
+        timing["provider_submission_failed_at"] = openai.iso_now()
+        checkpoint = write_result_checkpoint(
+            run_dir, "", "unknown", "submission_uncertain", timing,
+            f"Submission connection failed ({type(error).__name__}); remote state unknown.",
+        )
+        raise SubmissionUncertain(checkpoint, timing, error) from error
 
 
 def endpoint_with_query(base_url: str, path: str, query: dict[str, str]) -> str:
@@ -93,7 +133,7 @@ def response_status(response: dict[str, Any]) -> str:
 
 
 def has_image_data(response: dict[str, Any]) -> bool:
-    return isinstance(response.get("data"), list)
+    return isinstance(response.get("data"), list) and bool(response["data"])
 
 
 def response_error_detail(response: dict[str, Any]) -> str:
@@ -173,17 +213,20 @@ def poll_remote_task(
     now_fn = now_fn or openai.iso_now
 
     total_timeout = max(
-        1,
-        int(getattr(args, "pending_total_timeout", DEFAULT_PENDING_TOTAL_TIMEOUT) or 0),
+        timeout_seconds(getattr(args, "pending_total_timeout", DEFAULT_PENDING_TOTAL_TIMEOUT)),
+        timeout_seconds(args.timeout),
     )
     poll_interval = max(1, int(getattr(args, "poll_interval", DEFAULT_POLL_INTERVAL) or 0))
-    deadline = request_started + total_timeout
-    status_url = task_status_endpoint(args.base_url, task_id, args.response_format)
+    deadline = bounded_deadline(request_started + total_timeout)
+    # Submission may request URLs; retrieve the existing task as bytes to avoid
+    # an unnecessary CDN request and URL-to-base64 recovery round trip.
+    status_url = task_status_endpoint(args.base_url, task_id, "b64_json")
     last_status = first_status
     status_history: list[dict[str, str]] = []
     append_status_change(status_history, last_status, now_fn)
     poll_count = 0
     notes = ["remote_task_pending"]
+    first_query = True
 
     timing["pending_poll_started_at"] = now_fn()
     timing["remote_task_id"] = task_id
@@ -197,16 +240,18 @@ def poll_remote_task(
             timing["remote_poll_count"] = poll_count
             raise RemoteTaskError(task_id, last_status, f"timed out after {total_timeout} seconds")
 
-        sleep_fn(min(poll_interval, remaining))
+        if not first_query:
+            sleep_fn(min(poll_interval, remaining))
+        first_query = False
         remaining = deadline - monotonic_fn()
         if remaining <= 0:
             timing["pending_poll_finished_at"] = now_fn()
             timing["remote_poll_count"] = poll_count
             raise RemoteTaskError(task_id, last_status, f"timed out after {total_timeout} seconds")
 
-        request_timeout = min(max(1, int(args.timeout)), max(1, int(remaining)))
         try:
-            response = get_fn(status_url, api_key_value, request_timeout)
+            with request_budget(min(STATUS_QUERY_TIMEOUT_SECONDS, remaining)):
+                response = get_fn(status_url, api_key_value, request_timeout(args.timeout))
         except openai.ApiError as error:
             poll_count += 1
             timing["remote_poll_count"] = poll_count
@@ -217,13 +262,29 @@ def poll_remote_task(
                 continue
             raise RemoteTaskError(task_id, last_status, f"status query failed with HTTP {error.status}") from error
         except Exception as error:
-            raise RemoteTaskError(task_id, last_status, f"status query failed: {error}") from error
+            timing["pending_poll_finished_at"] = now_fn()
+            raise RemoteTaskError(
+                task_id, last_status, f"status query failed ({type(error).__name__}); remote state unconfirmed"
+            ) from error
 
         poll_count += 1
         timing["remote_poll_count"] = poll_count
+        if monotonic_fn() >= deadline:
+            timing["pending_poll_finished_at"] = now_fn()
+            raise RemoteTaskError(task_id, last_status, f"timed out after {total_timeout} seconds")
         status = response_status(response)
 
+        if response_task_id(response) and response_task_id(response) != task_id:
+            raise RemoteTaskError(task_id, last_status, "status query returned a different task ID")
+
+        if status in FAILURE_STATUSES:
+            append_status_change(status_history, status, now_fn)
+            timing["pending_poll_finished_at"] = now_fn()
+            raise RemoteTaskError(task_id, status, response_error_detail(response))
+
         if has_image_data(response):
+            if status and status not in SUCCESS_STATUSES:
+                raise RemoteTaskError(task_id, status, "returned image data before a completed status")
             final_status = status or "completed"
             append_status_change(status_history, final_status, now_fn)
             timing["pending_poll_finished_at"] = now_fn()
@@ -240,10 +301,6 @@ def poll_remote_task(
                 notes + ["remote_task_completed"],
             )
 
-        if status in FAILURE_STATUSES:
-            append_status_change(status_history, status, now_fn)
-            timing["pending_poll_finished_at"] = now_fn()
-            raise RemoteTaskError(task_id, status, response_error_detail(response))
         if status in SUCCESS_STATUSES:
             append_status_change(status_history, status, now_fn)
             timing["pending_poll_finished_at"] = now_fn()
@@ -266,19 +323,147 @@ def resolve_async_response(
     api_key_value: str,
     request_started: float,
     timing: dict[str, Any],
+    *,
+    run_dir: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None, list[str]]:
     remote_task = initial_remote_task(response)
     if remote_task is None:
         return response, None, []
     task_id, first_status = remote_task
-    return poll_remote_task(
-        args,
-        task_id,
-        first_status,
-        api_key_value,
-        request_started,
-        timing,
-    )
+    if run_dir is not None:
+        write_result_checkpoint(run_dir, task_id, first_status, "remote_pending", timing)
+    try:
+        return poll_remote_task(
+            args, task_id, first_status, api_key_value, request_started, timing,
+        )
+    except RemoteTaskError as error:
+        if run_dir is not None:
+            stage = "remote_failed" if error.status in FAILURE_STATUSES else "status_query_failed"
+            checkpoint = write_result_checkpoint(run_dir, task_id, error.status, stage, timing)
+            error.context = {
+                "stage": stage, "remote_task_id": task_id, "remote_status": error.status,
+                "checkpoint": str(checkpoint.resolve()), "generation_resubmitted": False, "timing": timing,
+            }
+        raise
+
+
+def write_result_checkpoint(
+    run_dir: Path,
+    task_id: str,
+    status: str,
+    stage: str,
+    timing: dict[str, Any],
+    error: str | None = None,
+) -> Path:
+    path = run_dir / "remote-task.json"
+    checkpoint = {
+        "transport": TRANSPORT_NAME,
+        "transport_profile": TRANSPORT_PROFILE,
+        "remote_task_id": task_id or None,
+        "remote_status": status or "unknown",
+        "stage": stage,
+        "timing": timing,
+    }
+    if error:
+        checkpoint["error"] = error
+    path.write_text(json.dumps(checkpoint, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def save_completed_images(
+    args: argparse.Namespace,
+    response: dict[str, Any],
+    api_key_value: str,
+    run_dir: Path,
+    remote_metadata: dict[str, Any] | None,
+    timing: dict[str, Any],
+) -> tuple[list[Path], dict[str, Any], list[str]]:
+    task_id = str((remote_metadata or {}).get("remote_task_id") or response_task_id(response))
+    status = str((remote_metadata or {}).get("remote_status") or response_status(response) or "completed")
+    checkpoint = write_result_checkpoint(run_dir, task_id, status, "downloading", timing)
+    notes: list[str] = []
+    # Fetch bytes before writing any image, so a failed later URL cannot leave
+    # duplicate partial output when the same task is fetched as base64.
+    materialized = dict(response)
+    try:
+        data = []
+        for item in response.get("data", []):
+            if isinstance(item, dict) and item.get("url") and not item.get("b64_json"):
+                item = dict(item)
+                image_bytes = download_image(
+                    str(item["url"]), args.timeout, user_agent=openai.CLIENT_USER_AGENT
+                )
+                item["b64_json"] = base64.b64encode(image_bytes).decode("ascii")
+            data.append(item)
+        materialized["data"] = data
+    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, ConnectionError) as error:
+        detail = (
+            f"image URL download failed with HTTP {error.code}"
+            if isinstance(error, urllib.error.HTTPError)
+            else "image URL download failed with a network error or timeout"
+        )
+        notes.append(
+            f"remote_result_url_download_http_{error.code}"
+            if isinstance(error, urllib.error.HTTPError)
+            else "remote_result_url_download_network_error"
+        )
+        if isinstance(error, urllib.error.HTTPError):
+            error.close()
+        if not task_id:
+            write_result_checkpoint(run_dir, task_id, status, "download_failed", timing, detail)
+            raise RuntimeError(
+                f"808 returned image data, but {detail}; no remote task ID was returned. "
+                f"Checkpoint: {checkpoint}. No generation request was resubmitted."
+            ) from error
+
+        timing["result_recovery_started_at"] = openai.iso_now()
+        write_result_checkpoint(run_dir, task_id, status, "result_recovery", timing, detail)
+        # One read of the existing task, never another generation/edit POST.
+        try:
+            recovered = openai.json_get(
+                task_status_endpoint(args.base_url, task_id, "b64_json"),
+                api_key_value,
+                args.timeout,
+            )
+        except Exception as recovery_error:
+            failure = (
+                f"base64 result query failed with HTTP {recovery_error.status}"
+                if isinstance(recovery_error, openai.ApiError)
+                else f"base64 result query failed ({type(recovery_error).__name__})"
+            )
+            write_result_checkpoint(run_dir, task_id, status, "download_failed", timing, f"{detail}; {failure}")
+            raise RemoteTaskError(
+                task_id, status, f"returned image data, but {detail}; {failure}. Checkpoint: {checkpoint}"
+            ) from recovery_error
+
+        recovered_data = recovered.get("data") if isinstance(recovered, dict) else None
+        recovered_id = response_task_id(recovered) if isinstance(recovered, dict) else ""
+        if (
+            not isinstance(recovered, dict)
+            or (recovered_id and recovered_id != task_id)
+            or response_status(recovered) in FAILURE_STATUSES | PENDING_STATUSES
+            or not isinstance(recovered_data, list)
+            or not recovered_data
+            or len(recovered_data) != len(response.get("data", []))
+            or not all(
+                isinstance(item, dict)
+                and isinstance(item.get("b64_json"), str)
+                and item["b64_json"]
+                for item in recovered_data
+            )
+        ):
+            failure = "existing task did not return matching complete base64 image data"
+            write_result_checkpoint(run_dir, task_id, status, "download_failed", timing, f"{detail}; {failure}")
+            raise RemoteTaskError(
+                task_id, status, f"returned image data, but {detail}; {failure}. Checkpoint: {checkpoint}"
+            ) from error
+        materialized = {**response, **recovered}
+        timing["result_recovery_completed_at"] = openai.iso_now()
+        notes.append("remote_result_recovered_as_b64_json")
+
+    images = openai.save_response_images(materialized, run_dir, args.output_format, args.timeout)
+    write_result_checkpoint(run_dir, task_id, status, "saved", timing)
+    return images, materialized, notes
 
 
 def write_manifest(
@@ -318,6 +503,7 @@ def write_manifest(
     manifest_path = run_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     openai.write_latest_state(root, manifest_path, images, manifest["created_at"])
+    (run_dir / "remote-task.json").unlink(missing_ok=True)
     return manifest_path
 
 
@@ -328,6 +514,7 @@ def validate_808_arguments(args: argparse.Namespace) -> None:
         raise ValueError(f"This transport supports only: {supported}.")
     if int(args.pending_total_timeout) <= 0:
         raise ValueError("--pending-total-timeout must be a positive integer.")
+    args.pending_total_timeout = max(timeout_seconds(args.pending_total_timeout), args.timeout)
     if int(args.poll_interval) <= 0:
         raise ValueError("--poll-interval must be a positive integer.")
 
@@ -337,7 +524,8 @@ def dry_run_remote_async(args: argparse.Namespace) -> dict[str, Any]:
         "enabled": True,
         "poll_interval_seconds": args.poll_interval,
         "total_timeout_seconds": args.pending_total_timeout,
-        "status_endpoint": task_status_endpoint_template(args.base_url, args.response_format),
+        "result_response_format": "b64_json",
+        "status_endpoint": task_status_endpoint_template(args.base_url, "b64_json"),
     }
 
 
@@ -345,6 +533,7 @@ def remote_result_fields(remote_metadata: dict[str, Any] | None) -> dict[str, An
     return dict(remote_metadata) if remote_metadata else {}
 
 
+@with_request_budget
 def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     timing: dict[str, Any] = {"transport_started_at": openai.iso_now()}
     validate_808_arguments(args)
@@ -356,6 +545,7 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     if args.dry_run:
         return {
             "dry_run": True,
+            "timeout_seconds": args.timeout,
             "endpoint": url,
             "request": payload,
             "remote_async": dry_run_remote_async(args),
@@ -370,11 +560,9 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     key = openai.api_key(args)
     timing["provider_request_started_at"] = openai.iso_now()
     request_started = time.monotonic()
-    response, retry_notes = openai.request_with_compat_retry(
+    response, retry_notes = submit_request(
         lambda body: openai.json_request(url, body, key, args.timeout),
-        payload,
-        "generate",
-        protected_fields=openai.protected_output_fields(args),
+        payload, "generate", args, run_dir, timing,
     )
     timing["provider_submission_completed_at"] = openai.iso_now()
     response, remote_metadata, async_notes = resolve_async_response(
@@ -383,12 +571,16 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
         key,
         request_started,
         timing,
+        run_dir=run_dir,
     )
     timing["provider_response_completed_at"] = openai.iso_now()
     notes = size_notes + retry_notes + async_notes
 
     timing["download_started_at"] = openai.iso_now()
-    images = openai.save_response_images(response, run_dir, args.output_format, args.timeout)
+    images, response, download_notes = save_completed_images(
+        args, response, key, run_dir, remote_metadata, timing
+    )
+    notes.extend(download_notes)
     timing["download_completed_at"] = openai.iso_now()
     image_metadata = openai.collect_image_metadata(images)
     warnings = openai.output_size_warnings(payload.get("size"), image_metadata)
@@ -418,6 +610,7 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+@with_request_budget
 def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     timing: dict[str, Any] = {"transport_started_at": openai.iso_now()}
     validate_808_arguments(args)
@@ -446,6 +639,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     if args.dry_run:
         return {
             "dry_run": True,
+            "timeout_seconds": args.timeout,
             "endpoint": url,
             "request": payload,
             "images": [str(path.resolve()) for path in image_paths],
@@ -472,12 +666,8 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
 
     timing["provider_request_started_at"] = openai.iso_now()
     request_started = time.monotonic()
-    response, retry_notes = openai.request_with_compat_retry(
-        call,
-        payload,
-        "edit",
-        abort_retry=openai.should_retry_image_field,
-        protected_fields=openai.protected_output_fields(args),
+    response, retry_notes = submit_request(
+        call, payload, "edit", args, run_dir, timing,
     )
     timing["provider_submission_completed_at"] = openai.iso_now()
     response, remote_metadata, async_notes = resolve_async_response(
@@ -486,12 +676,16 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
         key,
         request_started,
         timing,
+        run_dir=run_dir,
     )
     timing["provider_response_completed_at"] = openai.iso_now()
     notes = size_notes + retry_notes + async_notes
 
     timing["download_started_at"] = openai.iso_now()
-    images = openai.save_response_images(response, run_dir, args.output_format, args.timeout)
+    images, response, download_notes = save_completed_images(
+        args, response, key, run_dir, remote_metadata, timing
+    )
+    notes.extend(download_notes)
     timing["download_completed_at"] = openai.iso_now()
     image_metadata = openai.collect_image_metadata(images)
     warnings = openai.output_size_warnings(payload.get("size"), image_metadata)
@@ -518,6 +712,46 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
         "warnings": warnings,
         "timing": timing,
         **remote_result_fields(remote_metadata),
+    }
+
+
+@with_request_budget
+def run_recover(args: argparse.Namespace) -> dict[str, Any]:
+    """Retrieve one known remote task; this path contains no submission POST."""
+    validate_808_arguments(args)
+    task_id = args.remote_task_id.strip()
+    if not task_id:
+        raise ValueError("--remote-task-id must contain the full existing remote task ID.")
+    status_url = task_status_endpoint(args.base_url, task_id, "b64_json")
+    if args.dry_run:
+        return {
+            "dry_run": True, "method": "GET", "endpoint": status_url,
+            "remote_task_id": task_id, "generation_resubmitted": False,
+            "timeout_seconds": args.timeout,
+        }
+
+    root = openai.output_root(args)
+    root.mkdir(parents=True, exist_ok=True)
+    run_dir = Path(tempfile.mkdtemp(prefix=time.strftime("%Y%m%d-%H%M%S-recover-"), dir=root))
+    timing: dict[str, Any] = {"transport_started_at": openai.iso_now()}
+    key = openai.api_key(args)
+    response, metadata, notes = resolve_async_response(
+        args, {"task_id": task_id, "status": "queued"}, key, time.monotonic(), timing,
+        run_dir=run_dir,
+    )
+    timing["download_started_at"] = openai.iso_now()
+    images, response, download_notes = save_completed_images(args, response, key, run_dir, metadata, timing)
+    timing["download_completed_at"] = openai.iso_now()
+    image_metadata = openai.collect_image_metadata(images)
+    notes += ["existing_remote_task_retrieved_without_submission", *download_notes]
+    # The original prompt and delivery parameters are unknown; do not invent them.
+    manifest = write_manifest(root, run_dir, "recover", {}, images, image_metadata, response,
+                              notes, [], timing, metadata)
+    return {
+        "command": "recover", "status": "completed", "generation_resubmitted": False,
+        "images": [str(path.resolve()) for path in images], "image_metadata": image_metadata,
+        "manifest": str(manifest.resolve()), "notes": notes, "warnings": [], "timing": timing,
+        **remote_result_fields(metadata),
     }
 
 
@@ -547,6 +781,11 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--primary-image-index", type=int, default=0, help="Zero-based index of the image being edited.")
     edit.add_argument("--use-latest", action="store_true", help="Use latest image saved by this skill.")
 
+    recover = subparsers.add_parser("recover", help="Retrieve an existing remote task without generating again.")
+    add_808_arguments(recover)
+    recover.add_argument("--remote-task-id", required=True)
+    recover.set_defaults(response_format="b64_json")
+
     return parser
 
 
@@ -558,10 +797,16 @@ def main(argv: list[str] | None = None) -> int:
             result = run_generate(args)
         elif args.command == "edit":
             result = run_edit(args)
+        elif args.command == "recover":
+            result = run_recover(args)
         else:
             parser.error("Unknown command.")
             return 2
     except Exception as error:
+        context = getattr(error, "context", None)
+        if context:
+            print(json.dumps({"failure_type": "fmage_transport_failure", "error": str(error), **context},
+                             ensure_ascii=False))
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
 

@@ -244,7 +244,7 @@ class PollingTests(unittest.TestCase):
         self.assertIn("remote_task_completed", notes)
         self.assertTrue(
             all(
-                urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["response_format"] == ["url"]
+                urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["response_format"] == ["b64_json"]
                 for url in requested_urls
             )
         )
@@ -290,7 +290,8 @@ class PollingTests(unittest.TestCase):
                 monotonic_fn=clock.monotonic,
                 now_fn=clock.iso_now,
             )
-        self.assertEqual(get_calls, 0)
+        self.assertEqual(get_calls, 120)
+        self.assertEqual(clock.value, 600)
         self.assertIn("task-timeout", str(raised.exception))
         self.assertIn("timed out", str(raised.exception))
 
@@ -457,7 +458,7 @@ class ServerRoutingTests(unittest.TestCase):
         self.assertEqual(image808["request"]["response_format"], "url")
         self.assertEqual(image808["request"]["size"], "2048x2048")
         self.assertEqual(image808["request"]["quality"], "high")
-        self.assertEqual(image808["remote_async"]["total_timeout_seconds"], 321)
+        self.assertEqual(image808["remote_async"]["total_timeout_seconds"], 600)
 
         self.assertEqual(lookalike["provider_transport"], "openai-images")
         self.assertNotIn("async", urllib.parse.parse_qs(urllib.parse.urlsplit(lookalike["endpoint"]).query))
@@ -508,7 +509,7 @@ class ServerRoutingTests(unittest.TestCase):
             {"provider": "image-808"},
         )
         self.assertEqual(status["response_format"], "url")
-        self.assertEqual(status["timeout_seconds"], 321)
+        self.assertEqual(status["timeout_seconds"], 600)
         self.assertEqual(status["remote_async"]["status_path"], "/images/tasks/{task_id}")
 
 

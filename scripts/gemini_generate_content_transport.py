@@ -19,6 +19,11 @@ import urllib.request
 
 import banana_models
 from transport_common import (
+    MIN_TIMEOUT_SECONDS,
+    timeout_seconds,
+    request_timeout,
+    read_response_bytes,
+    with_request_budget,
     primary_reference,
     build_prompt_provenance,
     collect_image_metadata,
@@ -320,10 +325,11 @@ def json_request(
         headers=headers,
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = response.read()
+        with urllib.request.urlopen(request, timeout=request_timeout(timeout)) as response:
+            payload = read_response_bytes(response)
     except urllib.error.HTTPError as error:
-        body_text = error.read().decode("utf-8", errors="replace")
+        with error:
+            body_text = read_response_bytes(error).decode("utf-8", errors="replace")
         raise ApiError(error.code, body_text) from error
     except urllib.error.URLError as error:
         raise RuntimeError(f"Network error: {error}") from error
@@ -394,6 +400,7 @@ def write_manifest(
     return path
 
 
+@with_request_budget
 def run_request(args: argparse.Namespace, references: list[str]) -> dict[str, Any]:
     timing: dict[str, Any] = {"transport_started_at": iso_now()}
     validate_common(args)
@@ -405,6 +412,7 @@ def run_request(args: argparse.Namespace, references: list[str]) -> dict[str, An
     if args.dry_run:
         return {
             "dry_run": True,
+            "timeout_seconds": args.timeout,
             "endpoint": url,
             "request": sanitize_payload(payload),
             "requested_size": requested_size,
@@ -472,7 +480,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--api-key-env", default="PROVIDER_API_KEY")
     parser.add_argument("--auth-scheme", choices=["x-goog-api-key", "bearer"], default="x-goog-api-key")
     parser.add_argument("--output-dir")
-    parser.add_argument("--timeout", type=int, default=240)
+    parser.add_argument("--timeout", type=timeout_seconds, default=MIN_TIMEOUT_SECONDS)
     parser.add_argument("--pending-total-timeout", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--pending-fast-window", type=int, default=120, help=argparse.SUPPRESS)
     parser.add_argument("--pending-fast-interval", type=int, default=20, help=argparse.SUPPRESS)

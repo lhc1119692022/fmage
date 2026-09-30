@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -109,7 +110,7 @@ class EndpointAndPayloadTests(unittest.TestCase):
     def test_http_authentication_headers(self) -> None:
         for scheme in ("x-goog-api-key", "bearer"):
             with self.subTest(scheme=scheme), mock.patch.object(transport.urllib.request, "urlopen") as opening:
-                opening.return_value.__enter__.return_value.read.return_value = b'{}'
+                opening.return_value = BytesIO(b'{}')
                 transport.json_request("https://api.808relay.com/test", {}, "dummy-test-key", 30, scheme)
                 request = opening.call_args.args[0]
                 headers = {key.lower(): value for key, value in request.header_items()}

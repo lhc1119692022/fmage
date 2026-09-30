@@ -52,6 +52,51 @@ class ImageApiHandler(BaseHTTPRequestHandler):
 
 
 class DirectOutputTests(unittest.TestCase):
+    def test_mcp_status_uses_global_output_dir_when_not_overridden(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "providers.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "active_providers": ["local-test"],
+                        "output_dir": "configured-output",
+                        "providers": {
+                            "local-test": {
+                                "transport": "openai-images",
+                                "base_url": "http://127.0.0.1:1/v1",
+                                "model": "gpt-image-1",
+                                "api_key": "test-only-key",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            environment = {**os.environ, "FMAGE_CONFIG": str(config_path)}
+            request = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "get_provider_status", "arguments": {}},
+            }
+            process = subprocess.run(
+                ["node", str(SERVER_PATH)],
+                input=json.dumps(request) + "\n",
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=environment,
+                timeout=10,
+                check=True,
+            )
+            response = json.loads(process.stdout.splitlines()[0])
+            self.assertNotIn("error", response)
+            self.assertEqual(
+                response["result"]["structuredContent"]["output_dir"],
+                str(root / "configured-output"),
+            )
+
     def test_mcp_writes_image_to_explicit_output_and_removes_empty_cache_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -109,6 +154,7 @@ class DirectOutputTests(unittest.TestCase):
                         "arguments": {
                             "prompt": ImageApiHandler.revised_prompt,
                             "output_dir": str(root / "requested-output"),
+                            "output_dir_user_requested": True,
                             "output_format": "png",
                             "size": "1024x1024",
                             "resolution_user_requested": True,
@@ -116,6 +162,19 @@ class DirectOutputTests(unittest.TestCase):
                         },
                     },
                 }
+                unrequested_override = json.loads(json.dumps(request))
+                unrequested_override["id"] = 0
+                del unrequested_override["params"]["arguments"]["output_dir_user_requested"]
+                process.stdin.write(json.dumps(unrequested_override) + "\n")
+                process.stdin.flush()
+                ignored_override_response = json.loads(process.stdout.readline())
+                self.assertNotIn("error", ignored_override_response)
+                configured_path = Path(
+                    ignored_override_response["result"]["structuredContent"]["images"][0]
+                )
+                self.assertEqual(configured_path.parent, root / "final")
+                self.assertTrue(configured_path.is_file())
+
                 process.stdin.write(json.dumps(request) + "\n")
                 process.stdin.flush()
                 line = process.stdout.readline()

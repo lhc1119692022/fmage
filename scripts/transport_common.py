@@ -1,17 +1,89 @@
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
 import hashlib
 import json
 import os
 from pathlib import Path
 import struct
+import socket
 import time
 from typing import Any
 import urllib.request
 
 
 DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+MIN_TIMEOUT_SECONDS = 600
+STATUS_QUERY_TIMEOUT_SECONDS = 30
+_REQUEST_DEADLINE: ContextVar[float | None] = ContextVar("fmage_request_deadline", default=None)
+
+
+def timeout_seconds(value: int | None = None) -> int:
+    return max(MIN_TIMEOUT_SECONDS, int(value or MIN_TIMEOUT_SECONDS))
+
+
+@contextmanager
+def request_budget(seconds: float):
+    """Nested requests share the earliest deadline, without raising its remainder to 600s."""
+    deadline = time.monotonic() + seconds
+    existing = _REQUEST_DEADLINE.get()
+    token = _REQUEST_DEADLINE.set(min(existing, deadline) if existing is not None else deadline)
+    try:
+        request_timeout()
+        yield
+    finally:
+        _REQUEST_DEADLINE.reset(token)
+
+
+def request_timeout(value: float | None = None) -> float:
+    timeout = timeout_seconds(value)
+    deadline = _REQUEST_DEADLINE.get()
+    if deadline is None:
+        return timeout
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Fmage request time budget exhausted.")
+    return remaining if value is None else min(timeout, remaining)
+
+
+def bounded_deadline(deadline: float) -> float:
+    existing = _REQUEST_DEADLINE.get()
+    return min(deadline, existing) if existing is not None else deadline
+
+
+def with_request_budget(call):
+    @wraps(call)
+    def run(args, *positional, **keywords):
+        budget = max(timeout_seconds(args.timeout), getattr(args, "pending_total_timeout", 0) or 0)
+        with request_budget(budget):
+            return call(args, *positional, **keywords)
+    return run
+
+
+def response_chunks(response):
+    """Read incrementally so a slowly streamed body cannot reset the task's deadline."""
+    read = getattr(response, "read1", response.read)
+    while True:
+        remaining = request_timeout()
+        # urllib owns the socket through a buffered file; HTTPError adds an fp wrapper.
+        stream = getattr(response, "fp", None)
+        if getattr(stream, "fp", None) is not None:
+            stream = stream.fp
+        sock = getattr(getattr(stream, "raw", None), "_sock", None)
+        if isinstance(sock, socket.socket) and _REQUEST_DEADLINE.get() is not None:
+            sock.settimeout(remaining)
+        chunk = read(DOWNLOAD_CHUNK_BYTES)
+        request_timeout()
+        if not chunk:
+            return
+        yield chunk
+
+
+def read_response_bytes(response) -> bytes:
+    return b"".join(response_chunks(response))
 
 
 def primary_reference(references: list[str], index: int = 0) -> str:
@@ -359,7 +431,7 @@ def download_image(url: str, timeout: int, user_agent: str | None = None) -> byt
     headers = {"User-Agent": user_agent} if user_agent else {}
     request = urllib.request.Request(url, method="GET", headers=headers)
     limit = max_download_bytes()
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with urllib.request.urlopen(request, timeout=request_timeout(timeout)) as response:
         validate_content_type(response.headers.get("Content-Type"))
         content_length = response.headers.get("Content-Length")
         if content_length and int(content_length) > limit:
@@ -367,10 +439,7 @@ def download_image(url: str, timeout: int, user_agent: str | None = None) -> byt
 
         chunks: list[bytes] = []
         total = 0
-        while True:
-            chunk = response.read(DOWNLOAD_CHUNK_BYTES)
-            if not chunk:
-                break
+        for chunk in response_chunks(response):
             total += len(chunk)
             if total > limit:
                 raise RuntimeError(f"Image download exceeded {limit} bytes.")

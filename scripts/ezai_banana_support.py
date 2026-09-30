@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-from transport_common import save_response_images_from_data
+from transport_common import save_response_images_from_data, request_timeout, read_response_bytes
 
 
 PROVIDER_API_KEY = ""
@@ -211,10 +211,11 @@ def multipart_request(
 
 def perform_request(request: urllib.request.Request, timeout: int) -> dict[str, Any]:
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = response.read()
+        with urllib.request.urlopen(request, timeout=request_timeout(timeout)) as response:
+            payload = read_response_bytes(response)
     except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
+        with error:
+            body = read_response_bytes(error).decode("utf-8", errors="replace")
         raise ApiError(error.code, body) from error
     except urllib.error.URLError as error:
         raise RuntimeError(f"Network error: {error}") from error

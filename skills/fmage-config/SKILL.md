@@ -53,4 +53,6 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
   request/response flow while sharing the 808 authentication and timeout policy.
   `response_format: "url"`, and `timeout: 600`. Preserve the existing `api_key` or `api_key_env`.
 - Providers use the normal direct prompt path. Do not configure prompt-profile or prompt-preparation fields.
+- Configured request and image-task time budgets have a 600-second minimum. Keep `timeout` at 600 or higher; refresh adds 600 when absent and raises smaller configured values. Preserve larger configured timeouts. Individual HTTP operations share the task's remaining budget; status queries are capped at 30 seconds. Foreground batch and workflow status waits use a separate 40-second window and must not be raised to 600 seconds.
+- Generic `openai-images` providers may configure `image_field` as `auto`, `image`, or `image[]` for the first edit submission. 808 uses its fixed `image[]` contract. Provider errors stop the attempt; the transport must not strip delivery fields or switch multipart fields and resubmit.
 - Never print existing API keys or ask the user to paste keys into chat; tell them to edit keys directly in `providers.json`.

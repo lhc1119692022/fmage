@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from transport_common import MIN_TIMEOUT_SECONDS
+
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = Path.home() / ".codex" / "fmage" / "providers.json"
@@ -58,6 +60,14 @@ def _is_removed_dalle_provider(provider_name: str, provider: dict[str, Any]) -> 
 
 
 def _normalize_legacy_fields(provider: dict[str, Any], provider_name: str, changes: list[str]) -> None:
+    configured_timeout = provider.get("timeout")
+    if configured_timeout is None or (
+        isinstance(configured_timeout, int)
+        and not isinstance(configured_timeout, bool)
+        and configured_timeout < MIN_TIMEOUT_SECONDS
+    ):
+        provider["timeout"] = MIN_TIMEOUT_SECONDS
+        changes.append(f"{provider_name}: raised request timeout to {MIN_TIMEOUT_SECONDS} seconds")
     if provider.get("transport") == "808-openai-images":
         provider["transport"] = OPENAI_IMAGES_TRANSPORT
         provider["transport_profile"] = "808"

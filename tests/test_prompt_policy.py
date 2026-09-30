@@ -381,6 +381,35 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual([job["quality"] for job in jobs], ["high", "high"])
         self.assertIn("Mapped quality=", json.dumps(response))
 
+    def test_edit_batch_shares_top_level_reference_image_with_every_job(self) -> None:
+        config = provider_config(["test"], {"test": provider("gpt-image-2", "openai-images")})
+        tools = tool_map(call_server(config, "tools/list", {}))
+        properties = tools["edit_image_batch"]["inputSchema"]["properties"]
+        self.assertEqual(
+            [option.get("type") for option in properties["images"]["anyOf"]],
+            ["string", "array"],
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "reference.png"
+            image_path.write_bytes(TRANSPARENT_TEST_PNG)
+            response = self.call_image_tool(
+                config,
+                name="edit_image_batch",
+                images=str(image_path),
+                jobs=[
+                    {"prompt": "proposal one"},
+                    {"prompt": "proposal two"},
+                    {"prompt": "proposal three"},
+                ],
+            )
+
+        self.assertNotIn("error", response, json.dumps(response))
+        result = response["result"]["structuredContent"]
+        self.assertEqual(result["completed_count"], 3)
+        self.assertEqual(result["failed_count"], 0)
+        self.assertEqual([job["status"] for job in result["job_statuses"]], ["completed"] * 3)
+
     def test_image_2_5_preserves_explicit_extended_quality(self) -> None:
         for model in ("gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
             config = provider_config(["test"], {"test": provider(model)})

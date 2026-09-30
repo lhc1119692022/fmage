@@ -15,6 +15,30 @@ from migrate_local_config import migrate_file, migrate_payload
 
 
 class MigrateLocalConfigTests(unittest.TestCase):
+    def test_missing_and_short_timeouts_are_migrated_without_changing_other_settings(self) -> None:
+        payload = {
+            "providers": {
+                "missing": {"transport": "openai-images", "model": "gpt-image-2", "api_key": "keep-key"},
+                "short": {"transport": "gemini-generate-content", "timeout": 60, "api_key_env": "KEEP_ENV"},
+                "long": {"transport": "openai-images", "timeout": 900, "base_url": "https://custom.invalid"},
+            },
+            "active_providers": ["short", "missing"],
+            "workflow_connections": {"custom": {"api_key": "keep-workflow-key"}},
+        }
+        original = copy.deepcopy(payload)
+        changes = migrate_payload(payload)
+        for name, expected in (("missing", 600), ("short", 600), ("long", 900)):
+            self.assertEqual(payload["providers"][name]["timeout"], expected)
+            actual_provider = copy.deepcopy(payload["providers"][name])
+            actual_provider.pop("timeout", None)
+            original_provider = copy.deepcopy(original["providers"][name])
+            original_provider.pop("timeout", None)
+            self.assertEqual(actual_provider, original_provider)
+        self.assertEqual(payload["active_providers"], original["active_providers"])
+        self.assertEqual(payload["workflow_connections"], original["workflow_connections"])
+        self.assertNotIn("keep-key", "\n".join(changes))
+        self.assertEqual(migrate_payload(payload), [])
+
     def test_workflow_defaults_are_added_once_and_existing_entries_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "providers.json"
