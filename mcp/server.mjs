@@ -6,7 +6,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createWorkflowService, workflowTools } from "./workflows.mjs";
-import { MIN_TIMEOUT_SECONDS, timeoutSeconds } from "./timeout-policy.mjs";
+import { timeoutSeconds } from "./timeout-policy.mjs";
 
 const SERVER_NAME = "Fmage";
 const SERVER_VERSION = "0.1.0";
@@ -30,10 +30,8 @@ const BASE_INITIALIZE_INSTRUCTIONS =
   "Do not create a separate plan, preparation pass, trace/status preflight, or repeated rewrite.";
 const MAX_EMBEDDED_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_CHILD_OUTPUT_BYTES = 2 * 1024 * 1024;
-const DEFAULT_HELPER_TIMEOUT_SECONDS = MIN_TIMEOUT_SECONDS;
 const HELPER_TIMEOUT_GRACE_SECONDS = 60;
 const BATCH_FOREGROUND_WAIT_SECONDS = 40;
-const PENDING_TOTAL_TIMEOUT_SECONDS = MIN_TIMEOUT_SECONDS;
 const PENDING_POLL_FAST_WINDOW_SECONDS = 120;
 const PENDING_POLL_FAST_INTERVAL_SECONDS = 5;
 const PENDING_POLL_SLOW_INTERVAL_SECONDS = 10;
@@ -43,29 +41,21 @@ const CONFIG_PATH =
   join(process.env.CODEX_HOME || join(homedir(), ".codex"), "fmage", "providers.json");
 const TRANSPORT_OPENAI_IMAGES = "openai-images";
 const workflowService = createWorkflowService(CONFIG_PATH);
-const TRANSPORT_PROFILE_808 = "808";
-const TRANSPORT_EZAI_BANANA_IMAGES = "ezai-banana-images";
+const TRANSPORT_JSON_IMAGES = "json-images";
 const TRANSPORT_GEMINI_GENERATE_CONTENT = "gemini-generate-content";
 const BANANA_MODEL_CAPABILITY_SPEC = JSON.parse(
   readFileSync(join(PLUGIN_ROOT, "config", "banana-model-capabilities.json"), "utf8"),
 );
-const OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT = "url";
-const OPENAI_IMAGES_808_SUPPORTED_MODELS = new Set([
-  "gpt-image-2",
-  "gpt-image-2-token",
-  "gpt-image-2.5",
-  "gpt-image-2.5-flare",
-  "gpt-image-2.5-sunburst",
-]);
-const EZAI_BANANA_DEFAULT_RESPONSE_FORMAT = "url";
-const EZAI_BANANA_SUPPORTED_RESPONSE_FORMATS = new Set(["url", "b64_json"]);
+const ASYNC_DEFAULT_RESPONSE_FORMAT = "url";
+const JSON_IMAGES_DEFAULT_RESPONSE_FORMAT = "url";
+const JSON_IMAGES_SUPPORTED_RESPONSE_FORMATS = new Set(["url", "b64_json"]);
 
 const TRANSPORTS = {
   [TRANSPORT_OPENAI_IMAGES]: join(PLUGIN_ROOT, "scripts", "openai_images_transport.py"),
-  [TRANSPORT_EZAI_BANANA_IMAGES]: join(
+  [TRANSPORT_JSON_IMAGES]: join(
     PLUGIN_ROOT,
     "scripts",
-    "ezai_banana_transport.py",
+    "json_images_transport.py",
   ),
   [TRANSPORT_GEMINI_GENERATE_CONTENT]: join(
     PLUGIN_ROOT,
@@ -75,12 +65,10 @@ const TRANSPORTS = {
 };
 const EDIT_ARGUMENT_MAPPINGS = {
   [TRANSPORT_OPENAI_IMAGES]: { primaryImageIndex: "--primary-image-index" },
-  [TRANSPORT_EZAI_BANANA_IMAGES]: { primaryImageIndex: "--primary-image-index" },
+  [TRANSPORT_JSON_IMAGES]: { primaryImageIndex: "--primary-image-index" },
   [TRANSPORT_GEMINI_GENERATE_CONTENT]: { primaryImageIndex: "--primary-image-index" },
 };
-const TRANSPORT_PROFILE_SCRIPTS = {
-  [TRANSPORT_PROFILE_808]: join(PLUGIN_ROOT, "scripts", "openai_images_808_transport.py"),
-};
+const ASYNC_TRANSPORT_SCRIPT = join(PLUGIN_ROOT, "scripts", "openai_images_async_transport.py");
 const REGRESSION_SCRIPT = join(
   PLUGIN_ROOT,
   "skills",
@@ -111,12 +99,6 @@ function nonEmptyString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function normalizeTransportProfile(value) {
-  const configured = nonEmptyString(value);
-  if (!configured) return null;
-  if (configured === TRANSPORT_PROFILE_808) return TRANSPORT_PROFILE_808;
-  throw new Error(`Unsupported transport_profile "${value}". Use "${TRANSPORT_PROFILE_808}".`);
-}
 
 function stripJsonBom(value) {
   return value.charCodeAt(0) === 0xfeff ? value.slice(1) : value;
@@ -573,7 +555,12 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   }
   const configuredTransport = nonEmptyString(raw.transport);
   const transport = configuredTransport;
-  const transportProfile = normalizeTransportProfile(raw.transport_profile);
+  if (raw.transport_profile !== undefined) throw new Error("Legacy transport_profile must be migrated before use.");
+  const asyncMode = raw.async_mode === true;
+  if (raw.async_mode !== undefined && typeof raw.async_mode !== "boolean") throw new Error("async_mode must be a boolean.");
+  const authScheme = nonEmptyString(raw.auth_scheme) || "x-goog-api-key";
+  if (!["bearer", "x-goog-api-key"].includes(authScheme)) throw new Error("Unsupported auth_scheme.");
+  timeoutSeconds(raw.timeout);
   const baseUrl = nonEmptyString(raw.base_url);
   const model = nonEmptyString(raw.model);
   const apiKeyEnv = nonEmptyString(raw.api_key_env);
@@ -584,50 +571,21 @@ async function resolveProvider(requestedProvider, requireKey = true) {
         `Use one of: ${Object.keys(TRANSPORTS).join(", ")}.`,
     );
   }
-  if (transportProfile && ![TRANSPORT_OPENAI_IMAGES, TRANSPORT_GEMINI_GENERATE_CONTENT].includes(transport)) {
-    throw new Error(
-      `Provider "${providerName}" transport_profile "${transportProfile}" requires transport ` +
-        `"${TRANSPORT_OPENAI_IMAGES}".`,
-    );
-  }
   if (!baseUrl || !model) {
     throw new Error(`Provider "${providerName}" must define base_url and model in ${CONFIG_PATH}.`);
   }
-  let openaiImages808 = null;
-  if (transportProfile === TRANSPORT_PROFILE_808) {
-    if (transport === TRANSPORT_OPENAI_IMAGES && !OPENAI_IMAGES_808_SUPPORTED_MODELS.has(model)) {
-      throw new Error(
-        `Provider "${providerName}" model "${model}" is not supported by transport_profile ` +
-          `"${TRANSPORT_PROFILE_808}". ` +
-          `Use gpt-image-2, gpt-image-2-token, gpt-image-2.5, gpt-image-2.5-flare, or gpt-image-2.5-sunburst.`,
-      );
-    }
-    const configuredTimeout = raw.timeout;
-    if (configuredTimeout !== undefined && positiveInteger(configuredTimeout, 0) === 0) {
-      throw new Error(`Provider "${providerName}" timeout must be a positive integer.`);
-    }
-    const responseFormat = nonEmptyString(raw.response_format) || OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT;
-    if (transport === TRANSPORT_OPENAI_IMAGES && !["url", "b64_json"].includes(responseFormat)) {
+  const responseFormat = nonEmptyString(raw.response_format);
+  if (responseFormat && !["url", "b64_json"].includes(responseFormat)) throw new Error("Unsupported response_format.");
+  let jsonImages = null;
+  if (transport === TRANSPORT_JSON_IMAGES) {
+    const responseFormat = nonEmptyString(raw.response_format) || JSON_IMAGES_DEFAULT_RESPONSE_FORMAT;
+    if (!JSON_IMAGES_SUPPORTED_RESPONSE_FORMATS.has(responseFormat)) {
       throw new Error(
         `Provider "${providerName}" has unsupported response_format "${responseFormat}". ` +
-          `Use "url" or "b64_json".`,
+          `Use ${Array.from(JSON_IMAGES_SUPPORTED_RESPONSE_FORMATS).map((item) => `"${item}"`).join(" or ")}.`,
       );
     }
-    openaiImages808 = transport === TRANSPORT_OPENAI_IMAGES ? {
-      responseFormat,
-      timeoutSeconds: timeoutSeconds(configuredTimeout),
-    } : null;
-  }
-  let ezaiBanana = null;
-  if (transport === TRANSPORT_EZAI_BANANA_IMAGES) {
-    const responseFormat = nonEmptyString(raw.response_format) || EZAI_BANANA_DEFAULT_RESPONSE_FORMAT;
-    if (!EZAI_BANANA_SUPPORTED_RESPONSE_FORMATS.has(responseFormat)) {
-      throw new Error(
-        `Provider "${providerName}" has unsupported response_format "${responseFormat}". ` +
-          `Use ${Array.from(EZAI_BANANA_SUPPORTED_RESPONSE_FORMATS).map((item) => `"${item}"`).join(" or ")}.`,
-      );
-    }
-    ezaiBanana = {
+    jsonImages = {
       responseFormat,
       editInputModes: ["json_image_urls", "multipart_local_files"],
     };
@@ -644,21 +602,22 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   return {
     name: providerName,
     transport,
-    transportProfile,
+    asyncMode,
+    authScheme,
     baseUrl,
     model,
     apiKey,
     apiKeyConfigured: Boolean(apiKey),
     apiKeySource: nonEmptyString(raw.api_key) ? "external_config" : apiKey ? `environment:${apiKeyEnv}` : "missing",
-    openaiImages808,
-    ezaiBanana,
+    jsonImages,
     config,
     raw,
   };
 }
 
 function helperTimeoutMilliseconds(value) {
-  return (timeoutSeconds(value, DEFAULT_HELPER_TIMEOUT_SECONDS) + HELPER_TIMEOUT_GRACE_SECONDS) * 1000;
+  const seconds = timeoutSeconds(value);
+  return seconds === null ? null : (seconds + HELPER_TIMEOUT_GRACE_SECONDS) * 1000;
 }
 
 function appendBoundedOutput(current, chunk, streamName, child) {
@@ -684,7 +643,7 @@ function runProcess(command, argv, extraEnv = {}, options = {}) {
     let settled = false;
     let pendingError = null;
     const timeoutMs = helperTimeoutMilliseconds(options.timeoutSeconds);
-    const timeout = setTimeout(() => {
+    const timeout = timeoutMs === null ? null : setTimeout(() => {
       pendingError = new Error(`Fmage helper timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
       child.kill();
     }, timeoutMs);
@@ -753,7 +712,7 @@ async function runImageRegression(args) {
     pythonCommand(),
     [REGRESSION_SCRIPT, "--input", image],
     { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
-    { timeoutSeconds: MIN_TIMEOUT_SECONDS },
+    {},
   );
   const output = normalizeDisplayPath(result.output);
   return {
@@ -796,23 +755,24 @@ function commonArguments(args, promptFile, provider) {
     appendOption(argv, "--background", args.background ?? "auto");
     appendOption(argv, "--output-format", args.output_format ?? "png");
     appendOption(argv, "--output-compression", args.output_compression);
-  } else if (provider.transport === TRANSPORT_EZAI_BANANA_IMAGES) {
+  } else if (provider.transport === TRANSPORT_JSON_IMAGES) {
     appendOption(argv, "--output-format", args.output_format ?? "png");
     appendOption(argv, "--thinking-level", args.thinking_level);
     appendOption(
       argv,
       "--response-format",
       nonEmptyString(args.response_format) ||
-        provider.ezaiBanana?.responseFormat ||
-        EZAI_BANANA_DEFAULT_RESPONSE_FORMAT,
+        provider.jsonImages?.responseFormat ||
+        JSON_IMAGES_DEFAULT_RESPONSE_FORMAT,
     );
   } else if (provider.transport === TRANSPORT_GEMINI_GENERATE_CONTENT) {
+    appendOption(argv, "--generation-config-format", provider.raw.generation_config_format);
     appendOption(argv, "--output-format", args.output_format ?? "png");
     appendOption(argv, "--thinking-level", args.thinking_level);
     appendOption(
       argv,
       "--auth-scheme",
-      provider.transportProfile === TRANSPORT_PROFILE_808 ? "bearer" : "x-goog-api-key",
+      provider.authScheme,
     );
   }
 
@@ -827,37 +787,14 @@ function commonArguments(args, promptFile, provider) {
   return argv;
 }
 
-function openaiImages808RequestTimeoutSeconds(args, provider) {
-  return timeoutSeconds(
-    args.timeout,
-    provider.raw.timeout,
-    provider.openaiImages808?.timeoutSeconds,
-  );
-}
-
-function openaiImages808PendingTimeoutSeconds(args, provider) {
-  return Math.max(
-    openaiImages808RequestTimeoutSeconds(args, provider),
-    positiveInteger(args._pending_total_timeout, 0),
-  );
-}
-
 function providerTransportScript(provider) {
-  if (provider.transportProfile && provider.transport === TRANSPORT_OPENAI_IMAGES) {
-    const script = TRANSPORT_PROFILE_SCRIPTS[provider.transportProfile];
-    if (!script) {
-      throw new Error(
-        `Provider "${provider.name}" has unsupported transport_profile "${provider.transportProfile}".`,
-      );
-    }
-    return script;
-  }
-  return TRANSPORTS[provider.transport];
+  return provider.asyncMode && provider.transport === TRANSPORT_OPENAI_IMAGES
+    ? ASYNC_TRANSPORT_SCRIPT : TRANSPORTS[provider.transport];
 }
 
 function appendEditArguments(argv, args, provider) {
   const mapping = EDIT_ARGUMENT_MAPPINGS[provider.transport];
-  if (provider.transport === TRANSPORT_OPENAI_IMAGES && provider.transportProfile !== TRANSPORT_PROFILE_808) {
+  if (provider.transport === TRANSPORT_OPENAI_IMAGES) {
     const imageField = nonEmptyString(provider.raw.image_field);
     if (imageField && !["auto", "image", "image[]"].includes(imageField)) {
       throw new Error('Provider image_field must be "auto", "image", or "image[]".');
@@ -872,7 +809,7 @@ function appendEditArguments(argv, args, provider) {
   }
 }
 
-function openaiImages808Arguments(args, promptFile, provider) {
+function asyncImageArguments(args, promptFile, provider) {
   const outputDir = transportOutputRoot(args, provider);
   const argv = ["--prompt-file", promptFile];
 
@@ -891,12 +828,12 @@ function openaiImages808Arguments(args, promptFile, provider) {
     argv,
     "--response-format",
     nonEmptyString(args.response_format) ||
-      provider.openaiImages808?.responseFormat ||
-      OPENAI_IMAGES_808_DEFAULT_RESPONSE_FORMAT,
+      provider.raw.response_format ||
+      ASYNC_DEFAULT_RESPONSE_FORMAT,
   );
   appendOption(argv, "--output-dir", outputDir);
-  appendOption(argv, "--timeout", openaiImages808RequestTimeoutSeconds(args, provider));
-  appendOption(argv, "--pending-total-timeout", openaiImages808PendingTimeoutSeconds(args, provider));
+  appendOption(argv, "--timeout", timeoutSeconds(args.timeout, provider.raw.timeout));
+  appendOption(argv, "--pending-total-timeout", timeoutSeconds(args.timeout, provider.raw.timeout, args._pending_total_timeout));
   appendFlag(argv, "--dry-run", args.dry_run);
   return argv;
 }
@@ -1050,7 +987,7 @@ function enforceDeliveryPolicy(args = {}) {
 }
 
 function bananaModelCapability(provider) {
-  const bindings = BANANA_MODEL_CAPABILITY_SPEC.contracts?.[provider.transport];
+  const bindings = BANANA_MODEL_CAPABILITY_SPEC.aliases;
   if (!bindings) return null;
   const wireModel = nonEmptyString(provider.model)?.toLowerCase();
   if (!bindings || !wireModel) return null;
@@ -1085,7 +1022,7 @@ function enforceModelCapabilityPolicy(args = {}, provider) {
   if (!thinkingLevel) return args;
 
   const capability = bananaModelCapability(provider);
-  const hasBananaContract = Boolean(BANANA_MODEL_CAPABILITY_SPEC.contracts?.[provider.transport]);
+  const hasBananaContract = [TRANSPORT_JSON_IMAGES, TRANSPORT_GEMINI_GENERATE_CONTENT].includes(provider.transport);
   if (hasBananaContract && !capability) {
     return args;
   }
@@ -1324,7 +1261,7 @@ async function enrichResult(result, revisedPrompt, provider) {
     request: sanitizeRequest(result.request),
     provider: provider.name,
     provider_transport: provider.transport,
-    ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
+    ...(provider.asyncMode ? { async_mode: true } : {}),
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
     prompt_submitted: revisedPrompt,
@@ -2013,7 +1950,7 @@ async function combineBatchResults({
     request,
     provider: provider.name,
     provider_transport: provider.transport,
-    ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
+    ...(provider.asyncMode ? { async_mode: true } : {}),
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
     prompt_submitted: prompt,
@@ -2155,7 +2092,7 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     updated_at: submittedAt,
     provider: provider.name,
     provider_transport: provider.transport,
-    ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
+    ...(provider.asyncMode ? { async_mode: true } : {}),
     provider_base_url: provider.baseUrl,
     provider_model: provider.model,
     requested_count: normalizedJobs.length,
@@ -2198,7 +2135,6 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
           const result = await runSingleImageCommand(command, {
             ...normalizedJobs[index],
             _transport_output_dir: requestOutputDir,
-            _pending_total_timeout: PENDING_TOTAL_TIMEOUT_SECONDS,
             _pending_fast_window: PENDING_POLL_FAST_WINDOW_SECONDS,
             _pending_fast_interval: PENDING_POLL_FAST_INTERVAL_SECONDS,
             _pending_slow_interval: PENDING_POLL_SLOW_INTERVAL_SECONDS,
@@ -2354,8 +2290,8 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
 
   try {
     const transportArguments =
-      provider.transportProfile === TRANSPORT_PROFILE_808 && provider.transport === TRANSPORT_OPENAI_IMAGES
-        ? openaiImages808Arguments(args, promptFile, provider)
+      provider.asyncMode && provider.transport === TRANSPORT_OPENAI_IMAGES
+        ? asyncImageArguments(args, promptFile, provider)
         : commonArguments(args, promptFile, provider);
     const argv = [scriptPath, command, ...transportArguments];
     if (command === "edit") {
@@ -2373,10 +2309,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
       }
     }
 
-    const helperTimeoutSeconds =
-      provider.transportProfile === TRANSPORT_PROFILE_808 && provider.transport === TRANSPORT_OPENAI_IMAGES
-        ? openaiImages808PendingTimeoutSeconds(args, provider)
-        : timeoutSeconds(args.timeout, provider.raw.timeout, args._pending_total_timeout);
+    const helperTimeoutSeconds = timeoutSeconds(args.timeout, provider.raw.timeout, args._pending_total_timeout);
     const helperEnvironment = {
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",
@@ -2438,11 +2371,11 @@ async function recoverRemoteImageTask(args) {
     throw new Error("Remote result retrieval requires provider and the full remote_task_id, without task_id.");
   }
   const provider = await resolveProvider(args.provider, !args.dry_run);
-  if (provider.transport !== TRANSPORT_OPENAI_IMAGES || provider.transportProfile !== TRANSPORT_PROFILE_808) {
-    throw new Error("Remote result retrieval is supported only for the selected 808 OpenAI Images profile.");
+  if (provider.transport !== TRANSPORT_OPENAI_IMAGES) {
+    throw new Error("Remote result retrieval requires the openai-images transport.");
   }
-  const timeout = openaiImages808PendingTimeoutSeconds(args, provider);
-  const argv = [providerTransportScript(provider), "recover"];
+  const timeout = timeoutSeconds(args.timeout, provider.raw.timeout, args._pending_total_timeout);
+  const argv = [ASYNC_TRANSPORT_SCRIPT, "recover"];
   appendOption(argv, "--remote-task-id", args.remote_task_id);
   appendOption(argv, "--base-url", provider.baseUrl);
   appendOption(argv, "--model", provider.model);
@@ -2525,9 +2458,9 @@ function commonProperties(editing = false) {
     },
     thinking_level: {
       type: "string",
-      enum: ["minimal", "high"],
+      enum: ["minimal", "medium", "high"],
       description:
-        "EzAI Nano Banana 2 only. Omit unless explicitly requested; never copy session reasoning.",
+        "Nano Banana 2 only. Omit unless explicitly requested; never copy session reasoning.",
     },
     thinking_level_user_requested: {
       type: "boolean",
@@ -2584,9 +2517,8 @@ function commonProperties(editing = false) {
     },
     timeout: {
       type: "integer",
-      minimum: MIN_TIMEOUT_SECONDS,
-      default: MIN_TIMEOUT_SECONDS,
-      description: "Timeout in seconds, at least 600. Smaller legacy values are raised to 600.",
+      minimum: 1,
+      description: "Optional timeout in seconds; omitted uses the runtime default.",
     },
     dry_run: {
       type: "boolean",
@@ -2854,7 +2786,7 @@ function toolDefinitions() {
     {
       name: TOOL_TASK_STATUS,
       title: "Get Fmage Image Task Status",
-      description: "Read local async task status, or retrieve an existing 808 remote task without resubmitting generation.",
+      description: "Read local async task status, or retrieve an existing remote image task without resubmitting generation.",
       inputSchema: {
         type: "object",
         properties: {
@@ -2864,7 +2796,7 @@ function toolDefinitions() {
           },
           remote_task_id: {
             type: "string",
-            description: "Full existing 808 remote task ID; requires provider. Retrieves only that task's result.",
+            description: "Full existing remote image task ID; requires provider. Retrieves only that task's result.",
           },
           provider: {
             type: "string",
@@ -2872,7 +2804,7 @@ function toolDefinitions() {
           },
           timeout: {
             type: "integer", minimum: 1,
-            description: "Remote retrieval timeout, minimum 600 seconds.",
+            description: "Optional remote retrieval timeout in seconds.",
           },
           dry_run: {
             type: "boolean",
@@ -3113,7 +3045,7 @@ async function providerStatus(requestedProvider) {
     default_provider: activeProviders[0],
     selected_provider: provider.name,
     transport: provider.transport,
-    ...(provider.transportProfile ? { transport_profile: provider.transportProfile } : {}),
+    ...(provider.asyncMode ? { async_mode: true } : {}),
     base_url: provider.baseUrl,
     model: provider.model,
     api_key_configured: provider.apiKeyConfigured,
@@ -3123,22 +3055,12 @@ async function providerStatus(requestedProvider) {
     cache_dir: transportOutputRoot({}, provider),
     task_dir: taskStoreRoot(),
     timeout_seconds: timeoutSeconds(provider.raw.timeout),
-    ...(provider.openaiImages808
+    ...(provider.transport === TRANSPORT_OPENAI_IMAGES ? { response_format: provider.raw.response_format ?? (provider.asyncMode ? "url" : null), async_mode: provider.asyncMode } : {}),
+    ...(provider.asyncMode ? { remote_async: { status_path: "/images/tasks/{task_id}" } } : {}),
+    ...(provider.jsonImages
       ? {
-          response_format: provider.openaiImages808.responseFormat,
-          timeout_seconds: provider.openaiImages808.timeoutSeconds,
-          remote_async: {
-            enabled: true,
-            submission_query: { async: "true" },
-            status_path: "/images/tasks/{task_id}",
-            result_response_format: "b64_json",
-          },
-        }
-      : {}),
-    ...(provider.ezaiBanana
-      ? {
-          response_format: provider.ezaiBanana.responseFormat,
-          edit_input_modes: provider.ezaiBanana.editInputModes,
+          response_format: provider.jsonImages.responseFormat,
+          edit_input_modes: provider.jsonImages.editInputModes,
         }
       : {}),
   };

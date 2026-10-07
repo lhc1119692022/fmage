@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Shared Nano Banana capability rules used by provider transports.
-
-This is internal transport code, not user configuration. The Nano Banana 2
-rules reuse the existing Gemini 3.1 Flash Image preset from
-com.image.model.api.connector_PS/js/provider-registry.js. Provider wire model
-IDs are contract-specific and must never be rewritten or used with another
-provider contract. The Nano Banana 2 / Pro differences come from the
-user-supplied EzAI API examples and capability comparison dated 2026-08-01.
-"""
+"""Provider-independent Nano Banana capabilities. Keep configured wire IDs unchanged."""
 
 from __future__ import annotations
 
@@ -43,64 +35,26 @@ MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
     }
     for model, capability in CAPABILITY_SPEC["models"].items()
 }
-MODEL_CONTRACT_BINDINGS: dict[str, dict[str, str]] = {
-    contract: dict(bindings)
-    for contract, bindings in CAPABILITY_SPEC["contracts"].items()
-}
-
-WIRE_MODEL_CONTRACTS: dict[str, str] = {}
-for contract, bindings in MODEL_CONTRACT_BINDINGS.items():
-    for wire_model, canonical_model in bindings.items():
-        if canonical_model not in MODEL_CAPABILITIES:
-            raise RuntimeError(
-                f"Nano Banana contract '{contract}' maps '{wire_model}' to unknown "
-                f"capability '{canonical_model}'."
-            )
-        normalized = wire_model.strip().lower()
-        existing = WIRE_MODEL_CONTRACTS.get(normalized)
-        if existing and existing != contract:
-            raise RuntimeError(
-                f"Nano Banana wire model ID '{wire_model}' belongs to both "
-                f"'{existing}' and '{contract}'."
-            )
-        WIRE_MODEL_CONTRACTS[normalized] = contract
+MODEL_ALIASES = dict(CAPABILITY_SPEC["aliases"])
+SUPPORTED_TRANSPORTS = {"json-images", "gemini-generate-content", "openai-images"}
 
 
 def wire_models_for(contract: str) -> tuple[str, ...]:
-    bindings = MODEL_CONTRACT_BINDINGS.get(contract)
-    if bindings is None:
-        raise ValueError(f"Unknown Nano Banana provider contract '{contract}'.")
-    return tuple(bindings)
+    if contract not in SUPPORTED_TRANSPORTS:
+        raise ValueError(f"Unknown image transport '{contract}'.")
+    return tuple(MODEL_ALIASES)
 
 
 def resolve_model(contract: str, model: str, *, required: bool = True) -> dict[str, Any] | None:
+    wire_models_for(contract)
     configured = str(model or "").strip()
-    bindings = MODEL_CONTRACT_BINDINGS.get(contract)
-    if bindings is None:
-        raise ValueError(f"Unknown Nano Banana provider contract '{contract}'.")
-    canonical_by_wire_id = {wire_model.lower(): canonical for wire_model, canonical in bindings.items()}
-    canonical = canonical_by_wire_id.get(configured.lower())
+    canonical = MODEL_ALIASES.get(configured.lower())
     if canonical is None:
-        owner = WIRE_MODEL_CONTRACTS.get(configured.lower())
-        if owner and owner != contract:
-            raise ValueError(
-                f"Nano Banana wire model ID '{configured}' belongs to provider contract "
-                f"'{owner}' and cannot be used with '{contract}'."
-            )
         if required:
-            supported = ", ".join(bindings)
-            raise ValueError(
-                f"Provider contract '{contract}' does not accept Nano Banana wire model ID "
-                f"'{configured}'. Use one of: {supported}."
-            )
+            raise ValueError(f"Unsupported Nano Banana model '{configured}'. Use Nano Banana Pro, 2, or 2.1.")
         return None
-    capability = MODEL_CAPABILITIES[canonical]
-    return {
-        "provider_contract": contract,
-        "wire_model": configured,
-        "canonical_model": canonical,
-        **capability,
-    }
+    return {"provider_contract": contract, "wire_model": configured,
+            "canonical_model": canonical, **MODEL_CAPABILITIES[canonical]}
 
 
 def normalize_resolution(value: str) -> str:

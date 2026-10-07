@@ -19,7 +19,7 @@ import urllib.parse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-import openai_images_808_transport as transport
+import openai_images_async_transport as transport
 
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlD7xkAAAAASUVORK5CYII="
@@ -79,7 +79,7 @@ def mcp_call(root, base_url, tool, arguments, *, key="test-key"):
     config.write_text(json.dumps({
         "active_providers": ["test"], "output_dir": str(root / "images"),
         "cache_dir": str(root / "cache"), "task_dir": str(root / "tasks"),
-        "providers": {"test": {"transport": "openai-images", "transport_profile": "808",
+        "providers": {"test": {"transport": "openai-images", "async_mode": True,
                                  "base_url": base_url, "model": "gpt-image-2.5-sunburst", "api_key": key}},
     }), encoding="utf-8")
     request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",

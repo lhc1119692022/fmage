@@ -35,24 +35,26 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
 
 - Before editing, inspect the file and preserve existing providers.
 - If missing and creation is requested, copy from plugin `config/providers.example.json`.
-- Edit non-secret fields normally: `active_providers`, legacy `active_provider`, `transport`,
-  `transport_profile`, `base_url`, `model`, `response_format`, `timeout`, and provider names.
-  `transport: "808-openai-images"`, `compatibility`, `compatibility_profile`, `prompt_profile`,
-  and `prompt_policy` are obsolete; remove them before use.
-- The primary transports are `openai-images`, `ezai-banana-images`, and
-  `gemini-generate-content`. Use `gemini-generate-content` for providers that
-  expose Google's native `/v1beta/models/{model}:generateContent` protocol; it supports generation
-  and edits through text and inline image parts.
-  Gemini authentication defaults to `x-goog-api-key`; the 808 profile uses the provider's
-  documented `Authorization: Bearer` header internally, without an extra config field.
-  `gemini-3.1-flash-image-preview` and `gemini-3.1-flash-image` share Nano Banana 2
-  capabilities; `gemini-3-pro-image-preview` and `gemini-3-pro-image` share Pro capabilities.
-  Keep the configured wire model ID unchanged. The `808-nano` example uses the Flash preview ID,
-  `https://api.808relay.com`, `transport_profile: "808"`, and `timeout: 600`. The profile uses
-  async submission and polling only for `openai-images`; Gemini keeps its native generateContent
-  request/response flow while sharing the 808 authentication and timeout policy.
-  `response_format: "url"`, and `timeout: 600`. Preserve the existing `api_key` or `api_key_env`.
-- Providers use the normal direct prompt path. Do not configure prompt-profile or prompt-preparation fields.
-- Configured request and image-task time budgets have a 600-second minimum. Keep `timeout` at 600 or higher; refresh adds 600 when absent and raises smaller configured values. Preserve larger configured timeouts. Individual HTTP operations share the task's remaining budget; status queries are capped at 30 seconds. Foreground batch and workflow status waits use a separate 40-second window and must not be raised to 600 seconds.
-- Generic `openai-images` providers may configure `image_field` as `auto`, `image`, or `image[]` for the first edit submission. 808 uses its fixed `image[]` contract. Provider errors stop the attempt; the transport must not strip delivery fields or switch multipart fields and resubmit.
+- Edit non-secret fields normally: active providers, transport, base_url, model, response_format,
+  async_mode, auth_scheme, generation_config_format, image_field, timeout, and provider names.
+- Supported protocols are openai-images, json-images, and gemini-generate-content.
+  Choose the protocol from the provider's API contract, never its name or hostname.
+  Old channel transport names and transport_profile are migration inputs only; do not create them.
+- For OpenAI Images async submission and /images/tasks/{task_id} polling, set async_mode=true.
+  Any provider/model may use this protocol. image_field accepts auto, image, or image[].
+- Gemini uses x-goog-api-key by default; set auth_scheme=bearer when required by the API.
+  Explicit /v1 and /v1beta base paths are preserved; unversioned URLs default to /v1beta.
+  generation_config_format defaults to image-config (generationConfig.imageConfig).
+  Set response-format for APIs using generationConfig.responseFormat.image, as in the supplied v1 documentation.
+- Nano Banana supports only Pro, 2, and 2.1. Aliases share capabilities across transports:
+  nano-banana-pro and gemini-3-pro-image[-preview]; nano-banana-2 and
+  gemini-3.1-flash-image[-preview]; nano-banana-2.1 and gemini-nano-banana-2.1.
+  Always preserve the configured wire model ID. Pro supports 1K/2K/4K; 2 adds 512px;
+  2.1 supports 1K/2K/4K and minimal/medium/high thinking (default medium).
+- Omit timeout to use runtime defaults. Explicit positive values are preserved and request-level
+  values override provider values. Migration removes the former forced 600 value; it never adds
+  a timeout. Explicit budgets cover download, submission, polling and delivery together.
+  Status queries retain a 30-second cap; foreground batch/workflow waits retain their 40-second window.
+- Preserve api_key/api_key_env. Do not configure removed prompt-preparation fields.
+  Provider errors stop the attempt; never strip fields or change multipart fields and resubmit.
 - Never print existing API keys or ask the user to paste keys into chat; tell them to edit keys directly in `providers.json`.

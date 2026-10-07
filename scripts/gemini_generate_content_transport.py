@@ -19,7 +19,6 @@ import urllib.request
 
 import banana_models
 from transport_common import (
-    MIN_TIMEOUT_SECONDS,
     timeout_seconds,
     request_timeout,
     read_response_bytes,
@@ -100,9 +99,7 @@ def normalized_model(model: str) -> str:
 def generate_content_endpoint(base_url: str, model: str) -> str:
     parsed = urllib.parse.urlsplit(base_url.strip())
     base_path = parsed.path.rstrip("/")
-    if base_path.endswith("/v1"):
-        base_path = base_path.removesuffix("/v1") + "/v1beta"
-    elif not base_path.endswith("/v1beta"):
+    if not base_path.endswith(("/v1", "/v1beta")):
         base_path += "/v1beta"
     model_id = urllib.parse.quote(normalized_model(model), safe="")
     path = f"{base_path}/models/{model_id}:generateContent"
@@ -266,6 +263,8 @@ def build_payload(
             "imageSize": "512" if resolution == "512px" else resolution,
         },
     }
+    if getattr(args, "generation_config_format", "image-config") == "response-format":
+        generation_config = {"responseFormat": {"image": generation_config["imageConfig"]}}
     if args.thinking_level:
         thinking_level = banana_models.resolve_thinking_level(
             TRANSPORT_NAME,
@@ -473,14 +472,15 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--aspect")
     parser.add_argument("--resolution")
     parser.add_argument("--quality", choices=["low", "medium", "high", "auto"], default="high")
-    parser.add_argument("--thinking-level", choices=["minimal", "high"])
+    parser.add_argument("--thinking-level", choices=["minimal", "medium", "high"])
     parser.add_argument("--output-format", choices=["png", "jpeg", "webp"], default="png")
+    parser.add_argument("--generation-config-format", choices=["image-config", "response-format"], default="image-config")
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--api-key-env", default="PROVIDER_API_KEY")
     parser.add_argument("--auth-scheme", choices=["x-goog-api-key", "bearer"], default="x-goog-api-key")
     parser.add_argument("--output-dir")
-    parser.add_argument("--timeout", type=timeout_seconds, default=MIN_TIMEOUT_SECONDS)
+    parser.add_argument("--timeout", type=timeout_seconds, default=None)
     parser.add_argument("--pending-total-timeout", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--pending-fast-window", type=int, default=120, help=argparse.SUPPRESS)
     parser.add_argument("--pending-fast-interval", type=int, default=20, help=argparse.SUPPRESS)

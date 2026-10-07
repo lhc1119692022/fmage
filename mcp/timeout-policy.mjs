@@ -1,9 +1,9 @@
-export const MIN_TIMEOUT_SECONDS = 600;
-export const MIN_TIMEOUT_MILLISECONDS = MIN_TIMEOUT_SECONDS * 1000;
-
+// Omitted timeouts use the runtime default; explicit values are never raised.
 export function timeoutSeconds(...values) {
-  return Math.max(
-    MIN_TIMEOUT_SECONDS,
-    ...values.map(Number).filter((value) => Number.isInteger(value) && value > 0),
-  );
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (!Number.isInteger(value) || value <= 0) throw new Error("timeout must be a positive integer.");
+    return value;
+  }
+  return null;
 }

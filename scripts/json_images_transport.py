@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate and edit Nano Banana images through EzAI's Images endpoints."""
+"""Generate and edit Nano Banana images through configurable JSON Images endpoints."""
 
 from __future__ import annotations
 
@@ -14,9 +14,8 @@ import urllib.parse
 import uuid
 
 import banana_models
-import ezai_banana_support as support
+import json_images_support as support
 from transport_common import (
-    MIN_TIMEOUT_SECONDS,
     timeout_seconds,
     with_request_budget,
     primary_reference,
@@ -32,8 +31,8 @@ from transport_common import (
 )
 
 
-TRANSPORT_NAME = "ezai-banana-images"
-EZAI_BANANA_WIRE_MODELS = frozenset(banana_models.wire_models_for(TRANSPORT_NAME))
+TRANSPORT_NAME = "json-images"
+JSON_IMAGES_WIRE_MODELS = frozenset(banana_models.wire_models_for(TRANSPORT_NAME))
 SUPPORTED_RESPONSE_FORMATS = {"url", "b64_json"}
 DEFAULT_RESPONSE_FORMAT = "url"
 DEFAULT_RESOLUTION = "2K"
@@ -200,10 +199,10 @@ def build_payload(
 
 
 def validate_common(args: argparse.Namespace) -> None:
-    if args.model not in EZAI_BANANA_WIRE_MODELS:
-        supported = ", ".join(sorted(EZAI_BANANA_WIRE_MODELS))
+    if args.model not in JSON_IMAGES_WIRE_MODELS:
+        supported = ", ".join(sorted(JSON_IMAGES_WIRE_MODELS))
         raise ValueError(
-            f"EzAI Banana accepts only these provider wire model IDs: {supported}."
+            f"JSON Images accepts only these provider wire model IDs: {supported}."
         )
     banana_models.resolve_model(TRANSPORT_NAME, args.model)
     if args.response_format not in SUPPORTED_RESPONSE_FORMATS:
@@ -379,7 +378,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     local_references = [item for item in references if not is_url(item)]
     if url_references and local_references:
         raise ValueError(
-            "EzAI Banana edits cannot mix URL and local-file references in one request; "
+            "JSON Images edits cannot mix URL and local-file references in one request; "
             "use all URLs or all local files."
         )
 
@@ -459,22 +458,22 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
 def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--prompt", help="Complete prompt text.")
     parser.add_argument("--prompt-file", help="Path to a UTF-8 prompt file.")
-    parser.add_argument("--size", help="Exact WIDTHxHEIGHT request mapped to EzAI resolution and aspect ratio.")
+    parser.add_argument("--size", help="Exact WIDTHxHEIGHT request mapped to model resolution and aspect ratio.")
     parser.add_argument("--aspect", help="Aspect ratio such as 1:1, 16:9, or 9:16.")
     parser.add_argument("--resolution", help="Model-supported resolution tier: 512px, 1k, 2k, or 4k.")
     parser.add_argument("--quality", choices=["low", "medium", "high", "auto"], default="high")
     parser.add_argument("--response-format", choices=sorted(SUPPORTED_RESPONSE_FORMATS), default=DEFAULT_RESPONSE_FORMAT)
     parser.add_argument(
         "--thinking-level",
-        choices=["minimal", "high"],
-        help="Optional Nano Banana 2 thinking_level; Nano Banana Pro does not support it.",
+        choices=["minimal", "medium", "high"],
+        help="Optional thinking level; validated against the selected model.",
     )
     parser.add_argument("--output-format", choices=["png", "jpeg", "webp"], default="png")
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--api-key-env", default="PROVIDER_API_KEY")
     parser.add_argument("--output-dir")
-    parser.add_argument("--timeout", type=timeout_seconds, default=MIN_TIMEOUT_SECONDS)
+    parser.add_argument("--timeout", type=timeout_seconds, default=None)
     parser.add_argument("--pending-total-timeout", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--pending-fast-window", type=int, default=120, help=argparse.SUPPRESS)
     parser.add_argument("--pending-fast-interval", type=int, default=20, help=argparse.SUPPRESS)
@@ -484,7 +483,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="EzAI Nano Banana Images transport.")
+    parser = argparse.ArgumentParser(description="Nano Banana Images transport.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     generate = subparsers.add_parser("generate", help="Generate images from text.")

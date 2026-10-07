@@ -13,7 +13,6 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from transport_common import MIN_TIMEOUT_SECONDS
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -183,7 +182,7 @@ def verify_mcp_handshake(server_path: Path) -> None:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=MIN_TIMEOUT_SECONDS,
+            timeout=30,
         )
     except subprocess.TimeoutExpired as error:
         raise RuntimeError(f"Fmage MCP handshake timed out: {server_path}") from error
@@ -307,14 +306,18 @@ def refresh_plugin(*, check_only: bool) -> None:
     )
     require_success(validation, "validating plugin")
 
+    records = plugin_list(cli).get("installed", [])
+    active = next((r for r in records if r.get("pluginId") == f"{PLUGIN_NAME}@{marketplace}"), {})
+    old_version = active.get("version", "")
+    source = active.get("source", {})
+    if source.get("source") != "local" or Path(source.get("path", "")).resolve() != PLUGIN_ROOT.resolve():
+        raise RuntimeError("Installed local marketplace source does not resolve to this plugin repository.")
+    print(f"Refreshing {PLUGIN_NAME}@{marketplace}: installed={old_version}, source={source_version()}, enabled={active.get('enabled')}")
     cachebuster = run_command(
         [sys.executable, str(helper_path("update_plugin_cachebuster.py")), str(PLUGIN_ROOT)]
     )
     require_success(cachebuster, "updating plugin cachebuster")
 
-    records = plugin_list(cli).get("installed", [])
-    active = next((r for r in records if r.get("pluginId") == f"{PLUGIN_NAME}@{marketplace}"), {})
-    old_version = active.get("version", "")
     old_token = old_version.rsplit(".", 1)[-1]
     new_token = source_version().rsplit(".", 1)[-1]
     if old_token.isdigit() and len(old_token) == 14 and new_token <= old_token:

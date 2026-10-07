@@ -20,17 +20,9 @@ from transport_common import (
 
 
 TRANSPORT_NAME = "openai-images"
-TRANSPORT_PROFILE = "808"
 DEFAULT_RESPONSE_FORMAT = "url"
-DEFAULT_PENDING_TOTAL_TIMEOUT = 600
+DEFAULT_PENDING_TOTAL_TIMEOUT = None
 DEFAULT_POLL_INTERVAL = 5
-SUPPORTED_MODELS = {
-    "gpt-image-2",
-    "gpt-image-2-token",
-    "gpt-image-2.5",
-    "gpt-image-2.5-flare",
-    "gpt-image-2.5-sunburst",
-}
 
 PENDING_STATUSES = {"queued", "pending", "processing", "in_progress", "running"}
 SUCCESS_STATUSES = {"completed", "complete", "succeeded", "success"}
@@ -42,7 +34,7 @@ class RemoteTaskError(RuntimeError):
     def __init__(self, task_id: str, status: str, detail: str):
         normalized_status = status or "unknown"
         super().__init__(
-            f'808 OpenAI Images remote task "{task_id}" {detail} (last status: {normalized_status}).'
+            f'OpenAI Images remote task "{task_id}" {detail} (last status: {normalized_status}).'
         )
         self.task_id = task_id
         self.status = normalized_status
@@ -52,7 +44,7 @@ class RemoteTaskError(RuntimeError):
 class SubmissionUncertain(RuntimeError):
     def __init__(self, checkpoint: Path, timing: dict[str, Any], error: Exception):
         super().__init__(
-            f"808 submission connection failed ({type(error).__name__}) before a task ID was received; "
+            f"Image submission connection failed ({type(error).__name__}) before a task ID was received; "
             "the remote generation state is unknown. Check the provider task log for the existing "
             f"task ID before retrieving its result. Checkpoint: {checkpoint}. "
             "No generation request was resubmitted."
@@ -155,7 +147,7 @@ def initial_remote_task(response: dict[str, Any]) -> tuple[str, str] | None:
     status = response_status(response)
     if not task_id:
         raise RuntimeError(
-            "808 OpenAI Images submission response contained neither image data nor id/task_id."
+            "OpenAI Images submission response contained neither image data nor id/task_id."
         )
     if status in FAILURE_STATUSES:
         raise RemoteTaskError(task_id, status, response_error_detail(response))
@@ -212,12 +204,10 @@ def poll_remote_task(
     monotonic_fn = monotonic_fn or time.monotonic
     now_fn = now_fn or openai.iso_now
 
-    total_timeout = max(
-        timeout_seconds(getattr(args, "pending_total_timeout", DEFAULT_PENDING_TOTAL_TIMEOUT)),
-        timeout_seconds(args.timeout),
-    )
+    budgets = [v for v in (args.timeout, getattr(args, "pending_total_timeout", None)) if v]
+    total_timeout = min(budgets) if budgets else None
     poll_interval = max(1, int(getattr(args, "poll_interval", DEFAULT_POLL_INTERVAL) or 0))
-    deadline = bounded_deadline(request_started + total_timeout)
+    deadline = bounded_deadline(request_started + total_timeout if total_timeout is not None else float("inf"))
     # Submission may request URLs; retrieve the existing task as bytes to avoid
     # an unnecessary CDN request and URL-to-base64 recovery round trip.
     status_url = task_status_endpoint(args.base_url, task_id, "b64_json")
@@ -358,7 +348,7 @@ def write_result_checkpoint(
     path = run_dir / "remote-task.json"
     checkpoint = {
         "transport": TRANSPORT_NAME,
-        "transport_profile": TRANSPORT_PROFILE,
+        "async_mode": True,
         "remote_task_id": task_id or None,
         "remote_status": status or "unknown",
         "stage": stage,
@@ -412,7 +402,7 @@ def save_completed_images(
         if not task_id:
             write_result_checkpoint(run_dir, task_id, status, "download_failed", timing, detail)
             raise RuntimeError(
-                f"808 returned image data, but {detail}; no remote task ID was returned. "
+                f"Provider returned image data, but {detail}; no remote task ID was returned. "
                 f"Checkpoint: {checkpoint}. No generation request was resubmitted."
             ) from error
 
@@ -483,7 +473,7 @@ def write_manifest(
     manifest: dict[str, Any] = {
         "command": command,
         "transport": TRANSPORT_NAME,
-        "transport_profile": TRANSPORT_PROFILE,
+        "async_mode": True,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "request": openai.request_metadata_without_prompts(request_payload),
         "requested_size": request_payload.get("size"),
@@ -507,14 +497,10 @@ def write_manifest(
     return manifest_path
 
 
-def validate_808_arguments(args: argparse.Namespace) -> None:
+def validate_async_arguments(args: argparse.Namespace) -> None:
     openai.validate_common(args)
-    if args.model not in SUPPORTED_MODELS:
-        supported = ", ".join(sorted(SUPPORTED_MODELS))
-        raise ValueError(f"This transport supports only: {supported}.")
-    if int(args.pending_total_timeout) <= 0:
-        raise ValueError("--pending-total-timeout must be a positive integer.")
-    args.pending_total_timeout = max(timeout_seconds(args.pending_total_timeout), args.timeout)
+    if args.pending_total_timeout is not None:
+        args.pending_total_timeout = timeout_seconds(args.pending_total_timeout)
     if int(args.poll_interval) <= 0:
         raise ValueError("--poll-interval must be a positive integer.")
 
@@ -536,7 +522,7 @@ def remote_result_fields(remote_metadata: dict[str, Any] | None) -> dict[str, An
 @with_request_budget
 def run_generate(args: argparse.Namespace) -> dict[str, Any]:
     timing: dict[str, Any] = {"transport_started_at": openai.iso_now()}
-    validate_808_arguments(args)
+    validate_async_arguments(args)
     prompt = openai.read_prompt(args)
     size, size_notes = openai.resolve_size(args, [])
     payload = common_payload(args, prompt, size)
@@ -613,7 +599,7 @@ def run_generate(args: argparse.Namespace) -> dict[str, Any]:
 @with_request_budget
 def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     timing: dict[str, Any] = {"transport_started_at": openai.iso_now()}
-    validate_808_arguments(args)
+    validate_async_arguments(args)
     prompt = openai.read_prompt(args)
     root = openai.output_root(args)
 
@@ -633,7 +619,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("primary_image_index is outside the supplied image list.")
     size, size_notes = openai.resolve_size(args, image_paths, primary_index)
     payload = common_payload(args, prompt, size)
-    image_field = "image[]"
+    image_field = openai.resolve_image_field(getattr(args, "image_field", "auto"), len(image_paths))
     url = submission_endpoint(args.base_url, "edit")
 
     if args.dry_run:
@@ -718,7 +704,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
 @with_request_budget
 def run_recover(args: argparse.Namespace) -> dict[str, Any]:
     """Retrieve one known remote task; this path contains no submission POST."""
-    validate_808_arguments(args)
+    validate_async_arguments(args)
     task_id = args.remote_task_id.strip()
     if not task_id:
         raise ValueError("--remote-task-id must contain the full existing remote task ID.")
@@ -755,7 +741,7 @@ def run_recover(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def add_808_arguments(parser: argparse.ArgumentParser) -> None:
+def add_async_arguments(parser: argparse.ArgumentParser) -> None:
     openai.add_common_arguments(parser)
     parser.set_defaults(pending_total_timeout=DEFAULT_PENDING_TOTAL_TIMEOUT)
     parser.add_argument(
@@ -768,21 +754,22 @@ def add_808_arguments(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="808 OpenAI Images asynchronous generator/editor."
+        description="OpenAI Images asynchronous generator/editor."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     generate = subparsers.add_parser("generate", help="Generate images from text.")
-    add_808_arguments(generate)
+    add_async_arguments(generate)
 
     edit = subparsers.add_parser("edit", help="Edit local images using one or more references.")
-    add_808_arguments(edit)
+    add_async_arguments(edit)
+    edit.add_argument("--image-field", choices=["auto", "image", "image[]"], default="auto")
     edit.add_argument("--image", action="append", help="Reference image path. Repeat for multiple images.")
     edit.add_argument("--primary-image-index", type=int, default=0, help="Zero-based index of the image being edited.")
     edit.add_argument("--use-latest", action="store_true", help="Use latest image saved by this skill.")
 
     recover = subparsers.add_parser("recover", help="Retrieve an existing remote task without generating again.")
-    add_808_arguments(recover)
+    add_async_arguments(recover)
     recover.add_argument("--remote-task-id", required=True)
     recover.set_defaults(response_format="b64_json")
 

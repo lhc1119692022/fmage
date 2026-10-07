@@ -14,21 +14,21 @@ import urllib.request
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
-import ezai_banana_support as banana_support
-import ezai_banana_transport as banana
+import json_images_support as banana_support
+import json_images_transport as banana
 import gemini_generate_content_transport as gemini
-import openai_images_808_transport as image808
+import openai_images_async_transport as image808
 import openai_images_transport as openai
 import transport_common as common
 
 
 class TimeoutPolicyTests(unittest.TestCase):
-    def test_direct_transport_arguments_raise_short_timeouts_and_preserve_longer_ones(self):
+    def test_direct_transport_arguments_use_defaults_and_preserve_explicit_values(self):
         for transport, model in (
             (openai, "gpt-image-2"), (image808, "gpt-image-2.5-sunburst"),
             (gemini, "gemini-3-pro-image"), (banana, "nano-banana-pro"),
         ):
-            for supplied, expected in ((None, 600), (60, 600), (900, 900)):
+            for supplied, expected in ((None, None), (60, 60), (900, 900)):
                 with self.subTest(transport=transport.__name__, supplied=supplied):
                     argv = ["generate", "--prompt", "test", "--base-url", "https://example.invalid", "--model", model]
                     if supplied is not None:
@@ -37,12 +37,12 @@ class TimeoutPolicyTests(unittest.TestCase):
                     self.assertEqual(args.timeout, expected)
                     if transport is image808:
                         args.pending_total_timeout = 60
-                        transport.validate_808_arguments(args)
-                        self.assertEqual(args.pending_total_timeout, expected)
+                        transport.validate_async_arguments(args)
+                        self.assertEqual(args.pending_total_timeout, 60)
 
-    def test_http_and_image_download_boundaries_enforce_timeout_floor(self):
+    def test_http_and_image_download_boundaries_preserve_runtime_defaults_and_explicit_timeouts(self):
         request = urllib.request.Request("https://example.invalid")
-        for supplied, expected in ((60, 600), (900, 900)):
+        for supplied, expected in ((None, None), (60, 60), (900, 900)):
             for call in (
                 lambda: openai.perform_request(request, supplied),
                 lambda: banana_support.perform_request(request, supplied),
@@ -65,13 +65,13 @@ class TimeoutPolicyTests(unittest.TestCase):
                 ("openai-images", "gpt-image-2", None),
                 ("openai-images", "gpt-image-2.5-sunburst", "808"),
                 ("gemini-generate-content", "gemini-3-pro-image", None),
-                ("ezai-banana-images", "nano-banana-pro", None),
+                ("json-images", "nano-banana-pro", None),
             ):
-                for configured, effective in ((None, 600), (60, 600), (900, 900)):
+                for configured, effective in ((None, None), (60, 60), (900, 900)):
                     name = f"provider-{len(providers)}"
                     provider = {"transport": transport, "model": model, "base_url": "https://example.invalid/v1", "api_key": ""}
                     if profile:
-                        provider["transport_profile"] = profile
+                        provider["async_mode"] = True
                     if configured is not None:
                         provider["timeout"] = configured
                     providers[name] = provider
@@ -81,7 +81,7 @@ class TimeoutPolicyTests(unittest.TestCase):
                         if tool == "generate_image":
                             arguments.update(prompt="test timeout routing", dry_run=True, timeout=60)
                         requests.append({"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": {"name": tool, "arguments": arguments}})
-                        expected[request_id] = effective
+                        expected[request_id] = 60 if tool == "generate_image" else effective
             batch_id = len(requests) + 1
             requests.append({"jsonrpc": "2.0", "id": batch_id, "method": "tools/call", "params": {
                 "name": "generate_image_batch", "arguments": {"provider": "provider-1", "dry_run": True,
@@ -108,7 +108,7 @@ class TimeoutPolicyTests(unittest.TestCase):
                     if "remote_async" in data and "total_timeout_seconds" in data["remote_async"]:
                         self.assertEqual(data["remote_async"]["total_timeout_seconds"], effective)
             batch = responses[batch_id]["result"]["structuredContent"]
-            self.assertEqual([job["timeout_seconds"] for job in batch["job_statuses"]], [600, 900])
+            self.assertEqual([job["timeout_seconds"] for job in batch["job_statuses"]], [60, 900])
 
 
 if __name__ == "__main__":

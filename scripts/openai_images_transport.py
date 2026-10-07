@@ -20,7 +20,6 @@ import urllib.request
 import uuid
 
 from transport_common import (
-    MIN_TIMEOUT_SECONDS,
     timeout_seconds,
     STATUS_QUERY_TIMEOUT_SECONDS,
     request_budget,
@@ -665,12 +664,10 @@ def poll_pending_response(
     command: str,
 ) -> tuple[dict[str, Any] | None, list[str], str, bool]:
     total_timeout = max(0, int(getattr(args, "pending_total_timeout", 0) or 0))
-    if total_timeout <= 0:
-        return None, ["remote_task_pending"], first_status, False
-    total_timeout = max(timeout_seconds(total_timeout), timeout_seconds(args.timeout))
+    total_timeout = args.timeout or total_timeout or None
 
     endpoints = task_status_endpoints(args.base_url, task_id, command)
-    deadline = bounded_deadline(request_started + total_timeout)
+    deadline = bounded_deadline(request_started + total_timeout if total_timeout is not None else float("inf"))
     fast_until = time.monotonic() + max(0, int(args.pending_fast_window or 0))
     fast_interval = max(1, int(args.pending_fast_interval or 5))
     slow_interval = max(1, int(args.pending_slow_interval or 10))
@@ -1044,7 +1041,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", default=configured_value(PROVIDER_IMAGE_MODEL, "PROVIDER_IMAGE_MODEL", DEFAULT_MODEL))
     parser.add_argument("--api-key-env", default="PROVIDER_API_KEY")
     parser.add_argument("--output-dir")
-    parser.add_argument("--timeout", type=timeout_seconds, default=MIN_TIMEOUT_SECONDS)
+    parser.add_argument("--timeout", type=timeout_seconds, default=None)
     parser.add_argument("--pending-total-timeout", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--pending-fast-window", type=int, default=120, help=argparse.SUPPRESS)
     parser.add_argument("--pending-fast-interval", type=int, default=5, help=argparse.SUPPRESS)

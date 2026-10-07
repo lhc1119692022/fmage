@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EzAI Nano Banana transport-only prompt, HTTP, and output helpers."""
+"""Nano Banana transport-only prompt, HTTP, and output helpers."""
 
 from __future__ import annotations
 

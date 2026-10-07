@@ -21,7 +21,7 @@ SERVER_PATH = PLUGIN_ROOT / "mcp" / "server.mjs"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import openai_images_transport as openai
-import openai_images_808_transport as transport
+import openai_images_async_transport as transport
 
 
 PNG_BYTES = base64.b64decode(
@@ -84,7 +84,7 @@ def image808_args(command: str, output_dir: Path, *extra: str) -> argparse.Names
 class Image25RoutingTests(unittest.TestCase):
     def test_bare_image_2_5_model_is_supported(self) -> None:
         args = image808_args("generate", Path(tempfile.gettempdir()), "--model", "gpt-image-2.5")
-        transport.validate_808_arguments(args)
+        transport.validate_async_arguments(args)
 
     def test_image_2_5_accepts_xhigh_and_max(self) -> None:
         for quality in ("xhigh", "max"):
@@ -96,7 +96,7 @@ class Image25RoutingTests(unittest.TestCase):
                 "--quality",
                 quality,
             )
-            transport.validate_808_arguments(args)
+            transport.validate_async_arguments(args)
 
 
 def call_server(config: dict[str, object], tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
@@ -161,7 +161,7 @@ class EndpointAndPayloadTests(unittest.TestCase):
     def test_transparent_background_is_forwarded_with_png_for_async_transport(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             args = image808_args("generate", Path(temp_dir), "--background", "transparent")
-            transport.validate_808_arguments(args)
+            transport.validate_async_arguments(args)
             payload = transport.common_payload(args, "transparent prompt", "1024x1024")
 
         self.assertEqual(payload["background"], "transparent")
@@ -185,14 +185,13 @@ class EndpointAndPayloadTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "neither image data nor id/task_id"):
             transport.initial_remote_task({"status": "queued"})
 
-    def test_transport_rejects_unrelated_models_but_accepts_token_variant(self) -> None:
+    def test_transport_accepts_custom_models_without_vendor_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             args = image808_args("generate", Path(temp_dir))
             args.model = "gemini-3-pro-image"
-            with self.assertRaisesRegex(ValueError, "supports only"):
-                transport.validate_808_arguments(args)
+            transport.validate_async_arguments(args)
             args.model = "gpt-image-2-token"
-            transport.validate_808_arguments(args)
+            transport.validate_async_arguments(args)
 
 
 class PollingTests(unittest.TestCase):
@@ -290,8 +289,8 @@ class PollingTests(unittest.TestCase):
                 monotonic_fn=clock.monotonic,
                 now_fn=clock.iso_now,
             )
-        self.assertEqual(get_calls, 120)
-        self.assertEqual(clock.value, 600)
+        self.assertEqual(get_calls, 1)
+        self.assertEqual(clock.value, 1)
         self.assertIn("task-timeout", str(raised.exception))
         self.assertIn("timed out", str(raised.exception))
 
@@ -363,7 +362,7 @@ class TransportExecutionTests(unittest.TestCase):
             self.assertNotIn("remote_task_id", result)
             self.assertEqual(Path(result["images"][0]).read_bytes(), PNG_BYTES)
 
-    def test_edit_always_uses_image_array_for_one_or_many_files(self) -> None:
+    def test_edit_auto_selects_image_field_for_one_or_many_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             references = [root / "one.png", root / "two.png"]
@@ -399,7 +398,7 @@ class TransportExecutionTests(unittest.TestCase):
                         transport.run_edit(args)
 
                     self.assertEqual(len(captured_fields), count)
-                    self.assertEqual({field for field, _ in captured_fields}, {"image[]"})
+                    self.assertEqual({field for field, _ in captured_fields}, {"image" if count == 1 else "image[]"})
 
 
 class ServerRoutingTests(unittest.TestCase):
@@ -411,7 +410,7 @@ class ServerRoutingTests(unittest.TestCase):
             "providers": {
                 "image-808": {
                     "transport": "openai-images",
-                    "transport_profile": "808",
+                    "async_mode": True,
                     "base_url": "https://neutral.example/v1",
                     "model": "gpt-image-2",
                     "response_format": "url",
@@ -427,7 +426,7 @@ class ServerRoutingTests(unittest.TestCase):
             },
         }
 
-    def test_transport_profile_is_the_async_routing_switch(self) -> None:
+    def test_async_option_is_the_routing_switch(self) -> None:
         config = self.config()
         image808 = call_server(
             config,
@@ -450,7 +449,7 @@ class ServerRoutingTests(unittest.TestCase):
             },
         )
         self.assertEqual(image808["provider_transport"], "openai-images")
-        self.assertEqual(image808["transport_profile"], "808")
+        self.assertTrue(image808["async_mode"])
         self.assertEqual(
             urllib.parse.parse_qs(urllib.parse.urlsplit(image808["endpoint"]).query)["async"],
             ["true"],
@@ -458,7 +457,7 @@ class ServerRoutingTests(unittest.TestCase):
         self.assertEqual(image808["request"]["response_format"], "url")
         self.assertEqual(image808["request"]["size"], "2048x2048")
         self.assertEqual(image808["request"]["quality"], "high")
-        self.assertEqual(image808["remote_async"]["total_timeout_seconds"], 600)
+        self.assertEqual(image808["remote_async"]["total_timeout_seconds"], 321)
 
         self.assertEqual(lookalike["provider_transport"], "openai-images")
         self.assertNotIn("async", urllib.parse.parse_qs(urllib.parse.urlsplit(lookalike["endpoint"]).query))
@@ -509,7 +508,7 @@ class ServerRoutingTests(unittest.TestCase):
             {"provider": "image-808"},
         )
         self.assertEqual(status["response_format"], "url")
-        self.assertEqual(status["timeout_seconds"], 600)
+        self.assertEqual(status["timeout_seconds"], 321)
         self.assertEqual(status["remote_async"]["status_path"], "/images/tasks/{task_id}")
 
 

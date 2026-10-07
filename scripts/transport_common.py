@@ -16,18 +16,25 @@ import urllib.request
 
 
 DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
-MIN_TIMEOUT_SECONDS = 600
 STATUS_QUERY_TIMEOUT_SECONDS = 30
 _REQUEST_DEADLINE: ContextVar[float | None] = ContextVar("fmage_request_deadline", default=None)
 
 
-def timeout_seconds(value: int | None = None) -> int:
-    return max(MIN_TIMEOUT_SECONDS, int(value or MIN_TIMEOUT_SECONDS))
+def timeout_seconds(value: int | None = None) -> int | None:
+    if value is None:
+        return None
+    result = int(value)
+    if isinstance(value, bool) or result <= 0:
+        raise ValueError("timeout must be a positive integer")
+    return result
 
 
 @contextmanager
-def request_budget(seconds: float):
-    """Nested requests share the earliest deadline, without raising its remainder to 600s."""
+def request_budget(seconds: float | None):
+    """Share explicit deadlines; omitted budgets preserve the runtime default."""
+    if seconds is None:
+        yield
+        return
     deadline = time.monotonic() + seconds
     existing = _REQUEST_DEADLINE.get()
     token = _REQUEST_DEADLINE.set(min(existing, deadline) if existing is not None else deadline)
@@ -38,8 +45,8 @@ def request_budget(seconds: float):
         _REQUEST_DEADLINE.reset(token)
 
 
-def request_timeout(value: float | None = None) -> float:
-    timeout = timeout_seconds(value)
+def request_timeout(value: float | None = None) -> float | None:
+    timeout = value
     deadline = _REQUEST_DEADLINE.get()
     if deadline is None:
         return timeout
@@ -57,7 +64,8 @@ def bounded_deadline(deadline: float) -> float:
 def with_request_budget(call):
     @wraps(call)
     def run(args, *positional, **keywords):
-        budget = max(timeout_seconds(args.timeout), getattr(args, "pending_total_timeout", 0) or 0)
+        budgets = [v for v in (args.timeout, getattr(args, "pending_total_timeout", None)) if v]
+        budget = min(budgets) if budgets else None
         with request_budget(budget):
             return call(args, *positional, **keywords)
     return run

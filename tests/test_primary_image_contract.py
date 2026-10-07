@@ -18,9 +18,9 @@ class PrimaryImageContractTests(unittest.TestCase):
     def test_all_edit_transports_accept_and_use_primary_image(self) -> None:
         cases = (
             ("gemini_generate_content_transport", "gemini-generate-content", "gemini-3.1-flash-image", None),
-            ("ezai_banana_transport", "ezai-banana-images", "nano-banana-2", None),
+            ("json_images_transport", "json-images", "nano-banana-2", None),
             ("openai_images_transport", "openai-images", "gpt-image-2.5", None),
-            ("openai_images_808_transport", "openai-images", "gpt-image-2.5", "808"),
+            ("openai_images_async_transport", "openai-images", "gpt-image-2.5", "808"),
         )
         with tempfile.TemporaryDirectory() as directory:
             images = [str(Path(directory) / "square.png"), str(Path(directory) / "wide.png")]
@@ -52,7 +52,7 @@ class PrimaryImageContractTests(unittest.TestCase):
                         self.assertEqual(args.image, images)
                 configured = provider(model, transport)
                 if profile:
-                    configured["transport_profile"] = profile
+                    configured["async_mode"] = True
                 config = provider_config(["test"], {"test": configured})
                 for tool in ("edit_image", "edit_image_batch"):
                     with self.subTest(tool=tool, transport=transport, profile=profile):

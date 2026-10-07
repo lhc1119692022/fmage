@@ -151,7 +151,7 @@ class EndpointAndPayloadTests(unittest.TestCase):
                 "https://api-direct.ezaiclub.com/v1",
                 "gemini-3-pro-image",
             ),
-            "https://api-direct.ezaiclub.com/v1beta/models/gemini-3-pro-image:generateContent",
+            "https://api-direct.ezaiclub.com/v1/models/gemini-3-pro-image:generateContent",
         )
 
     def test_native_aspect_tokens_are_not_fraction_reduced(self) -> None:
@@ -327,7 +327,7 @@ class ServerRoutingTests(unittest.TestCase):
                         "transport": "gemini-generate-content",
                         "base_url": "https://api.808relay.com",
                         "model": "gemini-3.1-flash-image-preview",
-                        "transport_profile": "808",
+                        "auth_scheme": "bearer",
                         "timeout": 600,
                         "api_key": "",
                     }

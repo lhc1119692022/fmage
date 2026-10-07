@@ -12,12 +12,13 @@
 
 ## Image Entry Points
 
-The plugin exposes four independent skills while sharing one MCP server and one provider/transport layer:
+The plugin exposes five independent skills while sharing one MCP server and one provider/transport layer:
 
 - `Fmage 配置` (`fmage-config`) manages local provider configuration.
 - `Fmage 图像生成` (`fmage`) is the default image entry and keeps the original understanding-and-expansion behavior.
 - `Fmage 直传生图` (`fmage-direct`) is explicit-only. Invoke `/Fmage 直传生图` or `$fmage-direct` before the image request to preserve the prompt without expansion, translation, polishing, or paraphrase.
 - `Fmage 图片退步` (`fmage-image-regression`) runs the fixed local regression pipeline.
+- `Fmage 工作流` (`fmage-workflow`) runs configured RunningHub workflows.
 
 The selected image entry is request-local and must be chosen before prompt interpretation or attachment inspection. Image task results use neutral fields such as `prompt_submitted`, `prompts_submitted`, and `prompt_mode`; legacy `revised_*` fields remain readable for older manifests.
 
@@ -31,13 +32,40 @@ python scripts/refresh_local_runtime.py
 
 Use `python scripts/refresh_local_runtime.py --check` for a read-only verification. The host keeps skill and MCP catalogs per task, so start a new Codex task after a refresh; this does not resubmit any image request.
 
-Provider `timeout` and the overall image-task budget have a 600-second minimum; larger values are preserved. Reference downloads, submission, polling, and result delivery share that budget, so each HTTP operation uses only the remaining time. Status queries are capped at 30 seconds. A slowly streamed response also consumes the same budget. The helper process keeps an additional 60-second cleanup allowance. Batch foreground waits and workflow status polling windows are at most 40 seconds; a running image batch continues in the background. Completed workflow output downloads retain their 600-second request allowance. Refresh adds or raises provider `timeout` fields in the local configuration, and dry-runs/provider status report the configured request timeout.
+Providers select a protocol: openai-images, json-images, or gemini-generate-content.
+There are no channel-specific execution profiles or model allowlists for OpenAI Images.
+For asynchronous OpenAI Images APIs, configure async_mode=true; this submits with
+async=true and polls /images/tasks/{task_id}. Configure image_field as auto,
+image, or image[] to match the edit API before submission. Names and hostnames do not select behavior.
+Gemini supports explicit auth_scheme values x-goog-api-key (default) and bearer.
+Explicit /v1 and /v1beta paths are preserved; an unversioned base URL uses /v1beta.
+generation_config_format selects image-config (default, imageConfig) or response-format
+(responseFormat.image, used by the supplied v1 documentation). The example 2.1 provider uses the latter.
 
-Asynchronous image tasks are queried immediately after their ID is received. Generic OpenAI-compatible polling then uses 5-second intervals for the first 120 seconds of polling and 10-second intervals thereafter; 808 keeps its 5-second interval. 808 status queries retrieve base64 results directly while preserving the configured submission response format. Provider errors do not trigger another generation/edit POST, parameter stripping, or multipart-field switching. For generic `openai-images` providers, an optional provider `image_field` setting selects `auto`, `image`, or `image[]` before the first edit submission. 808 retains its fixed `image[]` contract. Resolve compatibility before a new user-authorized request.
+Nano Banana capabilities are shared across protocols and preserve the configured model ID:
 
-An 808 connection can close before that timeout even when the server has accepted the task. A submission failure before the task ID arrives now records `submission_uncertain` and `remote_status=unknown` in `remote-task.json`, with stage timing preserved in batch results. No generation is resubmitted. Once the full existing task ID is known, explicitly retrieve it with `get_image_task_status({"provider":"808-image","remote_task_id":"task_..."})`; this uses GET queries and defaults to base64 results. The original prompt, model, and delivery settings are not assumed from the current provider configuration. Local Fmage task status remains available through `task_id`. Use `dry_run=true` for a keyless remote-routing check.
+| Family | Accepted model IDs | Resolution tiers | Thinking |
+| --- | --- | --- | --- |
+| Pro | nano-banana-pro, gemini-3-pro-image, gemini-3-pro-image-preview | 1K, 2K, 4K | No exposed control |
+| 2 | nano-banana-2, gemini-3.1-flash-image, gemini-3.1-flash-image-preview | 512px, 1K, 2K, 4K | minimal (default), high |
+| 2.1 | gemini-nano-banana-2.1, nano-banana-2.1 | 1K, 2K, 4K | minimal, medium (default), high |
 
-The plugin card supports at most three `interface.defaultPrompt` entries. Those card actions are separate from the four skill entry points above, which are declared by each skill's `agents/openai.yaml`. To prevent a missing Fmage MCP catalog from silently falling back to native image generation, keep the generic image skill disabled and disable the host feature as well:
+The capability table follows the supplied Nano Banana documentation. Other Nano Banana families
+are not supported. Alias recognition does not rewrite the model sent to a relay.
+
+Omitted timeout values use runtime defaults. Explicit positive request timeouts override provider
+settings without a minimum floor. Explicit budgets are shared by reference download, submission,
+polling and delivery; the helper allows a further 60 seconds for cleanup only when a budget exists.
+Refresh removes the former forced timeout value 600 and never inserts a replacement.
+Status queries retain a 30-second cap and batch/workflow foreground waits retain a 40-second window.
+
+Async tasks are queried immediately. No provider error resubmits generation or strips request fields.
+Submission connection loss before a task ID is received records submission_uncertain and remote_status=unknown.
+Once the existing full task ID is known, get_image_task_status with provider and remote_task_id
+retrieves it using GET only; it never generates again. Local tasks still use task_id.
+A keyless dry_run validates routing without contacting a provider.
+
+The plugin card supports at most three `interface.defaultPrompt` entries. Those card actions are separate from the five skill entry points above, which are declared by each skill's `agents/openai.yaml`. To prevent a missing Fmage MCP catalog from silently falling back to native image generation, keep the generic image skill disabled and disable the host feature as well:
 
 ```text
 codex features disable image_generation

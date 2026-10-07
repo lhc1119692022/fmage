@@ -1,7 +1,6 @@
 import { readFile, writeFile, mkdir, rename, stat } from 'node:fs/promises';
 import { dirname, join, resolve, basename, isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { MIN_TIMEOUT_MILLISECONDS } from './timeout-policy.mjs';
 export const workflowTools = [{name:'workflow_image',title:'Fmage 工作流',description:'List/select image workflows, submit once, or poll and download. Reuse request_id only for the same job. Never resubmit failed or uncertain tasks.',inputSchema:{type:'object',additionalProperties:false,required:['operation'],properties:{operation:{type:'string',enum:['list','set_default','run','status']},workflow:{type:'string'},inputs:{type:'object'},request_id:{type:'string'},task_id:{type:'string',description:'Status only: verified task ID for uncertain submission recovery.'},output_dir:{type:'string'},dry_run:{type:'boolean'}}}}];
 export function imageExtension(b) {
   if(b.length>=24 && b.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return 'png';
@@ -37,10 +36,10 @@ export function createWorkflowService(configPath,{fetchImpl=fetch,sleep=delay,no
     if(u.protocol!=='https:'||!['www.runninghub.cn','www.runninghub.ai'].includes(u.hostname)||u.username||u.password||u.port||u.pathname!=='/'||u.search||u.hash) throw new Error('Invalid RunningHub base_url.');
     return {base:u.origin,key:(c.api_key_env?process.env[c.api_key_env]:c.api_key)||''};
   }
-  async function api(c,endpoint,body,timeoutMs=MIN_TIMEOUT_MILLISECONDS) {
+  async function api(c,endpoint,body,timeoutMs) {
     if(!c.key) throw new Error('Set RunningHub API key locally in workflow_connections.');
     let r;
-    try {r=await fetchImpl(c.base+'/task/openapi/'+endpoint,{method:'POST',redirect:'error',signal:AbortSignal.timeout(Math.max(1,Math.ceil(timeoutMs))),headers:{Authorization:'Bearer '+c.key,...(body instanceof FormData?{}:{'Content-Type':'application/json'})},body:body instanceof FormData?body:JSON.stringify({...body,apiKey:c.key})});}
+    try {r=await fetchImpl(c.base+'/task/openapi/'+endpoint,{method:'POST',redirect:'error',...(timeoutMs == null ? {} : {signal:AbortSignal.timeout(Math.max(1,Math.ceil(timeoutMs)))}),headers:{Authorization:'Bearer '+c.key,...(body instanceof FormData?{}:{'Content-Type':'application/json'})},body:body instanceof FormData?body:JSON.stringify({...body,apiKey:c.key})});}
     catch {throw new Error(`RunningHub ${endpoint}: network error or timeout.`);}
     if(!r.ok) throw new Error(`RunningHub ${endpoint}: HTTP ${r.status}`);
     let d;try{d=await r.json();}catch{throw new Error('Invalid API response.');}
@@ -128,7 +127,7 @@ export function createWorkflowService(configPath,{fetchImpl=fetch,sleep=delay,no
               const url=new URL(o.fileUrl);
               if(url.protocol!=='https:'||url.username||url.password) throw new Error('Invalid output URL.');
               // API credentials must never be forwarded to the image host.
-              const response=await fetchImpl(url,{signal:AbortSignal.timeout(MIN_TIMEOUT_MILLISECONDS),redirect:'error'});
+              const response=await fetchImpl(url,{redirect:'error'});
               if(!response.ok) throw new Error(`Download HTTP ${response.status}`);
               if(Number(response.headers.get('content-length'))>100*1024*1024) throw new Error('Output exceeds 100 MB.');
               const chunks=[];let size=0;

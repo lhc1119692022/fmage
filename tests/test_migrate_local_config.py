@@ -15,11 +15,12 @@ from migrate_local_config import migrate_file, migrate_payload
 
 
 class MigrateLocalConfigTests(unittest.TestCase):
-    def test_missing_and_short_timeouts_are_migrated_without_changing_other_settings(self) -> None:
+    def test_only_legacy_600_timeout_is_removed(self) -> None:
         payload = {
             "providers": {
                 "missing": {"transport": "openai-images", "model": "gpt-image-2", "api_key": "keep-key"},
                 "short": {"transport": "gemini-generate-content", "timeout": 60, "api_key_env": "KEEP_ENV"},
+                "legacy": {"transport": "openai-images", "timeout": 600},
                 "long": {"transport": "openai-images", "timeout": 900, "base_url": "https://custom.invalid"},
             },
             "active_providers": ["short", "missing"],
@@ -27,8 +28,8 @@ class MigrateLocalConfigTests(unittest.TestCase):
         }
         original = copy.deepcopy(payload)
         changes = migrate_payload(payload)
-        for name, expected in (("missing", 600), ("short", 600), ("long", 900)):
-            self.assertEqual(payload["providers"][name]["timeout"], expected)
+        for name, expected in (("missing", None), ("short", 60), ("legacy", None), ("long", 900)):
+            self.assertEqual(payload["providers"][name].get("timeout"), expected)
             actual_provider = copy.deepcopy(payload["providers"][name])
             actual_provider.pop("timeout", None)
             original_provider = copy.deepcopy(original["providers"][name])
@@ -54,7 +55,7 @@ class MigrateLocalConfigTests(unittest.TestCase):
             self.assertEqual(migrated["workflow_connections"]["runninghub"]["api_key"], "")
             self.assertEqual(migrate_file(path), [])
 
-    def test_migrates_ezai_nano_to_native_gemini_protocol(self) -> None:
+    def test_migrates_legacy_json_transport_without_rewriting_model(self) -> None:
         payload = {
             "active_providers": ["EzAI-nano", "808-MJ"],
             "providers": {
@@ -84,11 +85,11 @@ class MigrateLocalConfigTests(unittest.TestCase):
         changes = migrate_payload(payload)
 
         provider = payload["providers"]["EzAI-nano"]
-        self.assertEqual(provider["transport"], "gemini-generate-content")
-        self.assertEqual(provider["model"], "gemini-3-pro-image")
+        self.assertEqual(provider["transport"], "json-images")
+        self.assertEqual(provider["model"], "nano-banana-pro")
         self.assertEqual(provider["api_key"], "keep-this-secret")
-        self.assertNotIn("response_format", provider)
-        self.assertTrue(any("Gemini generateContent" in change for change in changes))
+        self.assertEqual(provider["response_format"], "url")
+        self.assertTrue(any("json-images" in change for change in changes))
 
     def test_removes_midjourney_provider_and_active_entry(self) -> None:
         payload = {
@@ -162,7 +163,8 @@ class MigrateLocalConfigTests(unittest.TestCase):
 
         legacy = payload["providers"]["legacy"]
         self.assertEqual(legacy["transport"], "openai-images")
-        self.assertEqual(legacy["transport_profile"], "808")
+        self.assertTrue(legacy["async_mode"])
+        self.assertNotIn("transport_profile", legacy)
         self.assertNotIn("compatibility", legacy)
         self.assertNotIn("prompt_profile", legacy)
         self.assertNotIn("prompt_policy", legacy)

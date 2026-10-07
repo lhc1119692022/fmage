@@ -348,7 +348,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         for model, transport in (
             ("gpt-image-2", "openai-images"),
             ("gemini-3.1-flash-image-preview", "gemini-generate-content"),
-            ("nano-banana-2", "ezai-banana-images"),
+            ("nano-banana-2", "json-images"),
             ("gpt-image-2.50", "openai-images"),
         ):
             config = provider_config(["test"], {"test": provider(model, transport)})

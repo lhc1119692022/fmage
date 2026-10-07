@@ -8,7 +8,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import banana_models
-import ezai_banana_transport as ezai
+import json_images_transport as ezai
 import gemini_generate_content_transport as gemini
 
 

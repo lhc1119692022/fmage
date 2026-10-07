@@ -10,7 +10,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from transport_common import MIN_TIMEOUT_SECONDS
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -18,10 +17,6 @@ DEFAULT_CONFIG_PATH = Path.home() / ".codex" / "fmage" / "providers.json"
 OPENAI_IMAGES_TRANSPORT = "openai-images"
 LEGACY_EZAI_NANO_TRANSPORT = "ezai-banana-images"
 GEMINI_GENERATE_CONTENT_TRANSPORT = "gemini-generate-content"
-EZAI_NANO_MODELS = {
-    "nano-banana-2": "gemini-3.1-flash-image",
-    "nano-banana-pro": "gemini-3-pro-image",
-}
 REMOVED_PROMPT_FIELDS = (
     "compatibility",
     "compatibility_profile",
@@ -60,18 +55,25 @@ def _is_removed_dalle_provider(provider_name: str, provider: dict[str, Any]) -> 
 
 
 def _normalize_legacy_fields(provider: dict[str, Any], provider_name: str, changes: list[str]) -> None:
-    configured_timeout = provider.get("timeout")
-    if configured_timeout is None or (
-        isinstance(configured_timeout, int)
-        and not isinstance(configured_timeout, bool)
-        and configured_timeout < MIN_TIMEOUT_SECONDS
-    ):
-        provider["timeout"] = MIN_TIMEOUT_SECONDS
-        changes.append(f"{provider_name}: raised request timeout to {MIN_TIMEOUT_SECONDS} seconds")
+    if provider.get("timeout") == 600:
+        provider.pop("timeout")
+        changes.append(f"{provider_name}: removed legacy forced timeout")
+    legacy_profile = provider.pop("transport_profile", None)
     if provider.get("transport") == "808-openai-images":
         provider["transport"] = OPENAI_IMAGES_TRANSPORT
-        provider["transport_profile"] = "808"
-        changes.append(f'{provider_name}: migrated transport to openai-images + profile 808')
+        legacy_profile = "808"
+    if legacy_profile == "808":
+        if provider.get("transport") == OPENAI_IMAGES_TRANSPORT:
+            provider.setdefault("async_mode", True)
+            provider.setdefault("image_field", "image[]")
+        elif provider.get("transport") == GEMINI_GENERATE_CONTENT_TRANSPORT:
+            provider.setdefault("auth_scheme", "bearer")
+        changes.append(f"{provider_name}: migrated legacy profile to generic protocol options")
+    elif legacy_profile is not None:
+        raise ValueError(f"{provider_name}: unsupported legacy transport profile")
+    if provider.get("transport") == LEGACY_EZAI_NANO_TRANSPORT:
+        provider["transport"] = "json-images"
+        changes.append(f"{provider_name}: migrated legacy transport to json-images; preserved model ID")
 
     removed_fields = [field for field in REMOVED_PROMPT_FIELDS if field in provider]
     if removed_fields:
@@ -81,14 +83,6 @@ def _normalize_legacy_fields(provider: dict[str, Any], provider_name: str, chang
             f'{provider_name}: removed obsolete prompt-preparation fields ({", ".join(removed_fields)})'
         )
 
-    model = provider.get("model")
-    if provider.get("transport") == LEGACY_EZAI_NANO_TRANSPORT and model in EZAI_NANO_MODELS:
-        provider["transport"] = GEMINI_GENERATE_CONTENT_TRANSPORT
-        provider["model"] = EZAI_NANO_MODELS[model]
-        provider.pop("response_format", None)
-        changes.append(
-            f'{provider_name}: migrated EzAI Nano to Gemini generateContent model {provider["model"]}'
-        )
 
 
 def migrate_payload(payload: dict[str, Any]) -> list[str]:

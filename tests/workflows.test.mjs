@@ -78,14 +78,14 @@ test('pending/failed tasks never download and input validation precedes submissi
   assert.throws(()=>imageExtension(Buffer.from('html')),/Expected/);
   const f=await fixture(t);await assert.rejects(f.call({operation:'run',request_id:'bad',inputs:{image:f.image,resolution_k:10}}),/range/);assert.equal(f.calls.length,0);
 });
-test('submission/download timeouts remain 600 seconds while status waits use their own budget',async t=>{
+test('only status waits have an explicit timeout budget',async t=>{
   const timeoutCalls=[];
   t.mock.method(AbortSignal,'timeout',ms=>{timeoutCalls.push(ms);return new AbortController().signal;});
   const complete=await fixture(t);
   await complete.call({operation:'run',request_id:'timeouts',inputs:{image:complete.image}});
   assert.equal((await complete.call({operation:'status',request_id:'timeouts'})).status,'completed');
-  assert.equal(timeoutCalls.length,6);
-  assert.deepEqual(timeoutCalls,[600000,600000,30000,600000,600000,600000]);
+  assert.equal(timeoutCalls.length,1);
+  assert.deepEqual(timeoutCalls,[30000]);
   const pending=await fixture(t,{status:'QUEUED',waitMs:1000});
   await pending.call({operation:'run',request_id:'waiting',inputs:{image:pending.image}});
   assert.equal((await pending.call({operation:'status',request_id:'waiting'})).status,'QUEUED');
@@ -101,6 +101,12 @@ test('slow status queries consume the same wait budget instead of extending it',
   const result=await f.call({operation:'status',request_id:'slow-status'});
   assert.equal(result.status,'RUNNING');assert.equal(result.task_id,'123456');
   assert.equal(f.clock(),40000);
-  assert.deepEqual(timeouts.slice(2),[30000,25000,10000]);
+  assert.deepEqual(timeouts,[30000,25000,10000]);
   assert.equal(f.calls.filter(c=>c.endpoint==='create').length,1);
+});
+
+test('omitted request and download timeouts use fetch defaults',async t=>{
+  const f=await fixture(t);await f.call({operation:'run',request_id:'defaults',inputs:{image:f.image}});
+  await f.call({operation:'status',request_id:'defaults'});
+  for(const call of f.calls.filter(c=>c.endpoint!=='status')) assert.equal(call.init.signal,undefined);
 });

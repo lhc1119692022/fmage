@@ -17,7 +17,7 @@ SERVER_PATH = PLUGIN_ROOT / "mcp" / "server.mjs"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import banana_models
-import ezai_banana_transport as transport
+import json_images_transport as transport
 
 
 PNG_BYTES = base64.b64decode(
@@ -248,7 +248,7 @@ class EndpointAndPayloadTests(unittest.TestCase):
     def test_nearest_supported_aspect_maps_1_08_to_square(self) -> None:
         self.assertEqual(
             banana_models.nearest_aspect_ratio(
-                "ezai-banana-images",
+                "json-images",
                 "nano-banana-pro",
                 1296 / 1200,
             ),
@@ -264,7 +264,7 @@ class EndpointAndPayloadTests(unittest.TestCase):
 
 class BananaModelRuleTests(unittest.TestCase):
     def test_ezai_transport_does_not_import_image_series_transport(self) -> None:
-        source = (SCRIPTS_DIR / "ezai_banana_transport.py").read_text(encoding="utf-8")
+        source = (SCRIPTS_DIR / "json_images_transport.py").read_text(encoding="utf-8")
         self.assertNotIn("openai_images_transport", source)
 
 
@@ -385,7 +385,7 @@ class ServerRoutingTests(unittest.TestCase):
             "cache_dir": "cache",
             "providers": {
                 "ezai-banana": {
-                    "transport": "ezai-banana-images",
+                    "transport": "json-images",
                     "base_url": "https://api-direct.ezaiclub.com",
                     "model": model,
                     "response_format": "b64_json",
@@ -394,7 +394,7 @@ class ServerRoutingTests(unittest.TestCase):
             },
         }
 
-    def test_server_routes_generate_to_ezai_banana_transport(self) -> None:
+    def test_server_routes_generate_to_json_images_transport(self) -> None:
         result = call_server(
             self.config(),
             "generate_image",
@@ -408,7 +408,7 @@ class ServerRoutingTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result["provider_transport"], "ezai-banana-images")
+        self.assertEqual(result["provider_transport"], "json-images")
         self.assertEqual(result["endpoint"], "https://api-direct.ezaiclub.com/v1/images/generations")
         self.assertEqual(result["request"]["response_format"], "b64_json")
         self.assertEqual(result["request"]["thinking_level"], "minimal")

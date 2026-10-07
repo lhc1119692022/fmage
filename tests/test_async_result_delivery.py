@@ -15,7 +15,7 @@ import urllib.parse
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import openai_images_808_transport as transport
+import openai_images_async_transport as transport
 
 
 PNG_BYTES = base64.b64decode(
