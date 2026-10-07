@@ -1,5 +1,7 @@
 # Resolution Tiers
 
+- Midjourney is excluded from tier/size normalization: keep ratio controls in prompt, never send structured size/resolution/aspect, and report native returned dimensions. No default 2K/4K tier applies.
+
 - `resolution: "1k"`, `"2k"`, `"3k"`, or `"4k"` selects a target resolution tier. It does not promise that either edge will equal the tier number, and `4k` does not mean `4096x4096`.
 - Phrases such as `具备8K超高分辨率`, `8K画质`, `超高清`, and `ultra-high-resolution` are prompt-level visual emphasis, not delivery-tier selections. They remain in the prompt unless the user explicitly asks for a supported resolution tier or exact pixel size.
 - Fmage combines the tier with `aspect` and the selected transport's limits, then writes the normalized dimensions actually sent upstream to `requested_size` and `request.size`.

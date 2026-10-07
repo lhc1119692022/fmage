@@ -32,7 +32,7 @@ python scripts/refresh_local_runtime.py
 
 Use `python scripts/refresh_local_runtime.py --check` for a read-only verification. The host keeps skill and MCP catalogs per task, so start a new Codex task after a refresh; this does not resubmit any image request.
 
-Providers select a protocol: openai-images, json-images, or gemini-generate-content.
+Providers select a protocol: openai-images, json-images, gemini-generate-content, or midjourney.
 There are no channel-specific execution profiles or model allowlists for OpenAI Images.
 For asynchronous OpenAI Images APIs, configure async_mode=true; this submits with
 async=true and polls /images/tasks/{task_id}. Configure image_field as auto,
@@ -41,6 +41,27 @@ Gemini supports explicit auth_scheme values x-goog-api-key (default) and bearer.
 Explicit /v1 and /v1beta paths are preserved; an unversioned base URL uses /v1beta.
 generation_config_format selects image-config (default, imageConfig) or response-format
 (responseFormat.image, used by the supplied v1 documentation). The example 2.1 provider uses the latter.
+
+Midjourney uses one independent v8.2 adapter and a shared protocol contract, based on the
+high-speed API with the stable documentation as supplementary information. Configure provider
+KC-MJ with transport=midjourney, base_url=https://newapi.prompt-hubs.com, and
+model=Midjourney v8.2 高速. Keep the API key in the local providers.json. The configured model
+ID is an opaque server identifier: it is sent unchanged, without a local model allowlist or
+model-dependent routing. Switching to mj-v8.2 or another server-side ID does not change the
+client contract. The server selects the upstream. All requests submit JSON to
+/v1/midjourney/generations and query /v1/tasks/{task_id}; no automatic model fallback occurs.
+Generation controls remain in prompt, including --ar, --raw, --stylize, --q and unknown flags.
+Existing --ar wins over natural-language ratios. No size, quality, resolution, n, or raw JSON
+controls are added. MJ has native pixel dimensions, not configurable 2K/4K tiers. Reference
+generation adds only image/images, preserving URL/data-URL/local-file input order (5 maximum).
+Local files become data URLs; edit and generate use the same generation endpoint.
+Post-generation actions are not implemented.
+
+Midjourney saves every returned single-image slot (normally 4), records an optional grid
+separately, and exposes count mismatches. Pending/query/download failures keep remote-task.json
+without resubmitting. Explicit get_image_task_status(provider, remote_task_id) retrieves the
+same task. Saved task identity retains the original model across model switches and requires
+the original service and credential. Retrieval is not a new generation request.
 
 Nano Banana capabilities are shared across protocols and preserve the configured model ID:
 

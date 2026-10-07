@@ -37,9 +37,16 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
 - If missing and creation is requested, copy from plugin `config/providers.example.json`.
 - Edit non-secret fields normally: active providers, transport, base_url, model, response_format,
   async_mode, auth_scheme, generation_config_format, image_field, timeout, and provider names.
-- Supported protocols are openai-images, json-images, and gemini-generate-content.
+- Supported protocols are openai-images, json-images, gemini-generate-content, and midjourney.
   Choose the protocol from the provider's API contract, never its name or hostname.
   Old channel transport names and transport_profile are migration inputs only; do not create them.
+- Midjourney uses its independent midjourney transport with one shared v8.2 contract. Configure
+  base_url, api_key, and model. KC-MJ defaults to Midjourney v8.2 高速; mj-v8.2 is an alternative
+  server model ID. Model IDs pass through unchanged, without a local allowlist or model routing.
+  Every ID uses /v1/midjourney/generations, /v1/tasks/{task_id}, and the same reference/output rules;
+  the server selects the upstream. Do not add async_mode, size, resolution, quality, raw, or
+  response_format to MJ configuration. MJ controls stay in prompt and pixels come from the backend.
+  No post-generation actions.
 - For OpenAI Images async submission and /images/tasks/{task_id} polling, set async_mode=true.
   Any provider/model may use this protocol. image_field accepts auto, image, or image[].
 - Gemini uses x-goog-api-key by default; set auth_scheme=bearer when required by the API.

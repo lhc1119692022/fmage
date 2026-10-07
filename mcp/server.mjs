@@ -43,6 +43,10 @@ const TRANSPORT_OPENAI_IMAGES = "openai-images";
 const workflowService = createWorkflowService(CONFIG_PATH);
 const TRANSPORT_JSON_IMAGES = "json-images";
 const TRANSPORT_GEMINI_GENERATE_CONTENT = "gemini-generate-content";
+const TRANSPORT_MIDJOURNEY = "midjourney";
+const MIDJOURNEY_CONTRACT = JSON.parse(
+  readFileSync(join(PLUGIN_ROOT, "config", "midjourney-v8.2-contract.json"), "utf8"),
+);
 const BANANA_MODEL_CAPABILITY_SPEC = JSON.parse(
   readFileSync(join(PLUGIN_ROOT, "config", "banana-model-capabilities.json"), "utf8"),
 );
@@ -51,6 +55,7 @@ const JSON_IMAGES_DEFAULT_RESPONSE_FORMAT = "url";
 const JSON_IMAGES_SUPPORTED_RESPONSE_FORMATS = new Set(["url", "b64_json"]);
 
 const TRANSPORTS = {
+  [TRANSPORT_MIDJOURNEY]: join(PLUGIN_ROOT, "scripts", "midjourney_transport.py"),
   [TRANSPORT_OPENAI_IMAGES]: join(PLUGIN_ROOT, "scripts", "openai_images_transport.py"),
   [TRANSPORT_JSON_IMAGES]: join(
     PLUGIN_ROOT,
@@ -64,6 +69,7 @@ const TRANSPORTS = {
   ),
 };
 const EDIT_ARGUMENT_MAPPINGS = {
+  [TRANSPORT_MIDJOURNEY]: { primaryImageIndex: "--primary-image-index" },
   [TRANSPORT_OPENAI_IMAGES]: { primaryImageIndex: "--primary-image-index" },
   [TRANSPORT_JSON_IMAGES]: { primaryImageIndex: "--primary-image-index" },
   [TRANSPORT_GEMINI_GENERATE_CONTENT]: { primaryImageIndex: "--primary-image-index" },
@@ -217,7 +223,7 @@ function compactFailureMessage(error) {
 
 function transportFailureFields(error) {
   return Object.fromEntries(
-    ["stage", "remote_task_id", "remote_status", "checkpoint", "generation_resubmitted"]
+    ["stage", "remote_task_id", "remote_status", "checkpoint", "generation_resubmitted", "download_error"]
       .filter((key) => error?.[key] !== undefined)
       .map((key) => [key, error[key]]),
   );
@@ -336,6 +342,8 @@ function normalizeTaskForResponse(task, options = {}) {
       completed_count: task.completed_count,
       pending_count: task.pending_count,
       failed_count: task.failed_count,
+      partial_count: task.partial_count,
+      grid_images: task.grid_images,
       requested_size: task.requested_size,
       images,
       display_images: displayImages,
@@ -397,6 +405,7 @@ function shouldExposeWarnings(result, { verbose = false } = {}) {
   if (warnings.some((warning) => /requested\s+\d+x\d+|dimensions|size/i.test(warning))) {
     return true;
   }
+  if (warnings.some((warning) => /^Midjourney expected \d+ single images/u.test(warning))) return true;
 
   const images = Array.isArray(result?.images) ? result.images : [];
   const failedCount = Number(result?.failed_count ?? 0);
@@ -414,8 +423,8 @@ function isPendingResult(result) {
   return Boolean(result && typeof result === "object" && result.pending);
 }
 
-function batchStatusFromCounts(completedCount, pendingCount, failedCount) {
-  if (failedCount === 0 && pendingCount === 0) return "completed";
+function batchStatusFromCounts(completedCount, pendingCount, failedCount, partialCount = 0) {
+  if (failedCount === 0 && pendingCount === 0) return partialCount > 0 ? "partial" : "completed";
   if (completedCount > 0) return "partial";
   if (pendingCount > 0) return failedCount > 0 ? "partial" : "pending";
   return "failed";
@@ -556,7 +565,7 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   const configuredTransport = nonEmptyString(raw.transport);
   const transport = configuredTransport;
   if (raw.transport_profile !== undefined) throw new Error("Legacy transport_profile must be migrated before use.");
-  const asyncMode = raw.async_mode === true;
+  let asyncMode = raw.async_mode === true;
   if (raw.async_mode !== undefined && typeof raw.async_mode !== "boolean") throw new Error("async_mode must be a boolean.");
   const authScheme = nonEmptyString(raw.auth_scheme) || "x-goog-api-key";
   if (!["bearer", "x-goog-api-key"].includes(authScheme)) throw new Error("Unsupported auth_scheme.");
@@ -573,6 +582,11 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   }
   if (!baseUrl || !model) {
     throw new Error(`Provider "${providerName}" must define base_url and model in ${CONFIG_PATH}.`);
+  }
+  let midjourney = null;
+  if (transport === TRANSPORT_MIDJOURNEY) {
+    midjourney = MIDJOURNEY_CONTRACT;
+    asyncMode = true;
   }
   const responseFormat = nonEmptyString(raw.response_format);
   if (responseFormat && !["url", "b64_json"].includes(responseFormat)) throw new Error("Unsupported response_format.");
@@ -610,6 +624,7 @@ async function resolveProvider(requestedProvider, requireKey = true) {
     apiKeyConfigured: Boolean(apiKey),
     apiKeySource: nonEmptyString(raw.api_key) ? "external_config" : apiKey ? `environment:${apiKeyEnv}` : "missing",
     jsonImages,
+    midjourney,
     config,
     raw,
   };
@@ -742,6 +757,12 @@ function commonArguments(args, promptFile, provider) {
   appendOption(argv, "--base-url", provider.baseUrl);
   appendOption(argv, "--model", provider.model);
   appendOption(argv, "--api-key-env", "FMAGE_ACTIVE_API_KEY");
+  if (provider.transport === TRANSPORT_MIDJOURNEY) {
+    appendOption(argv, "--output-dir", outputDir);
+    appendOption(argv, "--timeout", timeoutSeconds(args.timeout, provider.raw.timeout));
+    appendFlag(argv, "--dry-run", args.dry_run);
+    return argv;
+  }
   appendOption(argv, "--size", args.size);
   appendOption(argv, "--aspect", args.aspect);
   appendOption(argv, "--resolution", args.resolution);
@@ -980,7 +1001,8 @@ function enforceResolutionPolicy(args = {}) {
   return result;
 }
 
-function enforceDeliveryPolicy(args = {}) {
+function enforceDeliveryPolicy(args = {}, provider = null) {
+  if (provider?.transport === TRANSPORT_MIDJOURNEY) return args;
   return inferResolutionFromPrompt(
     enforceResolutionPolicy(enforceOutputFormatPolicy(enforceQualityPolicy(args))),
   );
@@ -1006,6 +1028,23 @@ function bananaModelCapability(provider) {
 }
 
 function enforceModelCapabilityPolicy(args = {}, provider) {
+  if (provider.transport === TRANSPORT_MIDJOURNEY) {
+    // MJ flags belong only to the opaque prompt. Never infer pixel tiers or JSON controls.
+    const result = { ...args };
+    if (nonEmptyString(args.aspect)) {
+      if (!/(?:^|\s)--ar(?:\s|=)/u.test(args.prompt || "")) {
+        throw new Error("Midjourney aspect belongs in prompt (for example --ar 16:9), not a structured aspect field.");
+      }
+      delete result.aspect; // Explicit --ar always wins, even over a conflicting tool argument.
+    }
+    const controls = ["size", "resolution", "quality", "thinking_level", "moderation", "background", "response_format", "output_compression"];
+    const unsupported = controls.filter((name) => args[name] !== undefined && args[name] !== null && args[name] !== "auto");
+    if (args.output_format !== undefined && (args.output_format !== "png" || args.output_format_user_requested)) unsupported.push("output_format");
+    if (unsupported.length) {
+      throw new Error("Midjourney uses native output dimensions and prompt-only generation controls; unsupported structured fields: " + unsupported.join(", ") + ". Preserve MJ flags in prompt; do not convert resolution or quality tiers.");
+    }
+    return result;
+  }
   const quality = nonEmptyString(args.quality);
   const supportsExtendedQuality =
     provider.transport === TRANSPORT_OPENAI_IMAGES &&
@@ -1300,6 +1339,10 @@ async function enrichResult(result, revisedPrompt, provider) {
     } catch {
       // Generated images remain usable if optional manifest enrichment fails.
     }
+  }
+  if (provider.transport === TRANSPORT_MIDJOURNEY && typeof result.request?.prompt === "string") {
+    enriched.request.prompt = result.request.prompt;
+    enriched.prompt_provenance.submitted = result.request.prompt;
   }
   return enriched;
 }
@@ -1617,7 +1660,7 @@ function batchReturnWhen(args) {
   return value;
 }
 
-function batchJobs(args) {
+function batchJobs(args, provider = null) {
   const jobs = Array.isArray(args.jobs) ? args.jobs : [];
   if (!jobs.length) throw new Error("jobs must contain at least one image job.");
   if (jobs.length > 10) throw new Error("jobs may contain at most 10 image jobs.");
@@ -1629,7 +1672,7 @@ function batchJobs(args) {
     if (!prompt) {
       throw new Error(`jobs[${index}].prompt must contain one complete image prompt.`);
     }
-    return { ...job, prompt };
+    return { ...job, prompt: provider?.transport === TRANSPORT_MIDJOURNEY ? job.prompt : prompt };
   });
 }
 
@@ -1720,6 +1763,8 @@ function updateTaskProgressFromSettled(task, settledResults) {
   const pending = fulfilled.filter(isPendingResult);
   const failed = settledResults.filter((item) => item?.status === "rejected");
   task.completed_count = completed.length;
+  task.partial_count = completed.filter((result) => result.status === "partial").length;
+  task.grid_images = completed.map((result) => result.grid_image_path).filter(Boolean);
   task.pending_count = pending.length;
   task.failed_count = failed.length;
   task.images = completed.flatMap((result) => (Array.isArray(result.images) ? result.images : []));
@@ -1944,6 +1989,8 @@ async function combineBatchResults({
     manifests: childManifests,
     requested_count: count,
     completed_count: successes.length,
+    partial_count: successes.filter((result) => result.status === "partial").length,
+    grid_images: successes.map((result) => result.grid_image_path).filter(Boolean),
     pending_count: pending.length,
     failed_count: failures.length,
     orchestration_count: count,
@@ -2010,8 +2057,8 @@ function imageEntryArguments(args) {
 
 async function runImageCommand(command, args) {
   args = imageEntryArguments(args);
-  args = enforceDeliveryPolicy(args);
   const provider = await resolveProvider(args.provider, !args.dry_run);
+  args = enforceDeliveryPolicy(args, provider);
   const count = requestedImageCount(args);
   if (count > 1) {
     return submitBatchImageTask(command, args, count);
@@ -2022,12 +2069,12 @@ async function runImageCommand(command, args) {
 async function runBatchImageCommand(command, args) {
   args = imageEntryArguments(args);
   const provider = await resolveProvider(args.provider, !args.dry_run);
-  return submitBatchJobs(command, { ...args, provider: provider.name }, batchJobs(args));
+  return submitBatchJobs(command, { ...args, provider: provider.name }, batchJobs(args, provider));
 }
 
 async function submitBatchImageTask(command, args, count) {
-  const prompt = nonEmptyString(args.prompt);
-  if (!prompt) throw new Error("The prompt argument must contain one complete image prompt.");
+  const prompt = args.prompt;
+  if (!nonEmptyString(prompt)) throw new Error("The prompt argument must contain one complete image prompt.");
   const jobs = Array.from({ length: count }, () => ({ prompt }));
   return submitBatchJobs(command, { ...args, jobs, return_when: args.return_when ?? "submitted" }, jobs, prompt);
 }
@@ -2043,12 +2090,18 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     command === "edit" && (args.use_latest || jobs.some((job) => Boolean(job.use_latest)));
   const latestImages = needsLatestImages ? await loadLatestImages(provider.config) : [];
   const normalizedJobs = jobs.map((job) => {
-    let jobArgs = enforceDeliveryPolicy(jobArgsFromBatchArgs(args, job));
+    let jobArgs = enforceDeliveryPolicy(jobArgsFromBatchArgs(args, job), provider);
     jobArgs = enforceModelCapabilityPolicy(jobArgs, provider);
     if (command === "edit" && latestImages.length && (args.use_latest || jobArgs.use_latest)) {
       const images = Array.isArray(jobArgs.images) ? jobArgs.images : [];
       jobArgs.images = [...images, ...latestImages];
       jobArgs.use_latest = false;
+    }
+    if (command === "edit" && provider.midjourney) {
+      const images = imageInputPaths(jobArgs.images);
+      if (!images.length || images.length > provider.midjourney.max_reference_images) {
+        throw new Error("Midjourney reference generation requires 1 to " + provider.midjourney.max_reference_images + " images; select the intended image(s) before submitting the batch.");
+      }
     }
     return jobArgs;
   });
@@ -2182,7 +2235,7 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
       const completedAt = isoNow();
       Object.assign(task, combined, {
         task_id: taskId,
-        status: batchStatusFromCounts(combined.completed_count, combined.pending_count, combined.failed_count),
+        status: batchStatusFromCounts(combined.completed_count, combined.pending_count, combined.failed_count, combined.partial_count),
         requested_count: normalizedJobs.length,
         completed_at: completedAt,
         updated_at: completedAt,
@@ -2271,11 +2324,11 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
 
 async function runSingleImageCommand(command, args, resolvedProvider = null) {
   args = imageEntryArguments(args);
-  const prompt = nonEmptyString(args.prompt);
-  if (!prompt) throw new Error("The prompt argument must contain one complete image prompt.");
+  if (!nonEmptyString(args.prompt)) throw new Error("The prompt argument must contain one complete image prompt.");
 
   const singleStartedAt = isoNow();
   const provider = resolvedProvider ?? (await resolveProvider(args.provider, !args.dry_run));
+  const prompt = provider.transport === TRANSPORT_MIDJOURNEY ? args.prompt : nonEmptyString(args.prompt);
   args = enforceModelCapabilityPolicy(args, provider);
   args = {
     ...args,
@@ -2371,6 +2424,27 @@ async function recoverRemoteImageTask(args) {
     throw new Error("Remote result retrieval requires provider and the full remote_task_id, without task_id.");
   }
   const provider = await resolveProvider(args.provider, !args.dry_run);
+  if (provider.transport === TRANSPORT_MIDJOURNEY) {
+    const argv = [TRANSPORTS[TRANSPORT_MIDJOURNEY], "recover"];
+    appendOption(argv, "--remote-task-id", args.remote_task_id);
+    appendOption(argv, "--base-url", provider.baseUrl);
+    appendOption(argv, "--model", provider.model);
+    appendOption(argv, "--api-key-env", "FMAGE_ACTIVE_API_KEY");
+    appendOption(argv, "--output-dir", transportOutputRoot({}, provider));
+    appendOption(argv, "--timeout", timeoutSeconds(args.timeout, provider.raw.timeout));
+    appendFlag(argv, "--dry-run", args.dry_run);
+    const result = await runProcess(pythonCommand(), argv, {
+      PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8",
+      ...(!args.dry_run ? {
+        FMAGE_ACTIVE_API_KEY: provider.apiKey,
+        FMAGE_DIRECT_OUTPUT_DIR: finalOutputRoot(args, provider),
+        FMAGE_OUTPUT_TIMESTAMP: timestampForPath(), FMAGE_OUTPUT_SEQUENCE: "1",
+      } : {}),
+    }, { timeoutSeconds: timeoutSeconds(args.timeout, provider.raw.timeout) });
+    const enriched = await enrichResult(result, result.request?.prompt ?? "", provider);
+    enriched.provider_model = result.model ?? provider.model;
+    return publishResultImages(enriched, args, provider);
+  }
   if (provider.transport !== TRANSPORT_OPENAI_IMAGES) {
     throw new Error("Remote result retrieval requires the openai-images transport.");
   }
@@ -2440,16 +2514,16 @@ function commonProperties(editing = false) {
     size: {
       type: "string",
       description:
-        "Exact WIDTHxHEIGHT size. Pass only when the user explicitly selected it, and also set resolution_user_requested=true.",
+        "Exact WIDTHxHEIGHT size. Pass only when the user explicitly selected it, and also set resolution_user_requested=true. Omit for Midjourney; it returns native pixel dimensions.",
     },
     aspect: {
       type: "string",
-      description: "Aspect ratio, such as 1:1, 3:4, or 16:9.",
+      description: "Aspect ratio, such as 1:1, 3:4, or 16:9. For Midjourney keep the ratio in prompt (such as --ar 16:9) and omit this field.",
     },
     resolution: {
       type: "string",
       description:
-        "Explicit delivery tier, such as 512px, 1k, 2k, 3k, or 4k. Keep visual wording such as 8K超高分辨率 or 8K画质 in prompt; do not map it here. Set resolution_user_requested=true for this field. Banana models validate supported tiers.",
+        "Explicit delivery tier, such as 512px, 1k, 2k, 3k, or 4k. Keep visual wording such as 8K超高分辨率 or 8K画质 in prompt; do not map it here. Set resolution_user_requested=true for this field. Banana models validate supported tiers. Midjourney has no resolution tiers; omit this field.",
     },
     resolution_user_requested: {
       type: "boolean",
@@ -2470,7 +2544,7 @@ function commonProperties(editing = false) {
       type: "string",
       enum: ["low", "medium", "high", "xhigh", "max", "auto"],
       description:
-        "Delivery tier. xhigh and max are native to gpt-image-2.5 series models using openai-images. This shared enum is not a capability list for every provider: when the selected transport does not expose an extended tier, the server maps xhigh/max to high, keeps the provider and model unchanged, and records the mapping in warnings. Otherwise supported values are low, medium, high, and auto. Always pass an explicitly requested tier.",
+        "Delivery tier. xhigh and max are native to gpt-image-2.5 series models using openai-images. This shared enum is not a capability list for every provider: when the selected transport does not expose an extended tier, the server maps xhigh/max to high, keeps the provider and model unchanged, and records the mapping in warnings. Otherwise supported values are low, medium, high, and auto. Always pass an explicitly requested tier for supported families. Midjourney is excluded: keep MJ quality flags in prompt and omit this field.",
     },
     quality_user_requested: {
       type: "boolean",
@@ -2491,7 +2565,7 @@ function commonProperties(editing = false) {
     output_format: {
       type: "string",
       enum: ["png", "jpeg", "webp"],
-      description: "Optional output format.",
+      description: "Optional output format. Omit for Midjourney; retain the backend output format.",
     },
     output_format_user_requested: {
       type: "boolean",
@@ -2505,7 +2579,7 @@ function commonProperties(editing = false) {
     },
     response_format: {
       type: "string",
-      description: "Optional JSON transport response format.",
+      description: "Optional JSON transport response format. Omit for Midjourney.",
     },
     output_dir: {
       type: "string",
@@ -3056,7 +3130,8 @@ async function providerStatus(requestedProvider) {
     task_dir: taskStoreRoot(),
     timeout_seconds: timeoutSeconds(provider.raw.timeout),
     ...(provider.transport === TRANSPORT_OPENAI_IMAGES ? { response_format: provider.raw.response_format ?? (provider.asyncMode ? "url" : null), async_mode: provider.asyncMode } : {}),
-    ...(provider.asyncMode ? { remote_async: { status_path: "/images/tasks/{task_id}" } } : {}),
+    ...(provider.asyncMode ? { remote_async: { status_path: provider.midjourney ? "/v1/tasks/{task_id}" : "/images/tasks/{task_id}" } } : {}),
+    ...(provider.midjourney ? { midjourney: { ...provider.midjourney, prompt_only_controls: true, native_dimensions: true } } : {}),
     ...(provider.jsonImages
       ? {
           response_format: provider.jsonImages.responseFormat,
@@ -3258,6 +3333,16 @@ async function handleRequest(message) {
     try {
       await handleToolCall(id, params);
     } catch (error) {
+      const context = transportFailureFields(error);
+      if (context.stage && context.checkpoint) {
+        const failure = { status: "failed", error: errorMessage(error), ...context };
+        sendResult(id, {
+          isError: true,
+          content: [{ type: "text", text: JSON.stringify(failure) }],
+          structuredContent: failure,
+        });
+        return;
+      }
       sendError(
         id,
         JsonRpcError.INTERNAL_ERROR,

@@ -41,6 +41,12 @@
   "output_dir": "",
   "cache_dir": "",
   "providers": {
+    "KC-MJ": {
+      "transport": "midjourney",
+      "base_url": "https://newapi.prompt-hubs.com",
+      "model": "Midjourney v8.2 高速",
+      "api_key": ""
+    },
     "openai-image-2": {
       "transport": "openai-images",
       "base_url": "https://api.openai.com/v1",

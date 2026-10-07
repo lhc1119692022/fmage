@@ -1,5 +1,9 @@
 # Diagnostics And Setup
 
+- A Midjourney `download_failed` result with `remote_status: completed` means generation succeeded but local delivery failed. Report the existing `remote_task_id`, checkpoint, and sanitized `download_error` fields; never describe it as an unknown submission. Downloads identify the client as `fmage-midjourney/1.0` and do not forward API credentials to image hosts. A remaining HTTP/Cloudflare error is terminal for that attempt: preserve the checkpoint and do not automatically retry or resubmit.
+
+- Midjourney retains its remote-task.json identity checkpoint after successful delivery as well as failures. This preserves original model identity across configuration changes; explicit recovery requires the original service URL and credential. Never resubmit on a count mismatch, download failure, or unknown submission outcome. Grid covers are separate from single-image counts. The OpenAI checkpoint cleanup behavior below does not apply to MJ.
+
 - A failed or partial image call is terminal for the current attempt. Stop and report it. Do not retry the same provider, change parameters and retry, select another provider, or query status/discovery tools to find an alternative provider. Only make another image call after the user explicitly asks for or approves it.
 - For ordinary image work, do not add an additional processing, trace, or status call before the base image tool. The host model only analyzes generation or editing intent; submit the user's prompt directly, extracting only explicit delivery-setting fragments into tool arguments and removing those same unambiguous fragments.
 - A submitted asynchronous task is not a retry. Use `get_image_task_status` only to follow that same task; never submit a replacement merely because it remains pending.

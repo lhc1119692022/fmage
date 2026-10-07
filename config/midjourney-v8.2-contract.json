@@ -1,0 +1,7 @@
+{
+  "series": "Midjourney v8.2",
+  "submission_path": "/midjourney/generations",
+  "async": true,
+  "max_reference_images": 5,
+  "expected_image_count": 4
+}
