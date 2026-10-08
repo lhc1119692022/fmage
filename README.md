@@ -32,6 +32,10 @@ python scripts/refresh_local_runtime.py
 
 Use `python scripts/refresh_local_runtime.py --check` for a read-only verification. The host keeps skill and MCP catalogs per task, so start a new Codex task after a refresh; this does not resubmit any image request.
 
+The same refresh now updates registered VS Code Agent Plugin and DeepSeek Harness Desktop
+payloads and distributable archives. They use host-private locations, never `~/.agents/skills`.
+See [host adapters](adapters/README.md) and [VS Code installation](vscode/README.md).
+
 Providers select a protocol: openai-images, json-images, gemini-generate-content, or midjourney.
 There are no channel-specific execution profiles or model allowlists for OpenAI Images.
 For asynchronous OpenAI Images APIs, configure async_mode=true; this submits with

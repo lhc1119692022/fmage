@@ -1,6 +1,6 @@
 {
   "name": "fmage",
-  "version": "0.1.0+codex.20261007164211",
+  "version": "0.1.0+codex.20261007200258",
   "description": "Generate and reference-edit images through independent OpenAI Images, Gemini/Nano Banana, and Midjourney adapters, with expanded and direct prompt entries and a local image-regression pipeline.",
   "author": {
     "name": "Local developer"

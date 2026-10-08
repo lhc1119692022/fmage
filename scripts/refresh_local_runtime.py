@@ -366,6 +366,8 @@ def main() -> int:
         refresh_config(config=args.config, check_only=args.check)
     if not args.skip_plugin:
         refresh_plugin(check_only=args.check)
+    from harness_plugins import refresh_registered
+    refresh_registered(check_only=args.check)
     print("Fmage local runtime refresh complete.")
     return 0
 

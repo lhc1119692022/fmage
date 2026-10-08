@@ -1,40 +1,30 @@
-# Fmage VS Code 适配层
+# Fmage VS Code 智能体插件
 
-Fmage 的 Codex 插件清单、技能入口和 VS Code MCP 服务器是三个不同层次：
+这是智能体窗口 Customizations → 插件识别的 Agent Plugin，不是 VSIX 扩展。
+生成目录有 `.plugin/plugin.json`、五个 `skills/*/SKILL.md`、`.mcp.json` 和独立运行代码。
+不再写入公共 `~/.agents/skills`，也不再注册用户级独立 Fmage MCP。
 
-- `mcp.json` 只负责让 VS Code 发现 `Fmage.*` 工具。
-- 本适配层把 Fmage skills 同步到 VS Code/Copilot 能识别的 `~/.agents/skills`。
-- 适配后的 skills 使用 `Fmage.*` 工具名，并把 `$fmage-*` 改为自然语言入口。
-
-## 安装
-
-在仓库根目录运行：
+构建 ZIP：
 
 ```text
-python scripts/install_vscode_adapter.py
+python scripts/harness_plugins.py --build vscode
 ```
 
-安装器会：
+解压后，在 VS Code 用户设置 `chat.pluginLocations` 中将解压后的 `fmage` 目录设置为 `true`，
+并启用 `chat.plugins.enabled`。本机自动安装路径为 `%APPDATA%/Code/User/agent-plugins/fmage`。
+此路径仅由 VS Code 插件设置注册，不进入其他 Harness 的共享技能发现目录。
 
-1. 同步五个 Fmage skills 到 `%USERPROFILE%\.agents\skills\fmage*`；
-2. 保留 VS Code `mcp.json` 中已有的其他服务器；
-3. 创建或更新 `Fmage` stdio MCP 服务器配置；
-4. 使用 `FMAGE_CONFIG` 指向现有的 `providers.json`，不会复制或打印 API 密钥。
+五个技能采用中文描述和标准前置元数据；`fmage-direct` 设置 `disable-model-invocation: true`。
+其他四个入口可按请求匹配。工具按 Fmage 服务器和原始工具名选择，完整前缀以 VS Code 提供的名称为准。
+图片退步调用本地 `regress_image` 工具；创意生图仍遵守失败停止、不自动重试的规则。
 
-只检查不写入：
+首次在本机配置两个适配器并迁移旧共享安装：
 
 ```text
-python scripts/install_vscode_adapter.py --check
+python scripts/harness_plugins.py --configure --deepseek-cli "D:/DeepSeek Harness/resources/runtime/cli/bin/dsh.cmd"
 ```
 
-安装后执行 VS Code 的 `Developer: Reload Window`，再在 Agent 模式的工具列表中确认 `Fmage`。默认图像请求直接说“使用 Fmage 生成图片”；直传入口使用“Fmage 直传生图”；工作流和图片退步也使用对应中文名称，不再依赖 Codex 专用的 `$fmage-*` 命令。
-
-## 配置路径
-
-默认路径为：
-
-- skills：`%USERPROFILE%\.agents\skills`
-- MCP：`%APPDATA%\Code\User\mcp.json`
-- providers：`%USERPROFILE%\.codex\fmage\providers.json`
-
-可通过 `--skills-dir` 和 `--mcp-config` 覆盖前两个路径，便于工作区级安装或测试。
+迁移只归档已识别的 Fmage 旧 Skill 和旧 MCP 注册，备份保存在 `%LOCALAPPDATA%/Fmage/backups`。
+以后运行 `python scripts/refresh_local_runtime.py` 会同时刷新 Codex 和已注册的两个适配器。
+已运行的工具进程可能需要重载插件或窗口；安装文件更新不等于当前会话已重新加载。
+不自动中断正在执行的图片任务。
