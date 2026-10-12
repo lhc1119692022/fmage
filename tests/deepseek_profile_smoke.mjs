@@ -1,4 +1,4 @@
-// Actual Desktop loader + Cordis lifecycle, with no resolver overrides or mock services.
+// Selected source/Electron loader + Cordis lifecycle, with no resolver overrides or mock services.
 // Caller supplies an empty temporary directory; never boot the user's full profile.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -6,9 +6,8 @@ import { cpSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const [runtime, installedProfile, temp] = process.argv.slice(2);
-assert(runtime && installedProfile && temp, 'Pass runtime, installed profile, empty temporary directory');
-const anchor = join(runtime, 'node_modules/@deepseek-ai/dsh/package.json');
+const [anchor, installedProfile, temp] = process.argv.slice(2);
+assert(anchor && installedProfile && temp, 'Pass CLI package.json anchor, installed profile, empty temporary directory');
 const require = createRequire(anchor);
 const boot = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')));
 const installed = boot.loadProfileDirectory('dsh', installedProfile, anchor);

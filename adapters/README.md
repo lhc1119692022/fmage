@@ -15,13 +15,13 @@ Codex 使用原生 `.codex-plugin/plugin.json`；其他宿主由 `scripts/harnes
 包仍需要 Node 和带 Pillow 的 Fmage Python 环境；本机优先使用已配置的 FMAGE_PYTHON，
 或现有 `~/.codex/runtimes/fmage-3.14/Scripts/python.exe`。不安装全局依赖、不修改 PATH。
 
-DeepSeek 适配以本机已验证的桌面运行时 `0.2.0-rc.2` 为接口版本，使用原生技能服务、
+DeepSeek 适配支持已验证的 Electron 运行时 `0.2.0-rc.2` 与源码运行时 `0.2.1-alpha.2`，使用原生技能服务、
 `mcp__Fmage__*` 工具名和 Cordis 生命周期。注册五个 Skill，直传仅允许显式调用。
 Skill 文件变化后失效技能目录缓存；工具进程和插件 JS 的更新需宿主重载才能确认生效。
 `.fmage-runtime.json` 每五秒记录已加载版本、内容摘要、进程和 MCP 注册数量。
 检查要求心跳新鲜且摘要匹配，旧进程或旧版本记录不能作为当前运行成功的证据；记录不进入包。
 
-桌面版离线安装使用应用随附的 dsh 命令：
+安装与校验使用本机明确登记的运行时。Electron 安装使用应用随附的 dsh 命令：
 
 ```text
 "D:/DeepSeek Harness/resources/runtime/cli/bin/dsh.cmd" plugin --profile desktop add "<TGZ路径>" --offline --ignore-scripts
@@ -30,12 +30,38 @@ Skill 文件变化后失效技能目录缓存；工具进程和插件 JS 的更�
 本机同步也使用版本化 TGZ，通过包管理器安装为 `profiles/desktop/node_modules/dsh-fmage` 实体目录。
 不要使用 `link:` 或 Windows Junction：本机桌面版曾在重启后无法解析链接包，实体目录对照可正常解析。
 `%LOCALAPPDATA%/Fmage/deepseek/dsh-fmage` 只作为构建副本，运行路径在 Desktop profile 内。
-后续刷新同时更新 TGZ 和实体安装内容，不会复制到 Web profile 或源码版。退出桌面应用后安装，再重新打开。
-不应使用其他 npm 安装的 dsh CLI 替代桌面应用随附版本。
+后续刷新同时更新 TGZ 和实体安装内容，只操作登记的 Desktop profile，不复制到 Web profile 或宿主源码仓库。
+不使用其他 npm 安装的全局 dsh CLI，也不终止运行中的图像请求；宿主重载前，安装成功不等于运行中已生效。
+
+从 Electron 改为源码启动时，显式登记现有源码目录，再执行正常刷新：
+
+```text
+python scripts/harness_plugins.py --register-deepseek-source "D:/deepseek-harness"
+python scripts/refresh_local_runtime.py
+python scripts/refresh_local_runtime.py --check
+```
+
+只同步或检查 VS Code 与 DeepSeek 时，可分别运行 `python scripts/harness_plugins.py`
+和 `python scripts/harness_plugins.py --check`；这条独立入口不依赖 Codex 重装辅助脚本。
+
+登记会备份并更新本机 `harness-installations.json`，保留 profile、VS Code 和产物路径；
+源码路径只保存在本机记录，不进入插件包。源码安装在该仓库目录中通过 `node --import tsx/esm`
+运行安装入口 `scripts/deepseek_source_cli.mjs`，调用源码 `apps/cli/src/bin.ts` 的 `runCli`，
+传入 `plugin --profile desktop add <TGZ> --prefer-offline --ignore-scripts`。
+入口使用 CLI 原生的 `packageManager` 参数指定源码 `node_modules/pnpm/bin/pnpm.cjs`；
+运行前校验它与仓库 `packageManager` 固定版本一致，避免全局 pnpm 版本与缓存格式差异。
+CLI 自身的参数解析、profile 文件锁和兼容性检查保持生效。
+源码模式优先使用缓存；缺少已有依赖的 registry 元数据时允许 pnpm 查询，以完成其供应链检查。
+不禁用策略检查、不自动重试失败的安装，也不执行依赖生命周期脚本。Electron 模式仍使用 `--offline`。
+与源码启动脚本使用相同的 CLI 和 tsx 依赖。`DSH_HOME` 按登记的 profile 明确设置，
+避免调用者的环境变量将安装写入另一个 profile。
+必须预先具备该源码的依赖与构建结果；脚本不会切换全局 CLI、构建宿主或绕过宿主兼容性检查。
+旧 Electron 登记继续受支持；路径缺失时明确报错，不按相似目录名称自动切换运行时。
 
 `%LOCALAPPDATA%/Fmage/harness-installations.json` 记录本机源仓库、两个目标目录和导出目录。
 完成首次配置后，现有 `refresh_local_runtime.py` 先刷新 Codex 版本与配置，再同步两套产物。
 `--check` 验证源文件和压缩包一致性、VS Code 注册、DeepSeek 实体目录及 TGZ 依赖，
-并使用桌面程序内置的加载器在临时 profile 中启动真实 Cordis 服务，核对五个 Skill 和十个 MCP 工具。
+并使用登记运行时的原生加载器在临时 profile 中启动真实 Cordis 服务，核对五个 Skill 和十个 MCP 工具。
+源码模式使用 CLI 的 `apps/cli/package.json` 作为依赖解析入口；Electron 模式使用随附 CLI 的入口。
 该测试不使用解析器替换或服务 mock，不加载用户会话，不调用付费模型，也不会写入实际桌面的运行记录。
 当前桌面进程的状态另外通过运行心跳报告；版本不一致明确报告需要重载。

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import io
@@ -30,6 +31,7 @@ RUNTIME_SCRIPTS = (
     "openai_images_transport.py", "openai_images_async_transport.py",
 )
 CONFIG_FILES = ("providers.example.json", "workflows.example.json", "midjourney-v8.2-contract.json", "banana-model-capabilities.json")
+DEEPSEEK_PEER_VERSIONS = "0.2.0-rc.2 || 0.2.1-alpha.2"
 
 
 def local_root() -> Path:
@@ -132,7 +134,7 @@ def payload(host: str) -> dict[str, bytes]:
             "description": "Fmage：图片生成、直传生图、图片退步、RunningHub 工作流与配置；DeepSeek Harness 桌面版专用。",
             "type": "module", "main": "index.mjs", "exports": {".": "./index.mjs", "./package.json": "./package.json"},
             "dsh": {"bundle": {"patch": "./cordis.patch.yml"}},
-            "peerDependencies": {"@deepseek-ai/dsh-skill": "0.2.0-rc.2", "@deepseek-ai/dsh-mcp-client": "0.2.0-rc.2", "@deepseek-ai/cordis": "~4.0.4"},
+            "peerDependencies": {"@deepseek-ai/dsh-skill": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/dsh-mcp-client": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/cordis": "~4.0.4"},
         })
         files["cordis.patch.yml"] = b'- insert:\n    - id: fmage\n      name: dsh-fmage\n'
         files["index.mjs"] = (ROOT / "adapters/deepseek/index.mjs").read_bytes()
@@ -283,15 +285,107 @@ def deepseek_installation_errors(files: dict[str, bytes], profile: Path, package
     return failures
 
 
-def install_deepseek(files: dict[str, bytes], profile: Path, cli: Path, package: Path) -> None:
+@dataclass(frozen=True)
+class DeepSeekRuntime:
+    kind: str
+    cli: list[str]
+    probe: list[str]
+    cwd: Path
+    anchor: Path
+
+
+def deepseek_runtime(settings: dict) -> DeepSeekRuntime:
+    runtime = settings.get("runtime")
+    if runtime is not None:
+        if not isinstance(runtime, dict) or runtime.get("kind") != "source" or not runtime.get("root"):
+            raise RuntimeError("DeepSeek runtime must declare kind=source and an explicit source root.")
+        source = Path(runtime["root"]).expanduser().resolve()
+        cli = source / "apps/cli/src/bin.ts"
+        anchor = source / "apps/cli/package.json"
+        for path in (cli, anchor, source / "node_modules/tsx/package.json",
+                     source / "package.json", source / "node_modules/pnpm/package.json",
+                     source / "node_modules/pnpm/bin/pnpm.cjs"):
+            if not path.is_file():
+                raise RuntimeError(f"DeepSeek source runtime dependency is missing: {path}")
+        if read_json(anchor).get("name") != "@deepseek-ai/dsh":
+            raise RuntimeError(f"DeepSeek source CLI manifest is invalid: {anchor}")
+        manager = read_json(source / "package.json").get("packageManager", "")
+        pnpm = read_json(source / "node_modules/pnpm/package.json")
+        if pnpm.get("name") != "pnpm" or manager.split("+", 1)[0] != f"pnpm@{pnpm.get('version')}":
+            raise RuntimeError("DeepSeek source pnpm must match the repository's packageManager pin.")
+        node = shutil.which("node")
+        if node is None:
+            raise RuntimeError("Node.js is required for the DeepSeek source runtime.")
+        # Match the source launcher's cwd and tsx preload; never use a global dsh.
+        command = [node, "--import", "tsx/esm"]
+        return DeepSeekRuntime(
+            "source", [*command, str(ROOT / "scripts/deepseek_source_cli.mjs"), str(source)],
+            command, source, anchor,
+        )
+
+    cli = Path(settings.get("cli", ""))
+    if not cli.is_file():
+        raise RuntimeError(
+            f"Registered DeepSeek Desktop CLI is missing: {cli}. "
+            "For a source launcher, register its repository with --register-deepseek-source."
+        )
+    resources = cli.resolve().parents[3]
+    executable = resources.parent / "DeepSeek Harness.exe"
+    if not executable.is_file() or not (resources / "app.asar").is_file():
+        raise RuntimeError("Cannot locate the installed Desktop Electron runtime from its CLI")
+    return DeepSeekRuntime(
+        "electron", [str(cli)], [str(executable), "--expose-internals"], ROOT,
+        resources / "app.asar/dsh/node_modules/@deepseek-ai/dsh/package.json",
+    )
+
+
+def deepseek_environment(profile: Path, *, probe: bool = False, kind: str = "source") -> dict[str, str]:
+    profile = profile.resolve()
+    if profile.name != "desktop" or profile.parent.name != "profiles":
+        raise RuntimeError(f"DeepSeek Fmage installation must target profiles/desktop: {profile}")
+    environment = {**os.environ, "DSH_HOME": str(profile.parent.parent), "DSH_TELEMETRY_DISABLED": "1"}
+    environment.pop("ELECTRON_RUN_AS_NODE", None)
+    if probe and kind == "electron":
+        environment["ELECTRON_RUN_AS_NODE"] = "1"
+    return environment
+
+
+def register_deepseek_source(source: Path) -> None:
+    path = state_path()
+    state = read_json(path)
+    if Path(state["source"]).resolve() != ROOT.resolve():
+        raise RuntimeError("Registered harness source differs from this repository.")
+    settings = state["hosts"]["deepseek"]
+    updated = {**settings, "runtime": {"kind": "source", "root": str(source.expanduser().resolve())}}
+    updated.pop("cli", None)
+    runtime = deepseek_runtime(updated)
+    profile = Path(settings["profile"])
+    deepseek_environment(profile)
+    if not (profile / "package.json").is_file():
+        raise RuntimeError(f"Existing Desktop profile is missing: {profile}")
+    if settings == updated:
+        print(f"DeepSeek source runtime already registered: {runtime.cwd}")
+        return
+    rollback = local_root() / "backups" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    backup(path, rollback)
+    state["hosts"]["deepseek"] = updated
+    atomic_write(path, json_bytes(state))
+    print(f"DeepSeek source runtime registered: {runtime.cwd}; Desktop profile preserved: {profile}; backup: {rollback}")
+
+
+def install_deepseek(files: dict[str, bytes], profile: Path, runtime: DeepSeekRuntime, package: Path) -> None:
     if not deepseek_installation_errors(files, profile, package):
         return
     rollback = local_root() / "backups" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     for name in ("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "cordis.patch.yml"):
         backup(profile / name, rollback)
-    result = subprocess.run([str(cli), "plugin", "--profile", "desktop", "add",
-                             "file:" + package.as_posix(), "--offline", "--ignore-scripts"],
-                            cwd=ROOT, check=False)
+    # Source pnpm may need registry metadata for policy checks on existing
+    # dependencies, even when the Fmage tarball is local. Do not disable those
+    # checks or automatically retry a failed installation.
+    cache_policy = "--prefer-offline" if runtime.kind == "source" else "--offline"
+    result = subprocess.run([*runtime.cli, "plugin", "--profile", "desktop", "add",
+                             "file:" + package.as_posix(), cache_policy, "--ignore-scripts"],
+                            cwd=runtime.cwd, env=deepseek_environment(profile), check=False)
     if result.returncode:
         raise RuntimeError(f"DeepSeek Desktop TGZ installation failed (exit {result.returncode}); backup: {rollback}")
     failures = deepseek_installation_errors(files, profile, package)
@@ -299,22 +393,18 @@ def install_deepseek(files: dict[str, bytes], profile: Path, cli: Path, package:
         raise RuntimeError("; ".join(failures))
 
 
-def verify_deepseek_loader(cli: Path, profile: Path) -> None:
-    resources = cli.parents[3]
-    runtime = resources / "app.asar/dsh"
-    executable = resources.parent / "DeepSeek Harness.exe"
-    if not executable.is_file() or not (resources / "app.asar").is_file():
-        raise RuntimeError("Cannot locate the installed Desktop Electron runtime from its CLI")
+def verify_deepseek_loader(runtime: DeepSeekRuntime, profile: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="fmage-desktop-profile-") as temporary:
+        environment = deepseek_environment(Path(temporary) / "profiles/desktop", probe=True, kind=runtime.kind)
+        environment["FMAGE_CONFIG"] = str(Path(temporary) / "no-credentials.json")
         result = subprocess.run([
-            str(executable), "--expose-internals", str(ROOT / "tests/deepseek_profile_smoke.mjs"),
-            str(runtime), str(profile), temporary,
-        ], env={**os.environ, "ELECTRON_RUN_AS_NODE": "1", "DSH_TELEMETRY_DISABLED": "1",
-                "FMAGE_CONFIG": str(Path(temporary) / "no-credentials.json")},
+            *runtime.probe, str(ROOT / "tests/deepseek_profile_smoke.mjs"),
+            str(runtime.anchor), str(profile), temporary,
+        ], cwd=runtime.cwd, env=environment,
             capture_output=True, text=True, encoding="utf-8", timeout=45, check=False)
     if result.returncode or '"nativeProfileLoader":true' not in result.stdout:
         raise RuntimeError(f"DeepSeek native profile activation probe failed: {result.stderr or result.stdout}")
-    print("DeepSeek isolated native profile activation verified: 5 skills, 10 MCP tools (not the live desktop process)")
+    print(f"DeepSeek {runtime.kind} isolated native profile activation verified: 5 skills, 10 MCP tools (not the live desktop process)")
 
 
 def deepseek_runtime_status(installed: Path, files: dict[str, bytes]) -> str:
@@ -343,6 +433,8 @@ def refresh_registered(*, check_only: bool = False) -> None:
     state = read_json(path)
     if Path(state["source"]).resolve() != ROOT.resolve():
         raise RuntimeError("Registered harness source differs from this repository.")
+    # Resolve the selected runtime before writing payloads or invoking an installer.
+    deepseek = deepseek_runtime(state["hosts"]["deepseek"]) if "deepseek" in state["hosts"] else None
     failures = []
     for host, settings in state["hosts"].items():
         target = Path(settings["path"])
@@ -366,12 +458,12 @@ def refresh_registered(*, check_only: bool = False) -> None:
             installed = profile / "node_modules/dsh-fmage"
             package = Path(state["packages"]) / f"dsh-fmage-{json.loads(files['.fmage-build.json'])['version']}.tgz"
             if not check_only:
-                install_deepseek(files, profile, Path(settings["cli"]), package)
+                install_deepseek(files, profile, deepseek, package)
             problems = deepseek_installation_errors(files, profile, package)
             failures.extend(problems)
             print(f"DeepSeek Desktop physical installation checked: {installed}")
             if not problems:
-                verify_deepseek_loader(Path(settings["cli"]), profile)
+                verify_deepseek_loader(deepseek, profile)
             print("DeepSeek Desktop runtime " + deepseek_runtime_status(installed, files))
     if failures:
         raise RuntimeError("; ".join(failures))
@@ -380,6 +472,7 @@ def refresh_registered(*, check_only: bool = False) -> None:
 
 
 def configure_installations(deepseek_cli: Path) -> None:
+    runtime = deepseek_runtime({"cli": str(deepseek_cli)})
     user = Path(os.environ["APPDATA"]) / "Code/User"
     targets = {"vscode": user / "agent-plugins/fmage", "deepseek": local_root() / "deepseek/dsh-fmage"}
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -398,7 +491,7 @@ def configure_installations(deepseek_cli: Path) -> None:
         backup(profile / name, rollback)
     files = payload("deepseek")
     package = build_archive("deepseek", files, local_root() / "packages")
-    install_deepseek(files, profile, deepseek_cli, package)
+    install_deepseek(files, profile, runtime, package)
     profile_config = read_json(profile / "package.json")
     if "dsh-fmage" not in profile_config.get("dsh", {}).get("profile", {}).get("bundles", []):
         raise RuntimeError("DeepSeek package installed but its bundle is not enabled; legacy installs preserved.")
@@ -417,10 +510,16 @@ def main() -> None:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--configure", action="store_true", help="Install private payloads and migrate the old shared adapter")
     parser.add_argument("--deepseek-cli", type=Path)
+    parser.add_argument("--register-deepseek-source", type=Path,
+                        help="Bind an existing Desktop registration to its source repository; preserves the profile and does not install")
     parser.add_argument("--build", choices=("vscode", "deepseek", "all"))
     parser.add_argument("--output", type=Path, default=local_root() / "packages")
     args = parser.parse_args()
-    if args.configure:
+    if args.register_deepseek_source:
+        if args.check or args.configure or args.build or args.deepseek_cli:
+            parser.error("--register-deepseek-source cannot be combined with check, configure, build, or deepseek-cli")
+        register_deepseek_source(args.register_deepseek_source)
+    elif args.configure:
         if args.check or not args.deepseek_cli or not args.deepseek_cli.is_file():
             parser.error("--configure requires the existing Desktop --deepseek-cli and cannot use --check")
         configure_installations(args.deepseek_cli)

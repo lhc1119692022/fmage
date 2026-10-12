@@ -82,7 +82,19 @@ Omitted timeout values use runtime defaults. Explicit positive request timeouts 
 settings without a minimum floor. Explicit budgets are shared by reference download, submission,
 polling and delivery; the helper allows a further 60 seconds for cleanup only when a budget exists.
 Refresh removes the former forced timeout value 600 and never inserts a replacement.
-Status queries retain a 30-second cap and batch/workflow foreground waits retain a 40-second window.
+Remote provider status requests retain a 30-second cap and batch/workflow foreground waits retain a 40-second window.
+
+For image batches, `return_when: "completed"` means wait up to that 40-second window.
+It may return `status: "running"`, `terminal: false`, the existing `task_id`, and an explicit
+`next_action` calling `get_image_task_status` with that ID and `wait_seconds: 40`.
+Follow this action with one waiter at a time; never repeat the image submission or replace it
+with single-image calls to wait, since those create new billable requests. Increasing `timeout`
+only changes the provider request budget. Local status calls default to a 40-second wait;
+`wait_seconds: 0` reads immediately. These calls never submit generation.
+`running_count` counts unsettled jobs and `pending_count` counts transport-returned pending jobs.
+An unfinished batch remains `running` even if some images are ready. A terminal failed,
+partial, or pending result ends this attempt; report it without automatic resubmission.
+Here `terminal` describes the local batch lifecycle, not proof that an upstream pending task stopped.
 
 Async tasks are queried immediately. No provider error resubmits generation or strips request fields.
 Submission connection loss before a task ID is received records submission_uncertain and remote_status=unknown.

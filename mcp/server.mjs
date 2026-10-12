@@ -32,6 +32,7 @@ const MAX_EMBEDDED_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_CHILD_OUTPUT_BYTES = 2 * 1024 * 1024;
 const HELPER_TIMEOUT_GRACE_SECONDS = 60;
 const BATCH_FOREGROUND_WAIT_SECONDS = 40;
+const taskStateWrites = new Map();
 const PENDING_POLL_FAST_WINDOW_SECONDS = 120;
 const PENDING_POLL_FAST_INTERVAL_SECONDS = 5;
 const PENDING_POLL_SLOW_INTERVAL_SECONDS = 10;
@@ -305,8 +306,22 @@ function taskStatePath(taskId) {
 
 async function writeTaskState(task) {
   const statePath = taskStatePath(task.task_id);
-  await mkdir(dirname(statePath), { recursive: true });
-  await writeFile(statePath, JSON.stringify(task, null, 2), "utf8");
+  // Capture each snapshot now, serialize writes, and publish atomically so a
+  // status reader never observes a truncated or older concurrent snapshot.
+  const snapshot = JSON.stringify(task, null, 2);
+  const previous = taskStateWrites.get(task.task_id) ?? Promise.resolve();
+  const pending = previous.catch(() => {}).then(async () => {
+    await mkdir(dirname(statePath), { recursive: true });
+    const temporary = `${statePath}.${process.pid}.tmp`;
+    await writeFile(temporary, snapshot, "utf8");
+    await rename(temporary, statePath);
+  });
+  taskStateWrites.set(task.task_id, pending);
+  try {
+    await pending;
+  } finally {
+    if (taskStateWrites.get(task.task_id) === pending) taskStateWrites.delete(task.task_id);
+  }
 }
 
 async function readTaskState(taskId) {
@@ -317,12 +332,43 @@ async function readTaskStateWithOptions(taskId, options = {}) {
   const normalizedTaskId = nonEmptyString(taskId);
   if (!normalizedTaskId) throw new Error("task_id is required.");
   const statePath = taskStatePath(normalizedTaskId);
-  const task = JSON.parse(stripJsonBom(await readFile(statePath, "utf8")));
+  const waitSeconds = options.waitSeconds ?? 0;
+  if (!Number.isInteger(waitSeconds) || waitSeconds < 0 || waitSeconds > BATCH_FOREGROUND_WAIT_SECONDS) {
+    throw new Error(`wait_seconds must be an integer from 0 to ${BATCH_FOREGROUND_WAIT_SECONDS}.`);
+  }
+  const deadline = Date.now() + waitSeconds * 1000;
+  let task;
+  do {
+    task = JSON.parse(stripJsonBom(await readFile(statePath, "utf8")));
+    if (!isActiveImageTask(task) || Date.now() >= deadline) break;
+    await new Promise((done) => setTimeout(done, Math.min(1000, deadline - Date.now())));
+  } while (true);
   return normalizeTaskForResponse({ ...task, state_path: statePath }, options);
+}
+
+function isActiveImageTask(task) {
+  return ["submitted", "running"].includes(task.status) ||
+    // Older versions labeled unfinished batches partial at the foreground boundary.
+    (task.status === "partial" && !task.completed_at);
 }
 
 function normalizeTaskForResponse(task, options = {}) {
   task = normalizeSubmittedPromptFields(task);
+  const active = isActiveImageTask(task);
+  const continuation = {
+    terminal: !active,
+    running_count: active
+      ? Math.max(0, task.requested_count - task.completed_count - task.pending_count - task.failed_count)
+      : 0,
+    ...(active ? {
+      status: task.status === "submitted" ? "submitted" : "running",
+      message: "This batch is already submitted and is still running. Do not resubmit the batch or replace it with single-image calls; that creates new billable requests. Follow next_action to wait for this same task.",
+      next_action: {
+        tool: TOOL_TASK_STATUS,
+        arguments: { task_id: task.task_id, wait_seconds: BATCH_FOREGROUND_WAIT_SECONDS },
+      },
+    } : {}),
+  };
   const images = Array.isArray(task.images) ? task.images : [];
   const displayImages = images.map(normalizeDisplayPath).filter(Boolean);
   const manifests = Array.isArray(task.manifests) ? task.manifests : [];
@@ -335,6 +381,9 @@ function normalizeTaskForResponse(task, options = {}) {
     const compact = {
       task_id: task.task_id,
       status: task.status,
+      ...continuation,
+      provider: task.provider,
+      provider_model: task.provider_model,
       prompt_mode: task.prompt_mode,
       prompt_submitted: task.prompt_submitted,
       prompts_submitted: task.prompts_submitted,
@@ -371,6 +420,7 @@ function normalizeTaskForResponse(task, options = {}) {
 
   const normalized = {
     ...task,
+    ...continuation,
     display_images: displayImages,
     display_manifests: displayManifests,
     display_manifest: displayManifest,
@@ -1766,6 +1816,7 @@ function updateTaskProgressFromSettled(task, settledResults) {
   task.partial_count = completed.filter((result) => result.status === "partial").length;
   task.grid_images = completed.map((result) => result.grid_image_path).filter(Boolean);
   task.pending_count = pending.length;
+  task.running_count = task.requested_count - completed.length - pending.length - failed.length;
   task.failed_count = failed.length;
   task.images = completed.flatMap((result) => (Array.isArray(result.images) ? result.images : []));
   task.image_metadata = completed.flatMap((result) =>
@@ -2151,6 +2202,7 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     requested_count: normalizedJobs.length,
     completed_count: 0,
     pending_count: 0,
+    running_count: normalizedJobs.length,
     failed_count: 0,
     images: [],
     image_metadata: [],
@@ -2285,11 +2337,7 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     ]);
     foregroundTimeout.cancel();
     if (!finished) {
-      if (task.completed_count > 0) {
-        task.status = "partial";
-      }
-      task.updated_at = isoNow();
-      await writeTaskState(task);
+      // The wait window expiring does not finish or fail any image job.
       return normalizeTaskForResponse(task, {
         verbose: Boolean(args.verbose || args.dry_run),
         includeProviderMetadata: Boolean(args.include_provider_metadata),
@@ -2669,7 +2717,7 @@ function batchProperties(editing = false) {
   properties.return_when = {
     type: "string",
     enum: ["submitted", "completed"],
-    description: "completed waits; submitted returns task_id.",
+    description: "completed (default) waits up to 40 seconds, then returns the same running task_id if unfinished. submitted returns immediately. Continue only with get_image_task_status(task_id, wait_seconds: 40); calling this image tool again submits new billable requests. timeout controls provider requests, not this wait window.",
   };
   properties.verbose = {
     type: "boolean",
@@ -2798,7 +2846,7 @@ function toolDefinitions() {
     {
       name: TOOL_GENERATE_BATCH,
       title: "Generate Image Batch with Fmage",
-      description: "Generate multiple independent images in one batch call.",
+      description: "Submit multiple independent image jobs once. A running result is already submitted: follow next_action with get_image_task_status, never repeat this call or replace it with single-image calls to wait.",
       inputSchema: {
         type: "object",
         properties: batchProperties(false),
@@ -2843,7 +2891,7 @@ function toolDefinitions() {
     {
       name: TOOL_EDIT_BATCH,
       title: "Edit Image Batch with Fmage",
-      description: "Edit multiple independent image jobs in one batch call.",
+      description: "Submit multiple independent image edits once. A running result is already submitted: follow next_action with get_image_task_status, never repeat this call or replace it with single-image calls to wait.",
       inputSchema: {
         type: "object",
         properties: batchProperties(true),
@@ -2860,13 +2908,18 @@ function toolDefinitions() {
     {
       name: TOOL_TASK_STATUS,
       title: "Get Fmage Image Task Status",
-      description: "Read local async task status, or retrieve an existing remote image task without resubmitting generation.",
+      description: "Wait for an already submitted local batch (default: up to 40 seconds), or retrieve an existing remote image task. Never submits generation. If terminal is false, use the returned next_action again, with only one waiter active.",
       inputSchema: {
         type: "object",
         properties: {
           task_id: {
             type: "string",
             description: "Local Fmage task id. Omit when retrieving a remote task.",
+          },
+          wait_seconds: {
+            type: "integer", minimum: 0, maximum: BATCH_FOREGROUND_WAIT_SECONDS,
+            default: BATCH_FOREGROUND_WAIT_SECONDS,
+            description: "Local task wait window; 0 reads immediately, 40 waits up to 40 seconds. Does not change provider timeout or submit generation. Only for task_id.",
           },
           remote_task_id: {
             type: "string",
@@ -2957,9 +3010,14 @@ function resultText(result, options = {}) {
   }
   if (isTask) {
     lines.push(`Task id: ${result.task_id}`);
+    if (result.message) lines.push(result.message);
+    if (result.next_action) {
+      lines.push(`Next action: ${result.next_action.tool}(${JSON.stringify(result.next_action.arguments)}). Keep exactly one waiter active.`);
+    }
+    const runningCount = result.running_count ? `, ${result.running_count} running` : "";
     const pendingCount = result.pending_count ? `, ${result.pending_count} pending` : "";
     lines.push(
-      `Progress: ${result.completed_count ?? 0}/${result.requested_count ?? "?"} completed${pendingCount}, ${result.failed_count ?? 0} failed`,
+      `Progress: ${result.completed_count ?? 0}/${result.requested_count ?? "?"} completed${runningCount}${pendingCount}, ${result.failed_count ?? 0} failed`,
     );
   }
   const submittedPrompt = result.prompt_submitted ?? result.revised_prompt_submitted;
@@ -3262,9 +3320,13 @@ async function handleToolCall(id, params) {
 
   if (params?.name === TOOL_TASK_STATUS) {
     const args = params.arguments ?? {};
+    if (args.remote_task_id && args.wait_seconds !== undefined) {
+      throw new Error("wait_seconds is only supported with a local task_id.");
+    }
     const result = args.remote_task_id
       ? await recoverRemoteImageTask(args)
       : await readTaskStateWithOptions(args.task_id, {
+          waitSeconds: args.wait_seconds ?? BATCH_FOREGROUND_WAIT_SECONDS,
           verbose: Boolean(args.verbose),
           includeProviderMetadata: Boolean(args.include_provider_metadata),
         });

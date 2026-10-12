@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -15,6 +16,113 @@ from refresh_local_runtime import verify_mcp_handshake
 
 
 class HarnessPluginsTests(unittest.TestCase):
+    def source_runtime_fixture(self, root):
+        source = root / "source checkout"
+        for name, data in {
+            "apps/cli/src/bin.ts": b"// source CLI",
+            "apps/cli/package.json": hp.json_bytes({"name": "@deepseek-ai/dsh"}),
+            "node_modules/tsx/package.json": b"{}",
+            "package.json": hp.json_bytes({"packageManager": "pnpm@11.28.5"}),
+            "node_modules/pnpm/package.json": hp.json_bytes({"name": "pnpm", "version": "11.28.5"}),
+            "node_modules/pnpm/bin/pnpm.cjs": b"// pinned pnpm",
+        }.items():
+            hp.atomic_write(source / name, data)
+        return source
+
+    def test_register_source_preserves_profile_and_other_hosts_with_rollback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = self.source_runtime_fixture(root)
+            profile = root / "home/profiles/desktop"
+            hp.atomic_write(profile / "package.json", b'{"private":true}')
+            state_path = root / "harness-installations.json"
+            state = {"source": str(hp.ROOT), "packages": "unchanged-packages", "hosts": {
+                "vscode": {"path": "unchanged-vscode"},
+                "deepseek": {"path": "unchanged-staging", "cli": "removed-desktop/dsh.cmd", "profile": str(profile)},
+            }}
+            hp.atomic_write(state_path, hp.json_bytes(state))
+            with patch.object(hp, "state_path", return_value=state_path), \
+                 patch.object(hp, "local_root", return_value=root), \
+                 patch.object(hp.shutil, "which", return_value="node.exe"):
+                hp.register_deepseek_source(source)
+                updated = hp.read_json(state_path)
+                self.assertEqual(updated["hosts"]["vscode"], state["hosts"]["vscode"])
+                self.assertEqual(updated["packages"], state["packages"])
+                self.assertEqual(updated["hosts"]["deepseek"], {
+                    "path": "unchanged-staging", "profile": str(profile),
+                    "runtime": {"kind": "source", "root": str(source.resolve())},
+                })
+                backups = list((root / "backups").rglob("*harness-installations.json"))
+                self.assertEqual(len(backups), 1)
+                self.assertEqual(hp.read_json(backups[0]), state)
+                hp.register_deepseek_source(source)
+                self.assertEqual(list((root / "backups").rglob("*harness-installations.json")), backups)
+                with self.assertRaisesRegex(RuntimeError, "dependency is missing"):
+                    hp.register_deepseek_source(root / "missing")
+                self.assertEqual(hp.read_json(state_path), updated)
+                self.assertEqual((profile / "package.json").read_bytes(), b'{"private":true}')
+
+    def test_source_installer_uses_selected_cli_cwd_and_desktop_home(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = self.source_runtime_fixture(root)
+            with patch.object(hp.shutil, "which", return_value="node.exe"):
+                runtime = hp.deepseek_runtime({"runtime": {"kind": "source", "root": str(source)}})
+            profile = root / "selected-home/profiles/desktop"
+            package = root / "fmage.tgz"
+            with patch.object(hp, "deepseek_installation_errors", side_effect=[["outdated"], []]), \
+                 patch.object(hp, "local_root", return_value=root), \
+                 patch.dict(hp.os.environ, {"DSH_HOME": "wrong-home", "ELECTRON_RUN_AS_NODE": "1"}), \
+                 patch.object(hp.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+                hp.install_deepseek({}, profile, runtime, package)
+            argv = run.call_args.args[0]
+            self.assertEqual(argv[:5], ["node.exe", "--import", "tsx/esm", str(hp.ROOT / "scripts/deepseek_source_cli.mjs"), str(source)])
+            self.assertEqual(argv[5:], ["plugin", "--profile", "desktop", "add", "file:" + package.as_posix(), "--prefer-offline", "--ignore-scripts"])
+            self.assertEqual(run.call_args.kwargs["cwd"], source)
+            self.assertEqual(run.call_args.kwargs["env"]["DSH_HOME"], str((root / "selected-home").resolve()))
+            self.assertNotIn("ELECTRON_RUN_AS_NODE", run.call_args.kwargs["env"])
+            with self.assertRaisesRegex(RuntimeError, "profiles/desktop"):
+                hp.deepseek_environment(root / "selected-home/profiles/web")
+            hp.atomic_write(source / "node_modules/pnpm/package.json", hp.json_bytes({"name": "pnpm", "version": "12.10.1"}))
+            with self.assertRaisesRegex(RuntimeError, "packageManager pin"):
+                hp.deepseek_runtime({"runtime": {"kind": "source", "root": str(source)}})
+
+    def test_source_probe_uses_cli_anchor_and_a_keyless_isolated_home(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = self.source_runtime_fixture(root)
+            with patch.object(hp.shutil, "which", return_value="node.exe"):
+                runtime = hp.deepseek_runtime({"runtime": {"kind": "source", "root": str(source)}})
+            profile = root / "real-home/profiles/desktop"
+            with patch.dict(hp.os.environ, {"FMAGE_CONFIG": "real-providers.json", "ELECTRON_RUN_AS_NODE": "1"}), \
+                 patch.object(hp.subprocess, "run", return_value=subprocess.CompletedProcess(
+                     [], 0, '{"nativeProfileLoader":true}', "")) as run:
+                hp.verify_deepseek_loader(runtime, profile)
+            argv = run.call_args.args[0]
+            self.assertEqual(argv[:3], ["node.exe", "--import", "tsx/esm"])
+            self.assertEqual(argv[4], str(source / "apps/cli/package.json"))
+            self.assertEqual(argv[5], str(profile))
+            environment = run.call_args.kwargs["env"]
+            self.assertEqual(environment["DSH_HOME"], argv[6])
+            self.assertEqual(environment["FMAGE_CONFIG"], str(Path(argv[6]) / "no-credentials.json"))
+            self.assertNotIn("ELECTRON_RUN_AS_NODE", environment)
+            self.assertEqual(run.call_args.kwargs["cwd"], source)
+
+    def test_electron_registration_remains_supported_and_missing_cli_never_falls_back(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cli = root / "resources/runtime/cli/bin/dsh.cmd"
+            for path in (cli, root / "DeepSeek Harness.exe", root / "resources/app.asar"):
+                hp.atomic_write(path, b"fixture")
+            runtime = hp.deepseek_runtime({"cli": str(cli)})
+            self.assertEqual(runtime.kind, "electron")
+            self.assertEqual(runtime.cli, [str(cli)])
+            self.assertEqual(runtime.anchor, root / "resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/package.json")
+            with self.assertRaisesRegex(RuntimeError, "CLI is missing"):
+                hp.deepseek_runtime({"cli": str(root / "missing.cmd")})
+            with self.assertRaisesRegex(RuntimeError, "kind=source"):
+                hp.deepseek_runtime({"cli": str(cli), "runtime": {"kind": "unknown"}})
+
     def test_runtime_status_requires_current_payload_and_fresh_heartbeat(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
