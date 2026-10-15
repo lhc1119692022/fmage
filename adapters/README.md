@@ -15,8 +15,11 @@ Codex 使用原生 `.codex-plugin/plugin.json`；其他宿主由 `scripts/harnes
 包仍需要 Node 和带 Pillow 的 Fmage Python 环境；本机优先使用已配置的 FMAGE_PYTHON，
 或现有 `~/.codex/runtimes/fmage-3.14/Scripts/python.exe`。不安装全局依赖、不修改 PATH。
 
-DeepSeek 适配支持已验证的 Electron 运行时 `0.2.0-rc.2` 与源码运行时 `0.2.1-alpha.2`，使用原生技能服务、
-`mcp__Fmage__*` 工具名和 Cordis 生命周期。注册五个 Skill，直传仅允许显式调用。
+DeepSeek 适配的 Harness 最低版本为 `0.2.0-rc.2`，两个 `@deepseek-ai/dsh-*` peer 均声明
+`>=0.2.0-rc.2`，不设置未来版本上限。Harness 原生兼容性检查包含预发布版本，因此后续 alpha、
+beta、rc、正式版和更高主版本不会仅因版本号被拦截。Cordis 的独立依赖范围保持 `~4.0.4`。
+版本放行不代表已验证未来接口兼容；刷新时通过登记运行时的实际加载测试检查当前版本。
+适配器使用原生技能服务、`mcp__Fmage__*` 工具名和 Cordis 生命周期。注册五个 Skill，直传仅允许显式调用。
 Skill 文件变化后失效技能目录缓存；工具进程和插件 JS 的更新需宿主重载才能确认生效。
 `.fmage-runtime.json` 每五秒记录已加载版本、内容摘要、进程和 MCP 注册数量。
 检查要求心跳新鲜且摘要匹配，旧进程或旧版本记录不能作为当前运行成功的证据；记录不进入包。
@@ -62,6 +65,7 @@ CLI 自身的参数解析、profile 文件锁和兼容性检查保持生效。
 完成首次配置后，现有 `refresh_local_runtime.py` 先刷新 Codex 版本与配置，再同步两套产物。
 `--check` 验证源文件和压缩包一致性、VS Code 注册、DeepSeek 实体目录及 TGZ 依赖，
 并使用登记运行时的原生加载器在临时 profile 中启动真实 Cordis 服务，核对五个 Skill 和十个 MCP 工具。
+宿主提供版本检查器时，同一测试还验证最低版本边界、后续预发布版本和跨主版本的放行规则，不添加兼容性豁免。
 源码模式使用 CLI 的 `apps/cli/package.json` 作为依赖解析入口；Electron 模式使用随附 CLI 的入口。
 该测试不使用解析器替换或服务 mock，不加载用户会话，不调用付费模型，也不会写入实际桌面的运行记录。
 当前桌面进程的状态另外通过运行心跳报告；版本不一致明确报告需要重载。

@@ -10,6 +10,24 @@ const [anchor, installedProfile, temp] = process.argv.slice(2);
 assert(anchor && installedProfile && temp, 'Pass CLI package.json anchor, installed profile, empty temporary directory');
 const require = createRequire(anchor);
 const boot = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')));
+const manifest = JSON.parse(readFileSync(join(installedProfile, 'node_modules/dsh-fmage/package.json'), 'utf8'));
+// Older Electron hosts predate the gate. Where present, exercise the host's
+// actual check without exemptions, including future prereleases and majors.
+if (typeof boot.evaluatePluginCompatibility === 'function') {
+  const peers = ['@deepseek-ai/dsh-skill', '@deepseek-ai/dsh-mcp-client'];
+  for (const version of [
+    '0.2.0-rc.2', '0.2.0-rc.3', '0.2.0', '0.2.1-alpha.2', '0.2.1-alpha.3',
+    '0.2.1-beta.1', '0.2.1', '0.3.0-alpha.1', '1.0.0-beta.1', '1.0.0', '2.0.0',
+  ]) {
+    assert.equal(boot.evaluatePluginCompatibility(manifest, {}, version), undefined,
+      `Fmage must admit Harness ${version} without an upper version limit`);
+  }
+  for (const version of ['0.1.9', '0.2.0-alpha.1', '0.2.0-rc.1']) {
+    const issue = boot.evaluatePluginCompatibility(manifest, {}, version);
+    assert(issue && !issue.exempted, `Fmage must retain its minimum Harness version for ${version}`);
+    assert.deepEqual(Object.keys(issue.peers).sort(), [...peers].sort());
+  }
+}
 const installed = boot.loadProfileDirectory('dsh', installedProfile, anchor);
 assert(!installed.skippedBundles.some(b => b.packageName === 'dsh-fmage'), 'Installed Fmage bundle cannot resolve');
 const layer = installed.layers.find(l => l.packageName === 'dsh-fmage');
