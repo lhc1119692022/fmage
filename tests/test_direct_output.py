@@ -184,6 +184,8 @@ class DirectOutputTests(unittest.TestCase):
                 response = json.loads(line)
                 self.assertNotIn("error", response)
                 result = response["result"]["structuredContent"]
+                self.assertEqual(list(result)[:3], ["provider", "provider_model", "prompt_mode"])
+                self.assertNotIn("provider_transport", result)
 
                 output_path = Path(result["images"][0])
                 final_dir = root / "requested-output"
@@ -227,6 +229,14 @@ class DirectOutputTests(unittest.TestCase):
                 manifest_path = Path(result["manifest"])
                 manifest_text = manifest_path.read_text(encoding="utf-8")
                 manifest = json.loads(manifest_text)
+                self.assertEqual(
+                    list(manifest)[:4],
+                    ["provider", "provider_transport", "provider_model", "prompt_mode"],
+                )
+                self.assertEqual(
+                    [manifest[key] for key in list(manifest)[:4]],
+                    ["local-test", "openai-images", "gpt-image-1", "expand"],
+                )
                 self.assertNotIn("prompt", manifest["request"])
                 self.assertNotIn("response_metadata", manifest)
                 self.assertEqual(manifest["prompt_provenance"], result["prompt_provenance"])

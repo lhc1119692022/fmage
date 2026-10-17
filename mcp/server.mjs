@@ -308,7 +308,7 @@ async function writeTaskState(task) {
   const statePath = taskStatePath(task.task_id);
   // Capture each snapshot now, serialize writes, and publish atomically so a
   // status reader never observes a truncated or older concurrent snapshot.
-  const snapshot = JSON.stringify(task, null, 2);
+  const snapshot = JSON.stringify(orderImageRecordFields(task), null, 2);
   const previous = taskStateWrites.get(task.task_id) ?? Promise.resolve();
   const pending = previous.catch(() => {}).then(async () => {
     await mkdir(dirname(statePath), { recursive: true });
@@ -1299,8 +1299,17 @@ function normalizeSubmittedPromptFields(result) {
   return normalized;
 }
 
+function orderImageRecordFields(record) {
+  const ordered = {};
+  // Reassigning existing properties does not move them ahead of transport fields.
+  for (const field of ["provider", "provider_transport", "provider_model", "prompt_mode"]) {
+    if (Object.hasOwn(record, field)) ordered[field] = record[field];
+  }
+  return { ...ordered, ...record };
+}
+
 function compactImageResultForResponse(result, args = {}) {
-  result = normalizeSubmittedPromptFields(result);
+  result = orderImageRecordFields(normalizeSubmittedPromptFields(result));
   if (args.verbose || result?.dry_run) return result;
   const includeProviderMetadata = Boolean(args.include_provider_metadata);
   const compact = { ...result };
@@ -1583,7 +1592,7 @@ async function writeImageManifestSidecars(cacheDir, result) {
     delete manifest.revised_prompts_submitted;
     delete manifest.provider_revised_prompt;
     delete manifest.revised_prompt_source;
-    await writeFile(sidecarPath, JSON.stringify(manifest, null, 2), "utf8");
+    await writeFile(sidecarPath, JSON.stringify(orderImageRecordFields(manifest), null, 2), "utf8");
     sidecars.push(sidecarPath);
   }
   return sidecars;
@@ -1891,7 +1900,6 @@ async function writeBatchManifest(root, batchRoot, result) {
     orchestration_count: result.orchestration_count,
     request: sanitizeRequestCompact(result.request),
     requested_size: result.requested_size,
-    prompt_mode: result.prompt_mode,
     prompt_submitted: result.prompt_submitted,
     prompts_submitted: result.prompts_submitted,
     prompt_provenance: result.prompt_provenance,
@@ -1907,7 +1915,7 @@ async function writeBatchManifest(root, batchRoot, result) {
     notes: result.notes,
     warnings: result.warnings,
   };
-  await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+  await writeFile(manifestPath, JSON.stringify(orderImageRecordFields(manifest), null, 2), "utf8");
   await writeGlobalLatestState({ ...result, manifest: manifestPath, updated_at: createdAt });
   await removeProviderLatestState(root);
   return manifestPath;
@@ -3330,13 +3338,14 @@ async function handleToolCall(id, params) {
           verbose: Boolean(args.verbose),
           includeProviderMetadata: Boolean(args.include_provider_metadata),
         });
+    const responseResult = orderImageRecordFields(result);
     sendResult(id, {
-      content: await imageContent(result, {
+      content: await imageContent(responseResult, {
         embedImages: shouldEmbedImages(params.arguments?.embed_images, false),
         verbose: Boolean(params.arguments?.verbose),
         includeProviderMetadata: Boolean(params.arguments?.include_provider_metadata),
       }),
-      structuredContent: result,
+      structuredContent: responseResult,
     });
     return;
   }

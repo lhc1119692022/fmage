@@ -250,6 +250,9 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual(result["request"]["prompt"], prompt)
         self.assertEqual(result["prompt_submitted"], prompt)
         self.assertEqual(result["prompt_mode"], "expand")
+        self.assertEqual(
+            list(result)[:4], ["provider", "provider_transport", "provider_model", "prompt_mode"],
+        )
         self.assertNotIn("revised_prompt_submitted", result)
         self.assertNotIn("prompt_preparation", result)
         self.assertNotIn("prompt_policy", result)
@@ -265,6 +268,9 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual(result["request"]["prompt"], prompt)
         self.assertEqual(result["prompt_submitted"], prompt)
         self.assertEqual(result["prompt_mode"], "direct")
+        self.assertEqual(
+            list(result)[:4], ["provider", "provider_transport", "provider_model", "prompt_mode"],
+        )
         self.assertNotIn("revised_prompt_submitted", result)
 
     def test_invalid_prompt_mode_is_rejected(self) -> None:
@@ -446,6 +452,9 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         )
         self.assertEqual(result["prompt_mode"], "expand")
         self.assertEqual(result["prompts_submitted"], ["first complete prompt", "second complete prompt"])
+        self.assertEqual(
+            list(result)[:4], ["provider", "provider_transport", "provider_model", "prompt_mode"],
+        )
         self.assertNotIn("prompt_preparations", result)
 
     def test_trace_uses_canonical_prompt_fields(self) -> None:

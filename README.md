@@ -22,6 +22,8 @@ The plugin exposes five independent skills while sharing one MCP server and one 
 
 The selected image entry is request-local and must be chosen before prompt interpretation or attachment inspection. Image task results use neutral fields such as `prompt_submitted`, `prompts_submitted`, and `prompt_mode`; legacy `revised_*` fields remain readable for older manifests.
 
+New image records and tool results put `provider`, `provider_transport`, `provider_model`, and `prompt_mode` first, in that order when present. Other fields keep their relative order; compact tool results still omit transport details. Existing saved records are not rewritten.
+
 ## Local Runtime Refresh
 
 After changing the plugin manifest, skills, MCP server, or local transport code, refresh the installed cache and run the keyless MCP handshake:

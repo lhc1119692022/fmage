@@ -230,6 +230,20 @@ class McpExecutionPolicyTests(unittest.TestCase):
                     self.assertNotIn("next_action", finished)
                     self.assertEqual(finished["task_id"], running["task_id"])
                     self.assertTrue(all(Path(path).is_file() for path in finished["images"]))
+                    self.assertEqual(
+                        list(finished)[:3], ["provider", "provider_model", "prompt_mode"],
+                    )
+                    priority_fields = ["provider", "provider_transport", "provider_model", "prompt_mode"]
+                    for path in finished["manifests"]:
+                        manifest = json.loads(Path(path).read_text(encoding="utf-8"))
+                        self.assertEqual(list(manifest)[:4], priority_fields)
+                    state_path = root / "cache/tasks" / running["task_id"] / "state.json"
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                    self.assertEqual(list(state)[:4], priority_fields)
+                    verbose = call("get_image_task_status", {
+                        "task_id": running["task_id"], "verbose": True,
+                    })["structuredContent"]
+                    self.assertEqual(list(verbose)[:4], priority_fields)
                     self.assertEqual(len(posts), 2)
                     # Terminal reads return immediately with the same final result.
                     again = call("get_image_task_status", {

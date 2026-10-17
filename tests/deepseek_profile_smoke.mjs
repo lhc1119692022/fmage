@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { cpSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { assertUnmetDshPeers } from './deepseek_compatibility.mjs';
 
 const [anchor, installedProfile, temp] = process.argv.slice(2);
 assert(anchor && installedProfile && temp, 'Pass CLI package.json anchor, installed profile, empty temporary directory');
@@ -24,8 +25,8 @@ if (typeof boot.evaluatePluginCompatibility === 'function') {
   }
   for (const version of ['0.1.9', '0.2.0-alpha.1', '0.2.0-rc.1']) {
     const issue = boot.evaluatePluginCompatibility(manifest, {}, version);
-    assert(issue && !issue.exempted, `Fmage must retain its minimum Harness version for ${version}`);
-    assert.deepEqual(Object.keys(issue.peers).sort(), [...peers].sort());
+    assertUnmetDshPeers(issue,
+      Object.fromEntries(peers.map(name => [name, manifest.peerDependencies[name]])), version);
   }
 }
 const installed = boot.loadProfileDirectory('dsh', installedProfile, anchor);
