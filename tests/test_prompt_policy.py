@@ -286,6 +286,76 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual(request["quality"], "high")
         self.assertEqual(request["size"], "2048x2048")
 
+    def test_image_family_versions_keep_default_quality_and_wire_id(self) -> None:
+        for model in (
+            "gpt-image-1",
+            "openai/gpt-image-1-mini",
+            "gpt-image-2",
+            "openai/gpt-image-2.5-sunburst",
+            "relay/openai/GPT-IMAGE-2.5-FLARE",
+            "渠道【GPT_IMAGE_2.5_sunburst】",
+            "zenmux:gpt image 2.5",
+            "openai/gpt-image-3",
+            "openai/GPT-IMAGE-3.1-preview",
+            "openai/gpt-image-20",
+        ):
+            with self.subTest(model=model):
+                config = provider_config(["test"], {"test": provider(model)})
+                response = self.call_image_tool(config, prompt="plain test image", aspect="16:9")
+                self.assertNotIn("error", response)
+                request = response["result"]["structuredContent"]["request"]
+                self.assertEqual(request["model"], model)
+                self.assertEqual(request["quality"], "high")
+                self.assertEqual(request["size"], "2736x1536")
+
+    def test_namespaced_quality_survives_all_image_routes(self) -> None:
+        model = "openai/gpt-image-2.5-sunburst"
+        with tempfile.TemporaryDirectory() as directory:
+            reference = Path(directory) / "reference.png"
+            reference.write_bytes(TRANSPARENT_TEST_PNG)
+            for async_mode in (False, True):
+                config = provider_config(["test"], {"test": {**provider(model), "async_mode": async_mode}})
+                for tool in sorted(STANDARD_IMAGE_TOOLS):
+                    for quality in (None, "medium", "max"):
+                        with self.subTest(async_mode=async_mode, tool=tool, quality=quality):
+                            arguments = {"aspect": "16:9"}
+                            if tool.endswith("_batch"):
+                                arguments["jobs"] = [{"prompt": "proposal one"}, {"prompt": "proposal two"}]
+                            else:
+                                arguments["prompt"] = "plain test image"
+                            if tool.startswith("edit_"):
+                                arguments["images"] = [str(reference)]
+                            if quality is not None:
+                                arguments.update(quality=quality, quality_user_requested=True)
+                            response = self.call_image_tool(config, name=tool, **arguments)
+                            self.assertNotIn("error", response, json.dumps(response))
+                            result = response["result"]["structuredContent"]
+                            request = result["request"]
+                            jobs = request["jobs"] if tool.endswith("_batch") else [request]
+                            for job in jobs:
+                                self.assertEqual(job["model"], model)
+                                if tool.endswith("_batch"):
+                                    if quality is not None:
+                                        self.assertEqual(job["quality"], quality)
+                                else:
+                                    self.assertEqual(job["quality"], quality or "high")
+                                    self.assertEqual(job["size"], "2736x1536")
+                            if tool.endswith("_batch"):
+                                self.assertEqual(result["completed_count"], 2)
+                                self.assertEqual(result["failed_count"], 0)
+                                self.assertIn(f"resolution_inferred_from_{quality or 'high'}_quality", result["notes"])
+                            self.assertNotIn("Mapped quality=", json.dumps(response))
+
+    def test_model_lookalikes_do_not_inherit_image_family_default_quality(self) -> None:
+        for model in ("notgpt-image-2.5", "gpt-image-2ish", "gpt-image-2.5ish"):
+            with self.subTest(model=model):
+                config = provider_config(["test"], {"test": provider(model)})
+                response = self.call_image_tool(config, prompt="plain test image")
+                self.assertNotIn("error", response)
+                request = response["result"]["structuredContent"]["request"]
+                self.assertEqual(request["model"], model)
+                self.assertEqual(request["quality"], "medium")
+
     def test_high_quality_prompt_semantic_uses_4k(self) -> None:
         config = self.clean_config()
         response = self.call_image_tool(config, prompt="A high-quality product image.")
@@ -356,6 +426,9 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             ("gemini-3.1-flash-image-preview", "gemini-generate-content"),
             ("nano-banana-2", "json-images"),
             ("gpt-image-2.50", "openai-images"),
+            ("openai/gpt-image-2.50", "openai-images"),
+            ("openai/gpt-image-3", "openai-images"),
+            ("openai/gpt-image-20", "openai-images"),
         ):
             config = provider_config(["test"], {"test": provider(model, transport)})
             for quality in ("xhigh", "max"):
@@ -417,7 +490,10 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual([job["status"] for job in result["job_statuses"]], ["completed"] * 3)
 
     def test_image_2_5_preserves_explicit_extended_quality(self) -> None:
-        for model in ("gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
+        for model in (
+            "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+            "openai/gpt-image-2.5-sunburst", "渠道【GPT_IMAGE_2.5_sunburst】",
+        ):
             config = provider_config(["test"], {"test": provider(model)})
             for quality in ("xhigh", "max"):
                 with self.subTest(model=model, quality=quality):

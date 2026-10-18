@@ -96,8 +96,60 @@ class Image2DefaultResolutionTests(unittest.TestCase):
         self.assertEqual(openai_size, "2048x2048")
         self.assertIn("resolution_inferred_from_high_quality", openai_notes)
 
+    def test_extended_quality_keeps_default_resolution_with_and_without_aspect(self) -> None:
+        for quality in ("xhigh", "max"):
+            for aspect in (None, "16:9"):
+                with self.subTest(quality=quality, aspect=aspect):
+                    args = shape_args("openai/gpt-image-2.5-sunburst")
+                    args.quality = quality
+                    args.aspect = aspect
+                    size, notes = transport.resolve_size(args, [])
+                    self.assertEqual(size, "2736x1536" if aspect else "2048x2048")
+                    self.assertIn(f"resolution_inferred_from_{quality}_quality", notes)
+
 
 class Image25QualityTests(unittest.TestCase):
+    def test_model_family_recognition_tolerates_decorated_ids(self) -> None:
+        cases = (
+            ("gpt-image-2", False, True),
+            ("gpt-image-2-token", False, True),
+            ("openai/gpt-image-2.5-sunburst", True, True),
+            ("relay/openai/GPT-IMAGE-2.5-FLARE", True, True),
+            ("渠道【GPT_IMAGE_2.5_sunburst】", True, True),
+            ("zenmux:gpt image 2.5", True, True),
+            ("gpt-image-2.5.1", True, True),
+            ("gpt-image-2.50", False, True),
+            ("openai/gpt-image-20", False, True),
+            ("openai/gpt-image-1", False, True),
+            ("openai/gpt-image-3", False, True),
+            ("openai/GPT-IMAGE-3.1-preview", False, True),
+            ("notgpt-image-2.5", False, False),
+            ("gpt-image-2.5ish", False, False),
+            ("gpt-image-2.5.1oops", False, False),
+            ("gpt-image-2ish", False, False),
+            ("gemini-3.1-flash-image-preview", False, False),
+            ("", False, False),
+            (None, False, False),
+        )
+        for model, image_2_5, gpt_image in cases:
+            with self.subTest(model=model):
+                self.assertEqual(transport.is_image_2_5_model(model), image_2_5)
+                self.assertEqual(transport.is_gpt_image_model(model), gpt_image)
+
+    def test_namespaced_models_preserve_extended_quality_and_transparency(self) -> None:
+        for command in ("generate", "edit"):
+            for quality in ("xhigh", "max"):
+                with self.subTest(command=command, quality=quality):
+                    args = transport.build_parser().parse_args([
+                        command, "--prompt", "test", "--model", "openai/gpt-image-2.5-sunburst",
+                        "--quality", quality, "--background", "transparent",
+                    ])
+                    transport.validate_common(args)
+                    payload = transport.common_payload(args, "test", "2048x2048")
+                    self.assertEqual(payload["model"], "openai/gpt-image-2.5-sunburst")
+                    self.assertEqual(payload["quality"], quality)
+                    self.assertEqual(payload["background"], "transparent")
+
     def test_image_2_5_quality_tiers_are_accepted(self) -> None:
         parser = transport.build_parser()
         for quality in ("xhigh", "max"):
@@ -130,6 +182,15 @@ class Image25QualityTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "supported only for gpt-image-2.5"):
                 transport.validate_common(args)
+
+    def test_lookalike_models_reject_extended_quality(self) -> None:
+        for model in ("gpt-image-2.50", "openai/gpt-image-2.50", "gpt-image-20", "gpt-image-2.5ish"):
+            with self.subTest(model=model):
+                args = transport.build_parser().parse_args([
+                    "generate", "--prompt", "test", "--model", model, "--quality", "max",
+                ])
+                with self.assertRaisesRegex(ValueError, "supported only for gpt-image-2.5"):
+                    transport.validate_common(args)
 
 
 class RequestHeaderTests(unittest.TestCase):

@@ -30,7 +30,7 @@ RUNTIME_SCRIPTS = (
     "midjourney_transport.py", "json_images_support.py", "transport_common.py",
     "openai_images_transport.py", "openai_images_async_transport.py",
 )
-CONFIG_FILES = ("providers.example.json", "workflows.example.json", "midjourney-v8.2-contract.json", "banana-model-capabilities.json")
+CONFIG_FILES = ("providers.example.json", "workflows.example.json", "midjourney-v8.2-contract.json", "banana-model-capabilities.json", "gpt-image-model-families.json")
 # Harness checks dsh peers with includePrerelease=True. Keep the oldest
 # supported runtime as the floor, allowing future releases and prereleases.
 DEEPSEEK_PEER_VERSIONS = ">=0.2.0-rc.2"

@@ -224,6 +224,7 @@ def verify_cached_plugin(cache_path: Path) -> None:
         cache_path / "scripts" / "gemini_generate_content_transport.py",
         cache_path / "scripts" / "midjourney_transport.py",
         cache_path / "config" / "midjourney-v8.2-contract.json",
+        cache_path / "config" / "gpt-image-model-families.json",
     ]
     for skill_name in REQUIRED_SKILLS:
         required_files.extend(

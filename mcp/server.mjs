@@ -51,6 +51,12 @@ const MIDJOURNEY_CONTRACT = JSON.parse(
 const BANANA_MODEL_CAPABILITY_SPEC = JSON.parse(
   readFileSync(join(PLUGIN_ROOT, "config", "banana-model-capabilities.json"), "utf8"),
 );
+// Share family boundaries with the Python transports; never rewrite the wire model ID.
+const GPT_IMAGE_MODEL_PATTERNS = Object.fromEntries(
+  Object.entries(JSON.parse(
+    readFileSync(join(PLUGIN_ROOT, "config", "gpt-image-model-families.json"), "utf8"),
+  )).map(([family, pattern]) => [family, new RegExp(pattern, "i")]),
+);
 const ASYNC_DEFAULT_RESPONSE_FORMAT = "url";
 const JSON_IMAGES_DEFAULT_RESPONSE_FORMAT = "url";
 const JSON_IMAGES_SUPPORTED_RESPONSE_FORMATS = new Set(["url", "b64_json"]);
@@ -910,8 +916,9 @@ function asyncImageArguments(args, promptFile, provider) {
 }
 
 function defaultQualityForProvider(provider) {
-  const model = nonEmptyString(provider?.model)?.toLowerCase();
-  return model.startsWith("gpt-image-2") ? "high" : "medium";
+  return provider?.transport === TRANSPORT_OPENAI_IMAGES &&
+    GPT_IMAGE_MODEL_PATTERNS["gpt-image"].test(nonEmptyString(provider?.model) || "")
+    ? "high" : "medium";
 }
 
 const RESOLUTION_TOKEN_PATTERN = String.raw`(?:\b\d+(?:\.\d+)?\s*k\b|\b\d{3,5}\s*[x×]\s*\d{3,5}\b)`;
@@ -1098,13 +1105,13 @@ function enforceModelCapabilityPolicy(args = {}, provider) {
   const quality = nonEmptyString(args.quality);
   const supportsExtendedQuality =
     provider.transport === TRANSPORT_OPENAI_IMAGES &&
-    /^gpt-image-2\.5(?:$|-)/iu.test(nonEmptyString(provider.model) || "");
+    GPT_IMAGE_MODEL_PATTERNS["gpt-image-2.5"].test(nonEmptyString(provider.model) || "");
   if (["xhigh", "max"].includes(quality) && !supportsExtendedQuality) {
     const result = { ...args, quality: "high" };
     result._model_capability_policy_warning =
       `Mapped quality="${quality}" to "high" for provider "${provider.name}" ` +
-      `model "${provider.model}" (transport "${provider.transport}") because the selected ` +
-      "transport does not expose extended quality tiers.";
+      `model "${provider.model}" (transport "${provider.transport}") because extended quality ` +
+      "tiers are not confirmed for the selected model and transport.";
     args = result;
   }
   const thinkingLevel = nonEmptyString(args.thinking_level)?.toLowerCase();

@@ -180,6 +180,7 @@ class HarnessPluginsTests(unittest.TestCase):
                 self.assertNotIn("config/providers.json", files)
                 self.assertNotIn("scripts/harness_plugins.py", files)
                 self.assertNotIn("scripts/install_vscode_adapter.py", files)
+                self.assertIn("config/gpt-image-model-families.json", files)
                 archive = hp.build_archive(host, files, out)
                 hp.verify_archive(host, files, out)
                 if host == "vscode":

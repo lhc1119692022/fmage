@@ -104,6 +104,18 @@ Once the existing full task ID is known, get_image_task_status with provider and
 retrieves it using GET only; it never generates again. Local tasks still use task_id.
 A keyless dry_run validates routing without contacting a provider.
 
+GPT Image family checks use shared keyword patterns in
+`config/gpt-image-model-families.json` for MCP and both OpenAI Images transports.
+They accept provider namespaces, channel labels, case differences, and hyphen/underscore/space
+variants, including `openai/gpt-image-2.5-sunburst`, while preserving the configured model ID
+in the request. The GPT Image family defaults to `quality=high` across legacy, current,
+and future numeric versions; the default does not depend on a `gpt-image-2` prefix.
+An explicit supported quality selection is preserved. Extended `xhigh`/`max` quality is
+confirmed for the 2.5 series using `openai-images`; other versions remain usable with base
+tiers and map extended requests to `high` with a warning until support is confirmed.
+Version boundaries distinguish 2.5 from 2.50; this is family recognition, not typo
+correction or automatic provider/model switching.
+
 The plugin card supports at most three `interface.defaultPrompt` entries. Those card actions are separate from the five skill entry points above, which are declared by each skill's `agents/openai.yaml`. To prevent a missing Fmage MCP catalog from silently falling back to native image generation, keep the generic image skill disabled and disable the host feature as well:
 
 ```text

@@ -70,17 +70,23 @@ IMAGE_FIELD_AUTO = "auto"
 IMAGE_FIELD_NAMES = {"image", "image[]"}
 IMAGE_FIELD_RETRY_STATUSES = {400, 415, 422}
 
-
-def is_image_2_model(model: str | None) -> bool:
-    return (model or "").strip().lower().startswith("gpt-image-2")
+# Shared with MCP so namespaced/decorated IDs receive the same capability checks.
+# These patterns classify IDs only; the configured wire model is sent unchanged.
+GPT_IMAGE_MODEL_PATTERNS = {
+    family: re.compile(pattern, re.IGNORECASE | re.ASCII)
+    for family, pattern in json.loads(
+        (Path(__file__).resolve().parents[1] / "config" / "gpt-image-model-families.json")
+        .read_text(encoding="utf-8")
+    ).items()
+}
 
 
 def is_image_2_5_model(model: str | None) -> bool:
-    return (model or "").strip().lower().startswith("gpt-image-2.5")
+    return bool(GPT_IMAGE_MODEL_PATTERNS["gpt-image-2.5"].search(model or ""))
 
 
 def is_gpt_image_model(model: str | None) -> bool:
-    return (model or "").strip().lower().startswith("gpt-image-")
+    return bool(GPT_IMAGE_MODEL_PATTERNS["gpt-image"].search(model or ""))
 
 
 def default_resolution_for_model(model: str | None) -> str:
@@ -391,10 +397,10 @@ def infer_resolution_from_quality(
 ) -> tuple[str | None, str | None]:
     if quality == "low":
         return "1k", "resolution_inferred_from_low_quality"
-    if quality == "high":
+    if quality in {"high", "xhigh", "max"}:
         resolution = default_resolution_for_model(model)
-        return resolution, "resolution_inferred_from_high_quality"
-    if quality in {"medium", "auto"} and is_image_2_model(model):
+        return resolution, f"resolution_inferred_from_{quality}_quality"
+    if quality in {"medium", "auto"} and is_gpt_image_model(model):
         return "2k", f"resolution_inferred_from_{quality}_quality"
     if quality in {"medium", "auto", None}:
         resolution = default_resolution_for_model(model)
