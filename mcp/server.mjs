@@ -1032,6 +1032,18 @@ function enforceOutputFormatPolicy(args = {}) {
   };
 }
 
+function enforceOutputCompressionPolicy(args = {}) {
+  if (args.output_compression == null || args.output_compression_user_requested === true) {
+    return args;
+  }
+  const result = { ...args };
+  delete result.output_compression;
+  result._output_compression_policy_warning =
+    `Ignored output_compression="${args.output_compression}" because output_compression_user_requested was not true; ` +
+    "leaving compression unset without changing output format or generation quality.";
+  return result;
+}
+
 function enforceResolutionPolicy(args = {}) {
   const requestedResolution = nonEmptyString(args.resolution);
   const requestedSize = nonEmptyString(args.size);
@@ -1061,7 +1073,7 @@ function enforceResolutionPolicy(args = {}) {
 function enforceDeliveryPolicy(args = {}, provider = null) {
   if (provider?.transport === TRANSPORT_MIDJOURNEY) return args;
   return inferResolutionFromPrompt(
-    enforceResolutionPolicy(enforceOutputFormatPolicy(enforceQualityPolicy(args))),
+    enforceResolutionPolicy(enforceOutputCompressionPolicy(enforceOutputFormatPolicy(enforceQualityPolicy(args)))),
   );
 }
 
@@ -1220,6 +1232,7 @@ function sanitizeRequest(request) {
     moderation: request.moderation,
     background,
     output_format: outputFormat,
+    output_compression: request.output_compression,
     output_mime_type: request.output_mime_type,
     response_format: request.response_format,
     parameters: request.parameters,
@@ -1744,6 +1757,13 @@ function batchJobs(args, provider = null) {
 
 function jobArgsFromBatchArgs(args, job) {
   const merged = { ...args, ...job };
+  // Consent for a batch default does not authorize a different per-job override.
+  for (const field of ["output_format", "output_compression"]) {
+    const consent = `${field}_user_requested`;
+    if (Object.hasOwn(job, field) && job[field] !== args[field] && !Object.hasOwn(job, consent)) {
+      merged[consent] = false;
+    }
+  }
   delete merged.jobs;
   delete merged.return_when;
   delete merged.embed_images;
@@ -1985,6 +2005,7 @@ async function combineBatchResults({
             moderation: job.moderation,
             background: job.background,
             output_format: job.output_format,
+            output_compression: job.output_compression,
             output_mime_type: job.output_mime_type,
             response_format: job.response_format,
             parameters: job.parameters,
@@ -2191,6 +2212,7 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
         moderation: job.moderation,
         background: job.background,
         output_format: job.output_format,
+        output_compression: job.output_compression,
         output_mime_type: job.output_mime_type,
         response_format: job.response_format,
         parameters: job.parameters,
@@ -2459,6 +2481,12 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
         args._output_format_policy_warning,
       ];
     }
+    if (args._output_compression_policy_warning) {
+      enriched.warnings = [
+        ...normalizedStringArray(enriched.warnings),
+        args._output_compression_policy_warning,
+      ];
+    }
     if (args._resolution_policy_warning) {
       enriched.warnings = [
         ...normalizedStringArray(enriched.warnings),
@@ -2628,7 +2656,7 @@ function commonProperties(editing = false) {
     output_format: {
       type: "string",
       enum: ["png", "jpeg", "webp"],
-      description: "Optional output format. Omit for Midjourney; retain the backend output format.",
+      description: "Defaults to PNG. Omit unless the user explicitly requests a format; non-PNG requires output_format_user_requested=true. Never infer a format change from generation quality. Omit for Midjourney; retain the backend output format.",
     },
     output_format_user_requested: {
       type: "boolean",
@@ -2638,7 +2666,11 @@ function commonProperties(editing = false) {
       type: "integer",
       minimum: 0,
       maximum: 100,
-      description: "JPEG/WebP compression from 0 to 100.",
+      description: "JPEG/WebP compression from 0 to 100, only when explicitly requested with output_compression_user_requested=true. Otherwise omit; never infer from generation quality (including max), resolution, or a format request alone. Invalid with PNG; never switch formats to accommodate compression.",
+    },
+    output_compression_user_requested: {
+      type: "boolean",
+      description: "True only when the user explicitly requested this compression setting, independently of format or generation quality. Otherwise omit both compression fields.",
     },
     response_format: {
       type: "string",

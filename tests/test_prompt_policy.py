@@ -210,6 +210,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             self.assertNotIn("prompt_check_id", all_property_names(schema))
             self.assertIn("resolution_user_requested", all_property_names(schema))
             self.assertIn("output_format_user_requested", all_property_names(schema))
+            self.assertIn("output_compression_user_requested", all_property_names(schema))
             self.assertIn("thinking_level_user_requested", all_property_names(schema))
 
         prompt_description = tools["generate_image"]["inputSchema"]["properties"]["prompt"]["description"]
@@ -412,6 +413,136 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertNotIn("error", response)
         request = response["result"]["structuredContent"]["request"]
         self.assertEqual(request["size"], "2880x2880")
+
+    def test_unrequested_compression_is_removed_across_image_routes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            reference = Path(directory) / "reference.png"
+            reference.write_bytes(TRANSPARENT_TEST_PNG)
+            for async_mode in (False, True):
+                config = provider_config(
+                    ["test"], {"test": {**provider("gpt-image-2.5"), "async_mode": async_mode}},
+                )
+                for tool in sorted(STANDARD_IMAGE_TOOLS):
+                    for mode in ("expand", "direct"):
+                        with self.subTest(async_mode=async_mode, tool=tool, mode=mode):
+                            arguments = {
+                                "prompt_mode": mode,
+                                "quality": "max", "quality_user_requested": True,
+                                "resolution": "2k", "resolution_user_requested": True,
+                                "aspect": "16:9", "output_format": "png",
+                                "output_compression": 100,
+                            }
+                            if tool.endswith("_batch"):
+                                arguments["jobs"] = [
+                                    {"prompt": f"proposal {index}", "output_format": "png",
+                                     "output_compression": 100}
+                                    for index in range(4)
+                                ]
+                            else:
+                                arguments["prompt"] = "plain test image"
+                            if tool.startswith("edit_"):
+                                arguments["images"] = [str(reference)]
+                            response = self.call_image_tool(config, name=tool, **arguments)
+                            self.assertNotIn("error", response, json.dumps(response))
+                            result = response["result"]["structuredContent"]
+                            request = result["request"]
+                            jobs = request["jobs"] if tool.endswith("_batch") else [request]
+                            for job in jobs:
+                                self.assertEqual(job["output_format"], "png")
+                                self.assertEqual(job["quality"], "max")
+                                self.assertNotIn("output_compression", job)
+                            self.assertTrue(any("output_compression_user_requested" in w for w in result["warnings"]))
+                            if tool.endswith("_batch"):
+                                self.assertEqual(result["completed_count"], 4)
+                                self.assertEqual(result["failed_count"], 0)
+                            else:
+                                self.assertEqual(request["size"], "2736x1536")
+
+    def test_format_and_compression_require_independent_explicit_requests(self) -> None:
+        for async_mode in (False, True):
+            config = provider_config(
+                ["test"], {"test": {**provider("gpt-image-2.5"), "async_mode": async_mode}},
+            )
+            for output_format in ("jpeg", "webp"):
+                for compression in (0, 80, 100):
+                    for consent in (None, False, True):
+                        with self.subTest(async_mode=async_mode, format=output_format,
+                                          compression=compression, consent=consent):
+                            arguments = {
+                                "output_format": output_format, "output_format_user_requested": True,
+                                "output_compression": compression,
+                            }
+                            if consent is not None:
+                                arguments["output_compression_user_requested"] = consent
+                            response = self.call_image_tool(config, prompt="test image", **arguments)
+                            self.assertNotIn("error", response, json.dumps(response))
+                            request = response["result"]["structuredContent"]["request"]
+                            self.assertEqual(request["output_format"], output_format)
+                            if consent:
+                                self.assertEqual(request["output_compression"], compression)
+                            else:
+                                self.assertNotIn("output_compression", request)
+
+    def test_unrequested_format_and_compression_use_png_without_compression(self) -> None:
+        for output_format in (None, "png", "jpeg", "webp"):
+            arguments = {"output_compression": 100}
+            if output_format:
+                arguments["output_format"] = output_format
+            response = self.call_image_tool(self.clean_config(), prompt="test image", **arguments)
+            self.assertNotIn("error", response, json.dumps(response))
+            request = response["result"]["structuredContent"]["request"]
+            self.assertEqual(request["output_format"], "png")
+            self.assertNotIn("output_compression", request)
+
+    def test_explicit_compression_cannot_switch_png_to_another_format(self) -> None:
+        for output_format in ("png", "jpeg"):
+            response = self.call_image_tool(
+                self.clean_config(), prompt="test image",
+                output_format=output_format,
+                output_compression=80, output_compression_user_requested=True,
+            )
+            self.assertIn("error", response)
+            self.assertIn("can only be used with --output-format jpeg or webp", response["error"]["message"])
+
+    def test_batch_override_does_not_inherit_consent_for_a_different_value(self) -> None:
+        response = self.call_image_tool(
+            self.clean_config(), name="generate_image_batch",
+            output_format="jpeg", output_format_user_requested=True,
+            output_compression=80, output_compression_user_requested=True,
+            jobs=[
+                {"prompt": "inherit explicit defaults"},
+                {"prompt": "unrequested compression override", "output_compression": 100},
+                {"prompt": "unrequested format override", "output_format": "webp",
+                 "output_compression_user_requested": False},
+                {"prompt": "explicit overrides", "output_format": "webp",
+                 "output_format_user_requested": True, "output_compression": 0,
+                 "output_compression_user_requested": True},
+            ],
+        )
+        self.assertNotIn("error", response, json.dumps(response))
+        result = response["result"]["structuredContent"]
+        self.assertEqual(result["completed_count"], 4)
+        self.assertEqual(result["failed_count"], 0)
+        jobs = result["request"]["jobs"]
+        self.assertEqual(jobs[0]["output_format"], "jpeg")
+        self.assertEqual(jobs[0]["output_compression"], 80)
+        self.assertEqual(jobs[1]["output_format"], "jpeg")
+        self.assertNotIn("output_compression", jobs[1])
+        self.assertEqual(jobs[2]["output_format"], "png")
+        self.assertNotIn("output_compression", jobs[2])
+        self.assertEqual(jobs[3]["output_format"], "webp")
+        self.assertEqual(jobs[3]["output_compression"], 0)
+
+    def test_max_in_provider_or_prompt_does_not_select_quality_or_compression(self) -> None:
+        config = provider_config(["Max"], {"Max": provider("gpt-image-2.5")})
+        response = self.call_image_tool(config, provider="Max", prompt="A box labelled Max.")
+        self.assertNotIn("error", response, json.dumps(response))
+        result = response["result"]["structuredContent"]
+        self.assertEqual(result["provider"], "Max")
+        self.assertEqual(result["request"]["quality"], "high")
+        self.assertEqual(result["request"]["output_format"], "png")
+        self.assertNotIn("output_compression", result["request"])
+        self.assertEqual(result["request"]["prompt"], "A box labelled Max.")
 
     def test_visual_resolution_language_is_documented_in_tool_schema(self) -> None:
         config = self.clean_config()
