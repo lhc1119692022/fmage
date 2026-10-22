@@ -23,7 +23,10 @@ window.__ModuleLoader__.load({
 .fmg-card{border:.5px solid var(--dsw-alias-border-l2);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:10px}
 .fmg-card[data-off=true] .fmg-fields{opacity:.6}
 .fmg-card[data-dragging=true]{opacity:.5}
-.fmg-card[data-over=true]{border-color:var(--dsw-alias-label-primary);border-style:dashed}
+.fmg-card{position:relative}
+.fmg-card[data-drop]::before{content:"";position:absolute;left:4px;right:4px;height:2px;border-radius:2px;background:var(--dsw-alias-state-business-primary);pointer-events:none}
+.fmg-card[data-drop=before]::before{top:-6px}
+.fmg-card[data-drop=after]::before{bottom:-6px}
 .fmg-head{display:flex;align-items:center;gap:8px;min-height:32px}
 .fmg-toggle{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;background:0 0;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;text-align:left}
 .fmg-toggle:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px;border-radius:6px}
@@ -128,15 +131,31 @@ window.__ModuleLoader__.load({
         active_workflow: active ? active.name : null, output_dir: draft.output_dir, cache_dir: draft.cache_dir,
       };
     }
-    /** Drag reorder: drop the source row onto the target row's position. */
-    const reorder = (list, fromId, toId) => {
-      const from = list.findIndex(r => r.id === fromId);
+    /** Insertion slot in the original list for dropping before/after a target row. */
+    const slotOf = (list, toId, pos) => {
       const to = list.findIndex(r => r.id === toId);
-      if (from < 0 || to < 0 || from === to) return list;
+      return to < 0 ? -1 : pos === 'before' ? to : to + 1;
+    };
+    /** True when the slot leaves the dragged row where it already is. */
+    const isNoop = (list, fromId, toId, pos) => {
+      const from = list.findIndex(r => r.id === fromId);
+      const slot = slotOf(list, toId, pos);
+      return from < 0 || slot < 0 || slot === from || slot === from + 1;
+    };
+    /** Drag reorder: insert the source row at the slot before or after the target row. */
+    const reorder = (list, fromId, toId, pos) => {
+      if (isNoop(list, fromId, toId, pos)) return list;
+      const from = list.findIndex(r => r.id === fromId);
+      const slot = slotOf(list, toId, pos);
       const next = list.slice();
       const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
+      next.splice(slot > from ? slot - 1 : slot, 0, item);
       return next;
+    };
+    /** Upper or lower half of the hovered card decides the insertion side. */
+    const dropSide = e => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      return e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
     };
     /** API key input: masked placeholder by default, eye toggles the full value. */
     function SecretField({ t, row, kind, id, onChange, setError }) {
@@ -181,14 +200,14 @@ window.__ModuleLoader__.load({
       }, icon(ICON.grip));
     }
 
-    function ProviderCard({ t, row, transports, update, onRemove, setError, open, onToggle, dragging, over, onDragStart, onDragOver, onDrop, onDragEnd }) {
+    function ProviderCard({ t, row, transports, update, onRemove, setError, open, onToggle, dragging, drop, onDragStart, onDragOver, onDrop, onDragEnd }) {
       const f = field => `fmg-${row.id}-${field}`;
       const remove = () => { if (window.confirm(t('confirmRemove', { name: row.name || '?' }))) onRemove(); };
       return h('li', {
         className: 'fmg-card',
-        'data-off': String(!row.enabled), 'data-dragging': String(dragging), 'data-over': String(over),
-        onDragOver: e => { e.preventDefault(); onDragOver(); },
-        onDrop: e => { e.preventDefault(); onDrop(); },
+        'data-off': String(!row.enabled), 'data-dragging': String(dragging), 'data-drop': drop || undefined,
+        onDragOver: e => { e.preventDefault(); onDragOver(dropSide(e)); },
+        onDrop: e => { e.preventDefault(); e.stopPropagation(); onDrop(); },
       },
         h('div', { className: 'fmg-head' },
           h(CardHandle, { t, id: row.id, onDragStart, onDragEnd }),
@@ -208,13 +227,13 @@ window.__ModuleLoader__.load({
         open ? h('div', { className: 'fmg-actions' },
           h(Button, { size: 'sm', variant: 'ghost', onClick: remove }, t('remove'))) : null);
     }
-    function ConnectionCard({ t, row, origins, update, onRemove, setError, dragging, over, onDragStart, onDragOver, onDrop, onDragEnd }) {
+    function ConnectionCard({ t, row, origins, update, onRemove, setError, dragging, drop, onDragStart, onDragOver, onDrop, onDragEnd }) {
       const f = field => `fmg-${row.id}-${field}`;
       const remove = () => { if (window.confirm(t('confirmRemove', { name: row.name || '?' }))) onRemove(); };
       return h('li', {
-        className: 'fmg-card', 'data-dragging': String(dragging), 'data-over': String(over),
-        onDragOver: e => { e.preventDefault(); onDragOver(); },
-        onDrop: e => { e.preventDefault(); onDrop(); },
+        className: 'fmg-card', 'data-dragging': String(dragging), 'data-drop': drop || undefined,
+        onDragOver: e => { e.preventDefault(); onDragOver(dropSide(e)); },
+        onDrop: e => { e.preventDefault(); e.stopPropagation(); onDrop(); },
       },
         h('div', { className: 'fmg-head' },
           h(CardHandle, { t, id: row.id, onDragStart, onDragEnd }),
@@ -226,13 +245,13 @@ window.__ModuleLoader__.load({
         h('div', { className: 'fmg-actions' }, h(Button, { size: 'sm', variant: 'ghost', onClick: remove }, t('remove'))));
     }
 
-    function WorkflowCard({ t, row, connections, instances, isDefault, onDefault, update, onRemove, dragging, over, onDragStart, onDragOver, onDrop, onDragEnd }) {
+    function WorkflowCard({ t, row, connections, instances, isDefault, onDefault, update, onRemove, dragging, drop, onDragStart, onDragOver, onDrop, onDragEnd }) {
       const f = field => `fmg-${row.id}-${field}`;
       const remove = () => { if (window.confirm(t('confirmRemove', { name: row.name || '?' }))) onRemove(); };
       return h('li', {
-        className: 'fmg-card', 'data-dragging': String(dragging), 'data-over': String(over),
-        onDragOver: e => { e.preventDefault(); onDragOver(); },
-        onDrop: e => { e.preventDefault(); onDrop(); },
+        className: 'fmg-card', 'data-dragging': String(dragging), 'data-drop': drop || undefined,
+        onDragOver: e => { e.preventDefault(); onDragOver(dropSide(e)); },
+        onDrop: e => { e.preventDefault(); e.stopPropagation(); onDrop(); },
       },
         h('div', { className: 'fmg-head' },
           h(CardHandle, { t, id: row.id, onDragStart, onDragEnd }),
@@ -255,8 +274,7 @@ window.__ModuleLoader__.load({
           setDraft(d => ({ ...d, [field]: d[field].map(r => r.id === id ? { ...r, ...patch } : r) }));
           if (dirty) setDirty(true);
         },
-        move: (index, delta) => { setDraft(d => ({ ...d, [field]: move(d[field], index, delta) })); setDirty(true); },
-        moveTo: (fromId, toId) => { setDraft(d => ({ ...d, [field]: reorder(d[field], fromId, toId) })); setDirty(true); },
+        moveTo: (fromId, toId, pos) => { setDraft(d => ({ ...d, [field]: reorder(d[field], fromId, toId, pos) })); setDirty(true); },
         remove: id => { setDraft(d => ({ ...d, [field]: d[field].filter(r => r.id !== id) })); setDirty(true); },
         add: row => { setDraft(d => ({ ...d, [field]: [...d[field], row] })); setDirty(true); },
       };
@@ -271,17 +289,26 @@ window.__ModuleLoader__.load({
       const [tab, setTab] = useState('providers');
       // Collapsed by default; the summary row keeps the list scannable.
       const [open, setOpen] = useState(() => new Set());
-      const [drag, setDrag] = useState({ list: null, from: null, over: null });
-      const dragProps = (list, id, api) => ({
+      const IDLE = { list: null, from: null, over: null, pos: null };
+      const [drag, setDrag] = useState(IDLE);
+      // Commit the slot the insertion line currently shows; dropping in a gap uses the same slot.
+      const commitDrop = (list, api) => {
+        if (drag.list === list && drag.from && drag.over) api.moveTo(drag.from, drag.over, drag.pos);
+        setDrag(IDLE);
+      };
+      const dragProps = (list, id, api, rows) => ({
         dragging: drag.list === list && drag.from === id,
-        over: drag.list === list && drag.over === id && drag.from !== id,
-        onDragStart: () => setDrag({ list, from: id, over: null }),
-        onDragOver: () => setDrag(d => (d.list === list && d.over === id ? d : { list, from: d.list === list ? d.from : null, over: id })),
-        onDrop: () => {
-          if (drag.list === list && drag.from && drag.from !== id) api.moveTo(drag.from, id);
-          setDrag({ list: null, from: null, over: null });
-        },
-        onDragEnd: () => setDrag({ list: null, from: null, over: null }),
+        // Only draw a line where the drop would actually move the row.
+        drop: drag.list === list && drag.over === id && drag.from && !isNoop(rows, drag.from, id, drag.pos) ? drag.pos : null,
+        onDragStart: () => setDrag({ list, from: id, over: null, pos: null }),
+        onDragOver: pos => setDrag(d => (d.list !== list ? d : d.over === id && d.pos === pos ? d : { ...d, over: id, pos })),
+        onDrop: () => commitDrop(list, api),
+        onDragEnd: () => setDrag(IDLE),
+      });
+      // The gaps between cards belong to the list, so a drop there is not lost.
+      const listProps = (list, api) => ({
+        onDragOver: e => { if (drag.list === list) e.preventDefault(); },
+        onDrop: e => { e.preventDefault(); commitDrop(list, api); },
       });
       const toggleOpen = id => setOpen(prev => {
         const next = new Set(prev);
@@ -329,19 +356,19 @@ window.__ModuleLoader__.load({
       const connectionNames = draft.connections.map(c => c.name).filter(Boolean);
       const panels = {
         providers: [
-          h('ul', { key: 'l', className: 'fmg-list' }, draft.providers.map(row => h(ProviderCard, {
+          h('ul', { key: 'l', className: 'fmg-list', ...listProps('providers', providers) }, draft.providers.map(row => h(ProviderCard, {
             key: row.id, t, row, transports: view.transports, setError,
             open: open.has(row.id), onToggle: () => toggleOpen(row.id),
-            ...dragProps('providers', row.id, providers),
+            ...dragProps('providers', row.id, providers, draft.providers),
             update: (patch, d) => providers.update(row.id, patch, d), onRemove: () => providers.remove(row.id),
           }))),
           h(React.Fragment, { key: 'e' }, empty(draft.providers)),
         ],
         workflows: [
           h('h4', { key: 'ch', style: { margin: 0 } }, t('connections')),
-          h('ul', { key: 'cl', className: 'fmg-list' }, draft.connections.map(row => h(ConnectionCard, {
+          h('ul', { key: 'cl', className: 'fmg-list', ...listProps('connections', connections) }, draft.connections.map(row => h(ConnectionCard, {
             key: row.id, t, row, origins: view.runninghubOrigins, setError,
-            ...dragProps('connections', row.id, connections),
+            ...dragProps('connections', row.id, connections, draft.connections),
             update: (patch, d) => {
               // Renaming a connection carries its workflows along.
               if (typeof patch.name === 'string') setDraft(dd => ({ ...dd, workflows: dd.workflows.map(w => w.connection === row.name ? { ...w, connection: patch.name } : w) }));
@@ -351,11 +378,11 @@ window.__ModuleLoader__.load({
           }))),
           h(React.Fragment, { key: 'ce' }, empty(draft.connections)),
           h('h4', { key: 'wh', style: { margin: '8px 0 0' } }, t('workflows')),
-          h('ul', { key: 'wl', className: 'fmg-list' }, draft.workflows.map(row => h(WorkflowCard, {
+          h('ul', { key: 'wl', className: 'fmg-list', ...listProps('workflows', workflows) }, draft.workflows.map(row => h(WorkflowCard, {
             key: row.id, t, row, connections: connectionNames, instances: view.instanceTypes,
             isDefault: draft.defaultWorkflow === row.id,
             onDefault: () => set({ defaultWorkflow: row.id }),
-            ...dragProps('workflows', row.id, workflows),
+            ...dragProps('workflows', row.id, workflows, draft.workflows),
             update: patch => workflows.update(row.id, patch), onRemove: () => workflows.remove(row.id),
           }))),
           h(React.Fragment, { key: 'we' }, empty(draft.workflows)),
