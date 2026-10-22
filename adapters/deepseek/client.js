@@ -25,11 +25,13 @@ window.__ModuleLoader__.load({
 .fmg-card[data-dragging=true]{opacity:.5}
 .fmg-card[data-over=true]{border-color:var(--dsw-alias-label-primary);border-style:dashed}
 .fmg-head{display:flex;align-items:center;gap:8px;min-height:32px}
-.fmg-rank{min-width:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}
+.fmg-toggle{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;background:0 0;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;text-align:left}
+.fmg-toggle:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px;border-radius:6px}
 .fmg-handle{cursor:grab;color:var(--dsw-alias-label-tertiary);display:inline-flex;align-items:center;flex:none;padding:2px;border-radius:6px}
 .fmg-handle:active{cursor:grabbing}
-.fmg-name{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fmg-sub{color:var(--dsw-alias-label-tertiary);font-size:12px;font-weight:400;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fmg-name{min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fmg-sub{flex:none;color:var(--dsw-alias-label-tertiary);font-size:12px;font-weight:400;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fmg-actions{display:flex;justify-content:flex-end}
 .fmg-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;align-items:start}
 .fmg-field{display:flex;flex-direction:column;gap:4px;min-width:0}
 .fmg-field>label{color:var(--dsw-alias-label-secondary);font-size:12px}
@@ -41,8 +43,8 @@ window.__ModuleLoader__.load({
 .fmg-icon{background:0 0;border:.5px solid var(--dsw-alias-border-l2);border-radius:8px;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--dsw-alias-label-secondary);flex:none}
 .fmg-icon:disabled{opacity:.35;cursor:default}
 .fmg-icon:focus-visible,.fmg-tab:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
-.fmg-bar{display:flex;gap:8px;align-items:center;position:sticky;bottom:0;z-index:1;padding:10px 0;margin-top:2px;background:var(--dsw-alias-bg-layer-2);border-top:.5px solid var(--dsw-alias-border-l4)}
-.fmg-panel{display:flex;flex-direction:column;gap:10px;padding-bottom:12px}
+.fmg-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;position:sticky;bottom:0;z-index:1;padding:10px 0;margin-top:2px;background:var(--dsw-alias-bg-layer-2);border-top:.5px solid var(--dsw-alias-border-l4)}
+.fmg-panel{display:flex;flex-direction:column;gap:10px;padding-bottom:4px}
 .fmg-grow{flex:1}
 .fmg-error{color:var(--dsw-alias-state-danger-primary,#d33)}
 .fmg-ok{color:var(--dsw-alias-label-tertiary)}
@@ -53,7 +55,7 @@ window.__ModuleLoader__.load({
       tabProviders: '提供商', tabWorkflows: '工作流', tabPaths: '目录',
       add: '添加提供商', addConnection: '添加连接', addWorkflow: '添加工作流',
       name: '名称', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API Key',
-      enable: '启用 {name}', remove: '删除', show: '显示密钥', hide: '隐藏密钥',
+      enable: '启用 {name}', remove: '移除', show: '显示密钥', hide: '隐藏密钥',
       drag: '拖动排序', expand: '展开', collapse: '折叠',
       keyEmpty: '未设置', keyEnv: '使用环境变量 {env}', default: '默认', setDefault: '设为默认',
       connections: 'RunningHub 连接', workflows: '工作流', connection: '连接', workflowId: '工作流 ID',
@@ -61,14 +63,14 @@ window.__ModuleLoader__.load({
       outputDir: '输出目录', cacheDir: '缓存目录', pathHint: '留空使用 Fmage 默认位置。',
       save: '保存', saving: '保存中…', reset: '放弃修改', reload: '重新读取', loading: '读取中…', saved: '已保存，新请求即生效。',
       dirty: '有未保存的修改', none: '暂无条目', noFile: '配置文件尚不存在，保存后自动创建。',
-      invalidJson: '{name} 的输入映射不是有效 JSON', confirmRemove: '删除“{name}”？保存后生效。',
+      invalidJson: '{name} 的输入映射不是有效 JSON', confirmRemove: '移除“{name}”？保存后生效。',
     };
     const en = {
       nav: 'Fmage images', title: 'Fmage images',
       tabProviders: 'Providers', tabWorkflows: 'Workflows', tabPaths: 'Folders',
       add: 'Add provider', addConnection: 'Add connection', addWorkflow: 'Add workflow',
       name: 'Name', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API key',
-      enable: 'Enable {name}', remove: 'Delete', show: 'Show key', hide: 'Hide key',
+      enable: 'Enable {name}', remove: 'Remove', show: 'Show key', hide: 'Hide key',
       drag: 'Drag to reorder', expand: 'Expand', collapse: 'Collapse',
       keyEmpty: 'Not set', keyEnv: 'Uses environment variable {env}', default: 'Default', setDefault: 'Make default',
       connections: 'RunningHub connections', workflows: 'Workflows', connection: 'Connection', workflowId: 'Workflow ID',
@@ -80,14 +82,12 @@ window.__ModuleLoader__.load({
     };
     const icon = d => h('svg', { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }, h('path', { d }));
     const ICON = {
-      trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
       eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
       eyeOff: 'M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
-      grip: 'M9 6h6M9 12h6M9 18h6', chevronDown: 'M6 9l6 6 6-6', chevronRight: 'M9 6l6 6-6 6',
+      grip: 'M9 6h6M9 12h6M9 18h6',
     };
-    const IconButton = ({ label, path, onClick, disabled, expanded }) => h('button', {
+    const IconButton = ({ label, path, onClick, disabled }) => h('button', {
       type: 'button', className: 'fmg-icon', 'aria-label': label, title: label, onClick, disabled,
-      ...(expanded === undefined ? {} : { 'aria-expanded': expanded }),
     }, icon(path));
 
     async function request(url, init) {
@@ -168,12 +168,6 @@ window.__ModuleLoader__.load({
     const Select = ({ id, value, options, onChange }) => h('select', { id, value, onChange: e => onChange(e.target.value) },
       (options.includes(value) ? options : [value, ...options]).map(o => h('option', { key: o, value: o }, o || '—')));
 
-    function RemoveButton({ t, name, onRemove }) {
-      return h(IconButton, {
-        label: t('remove'), path: ICON.trash,
-        onClick: () => { if (window.confirm(t('confirmRemove', { name: name || '?' }))) onRemove(); },
-      });
-    }
     /** Drag handle: the only draggable node, so text inside the card stays selectable. */
     function CardHandle({ t, id, onDragStart, onDragEnd }) {
       return h('span', {
@@ -189,7 +183,7 @@ window.__ModuleLoader__.load({
 
     function ProviderCard({ t, row, transports, update, onRemove, setError, open, onToggle, dragging, over, onDragStart, onDragOver, onDrop, onDragEnd }) {
       const f = field => `fmg-${row.id}-${field}`;
-      const rank = row.enabled ? String(row.rank) : '–';
+      const remove = () => { if (window.confirm(t('confirmRemove', { name: row.name || '?' }))) onRemove(); };
       return h('li', {
         className: 'fmg-card',
         'data-off': String(!row.enabled), 'data-dragging': String(dragging), 'data-over': String(over),
@@ -198,23 +192,25 @@ window.__ModuleLoader__.load({
       },
         h('div', { className: 'fmg-head' },
           h(CardHandle, { t, id: row.id, onDragStart, onDragEnd }),
-          h('span', { className: 'fmg-rank', 'aria-hidden': true }, rank),
-          h('span', { className: 'fmg-name' }, row.name || '—'),
-          open ? null : h('span', { className: 'fmg-sub' }, row.model),
-          h(Switch, { checked: row.enabled, label: t('enable', { name: row.name }), onChange: enabled => update({ enabled }) }),
-          h(IconButton, {
-            label: t(open ? 'collapse' : 'expand'), path: open ? ICON.chevronDown : ICON.chevronRight, onClick: onToggle, expanded: open,
-          }),
-          h(RemoveButton, { t, name: row.name, onRemove })),
+          // The title row is the disclosure control; no separate chevron.
+          h('button', {
+            type: 'button', className: 'fmg-toggle', onClick: onToggle, 'aria-expanded': open, title: t(open ? 'collapse' : 'expand'),
+          },
+            h('span', { className: 'fmg-name' }, row.name || '—'),
+            open ? null : h('span', { className: 'fmg-sub' }, row.model)),
+          h(Switch, { checked: row.enabled, label: t('enable', { name: row.name }), onChange: enabled => update({ enabled }) })),
         open ? h('div', { className: 'fmg-fields' },
           Field({ id: f('name'), label: t('name'), children: h('input', { id: f('name'), value: row.name, onChange: e => update({ name: e.target.value }) }) }),
           Field({ id: f('transport'), label: t('transport'), children: h(Select, { id: f('transport'), value: row.transport, options: transports, onChange: transport => update({ transport }) }) }),
           Field({ id: f('base'), label: t('baseUrl'), wide: true, children: h('input', { id: f('base'), value: row.base_url, spellCheck: false, onChange: e => update({ base_url: e.target.value }) }) }),
           Field({ id: f('model'), label: t('model'), wide: true, children: h('input', { id: f('model'), value: row.model, spellCheck: false, onChange: e => update({ model: e.target.value }) }) }),
-          Field({ id: f('key'), label: t('apiKey'), wide: true, children: h(SecretField, { t, row, kind: 'provider', id: f('key'), onChange: update, setError }) })) : null);
+          Field({ id: f('key'), label: t('apiKey'), wide: true, children: h(SecretField, { t, row, kind: 'provider', id: f('key'), onChange: update, setError }) })) : null,
+        open ? h('div', { className: 'fmg-actions' },
+          h(Button, { size: 'sm', variant: 'ghost', onClick: remove }, t('remove'))) : null);
     }
     function ConnectionCard({ t, row, origins, update, onRemove, setError, dragging, over, onDragStart, onDragOver, onDrop, onDragEnd }) {
       const f = field => `fmg-${row.id}-${field}`;
+      const remove = () => { if (window.confirm(t('confirmRemove', { name: row.name || '?' }))) onRemove(); };
       return h('li', {
         className: 'fmg-card', 'data-dragging': String(dragging), 'data-over': String(over),
         onDragOver: e => { e.preventDefault(); onDragOver(); },
@@ -222,16 +218,17 @@ window.__ModuleLoader__.load({
       },
         h('div', { className: 'fmg-head' },
           h(CardHandle, { t, id: row.id, onDragStart, onDragEnd }),
-          h('span', { className: 'fmg-name' }, row.name || '—'),
-          h(RemoveButton, { t, name: row.name, onRemove })),
+          h('span', { className: 'fmg-name' }, row.name || '—')),
         h('div', { className: 'fmg-fields' },
           Field({ id: f('name'), label: t('name'), children: h('input', { id: f('name'), value: row.name, onChange: e => update({ name: e.target.value }) }) }),
           Field({ id: f('base'), label: t('baseUrl'), children: h(Select, { id: f('base'), value: row.base_url, options: origins, onChange: base_url => update({ base_url }) }) }),
-          Field({ id: f('key'), label: t('apiKey'), wide: true, children: h(SecretField, { t, row, kind: 'connection', id: f('key'), onChange: update, setError }) })));
+          Field({ id: f('key'), label: t('apiKey'), wide: true, children: h(SecretField, { t, row, kind: 'connection', id: f('key'), onChange: update, setError }) })),
+        h('div', { className: 'fmg-actions' }, h(Button, { size: 'sm', variant: 'ghost', onClick: remove }, t('remove'))));
     }
 
     function WorkflowCard({ t, row, connections, instances, isDefault, onDefault, update, onRemove, dragging, over, onDragStart, onDragOver, onDrop, onDragEnd }) {
       const f = field => `fmg-${row.id}-${field}`;
+      const remove = () => { if (window.confirm(t('confirmRemove', { name: row.name || '?' }))) onRemove(); };
       return h('li', {
         className: 'fmg-card', 'data-dragging': String(dragging), 'data-over': String(over),
         onDragOver: e => { e.preventDefault(); onDragOver(); },
@@ -240,8 +237,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'fmg-head' },
           h(CardHandle, { t, id: row.id, onDragStart, onDragEnd }),
           h('span', { className: 'fmg-name' }, row.name || '—', isDefault ? ` · ${t('default')}` : ''),
-          isDefault ? null : h(Button, { size: 'sm', variant: 'outline', onClick: onDefault }, t('setDefault')),
-          h(RemoveButton, { t, name: row.name, onRemove })),
+          isDefault ? null : h(Button, { size: 'sm', variant: 'outline', onClick: onDefault }, t('setDefault'))),
         h('div', { className: 'fmg-fields' },
           Field({ id: f('name'), label: t('name'), children: h('input', { id: f('name'), value: row.name, onChange: e => update({ name: e.target.value }) }) }),
           Field({ id: f('conn'), label: t('connection'), children: h(Select, { id: f('conn'), value: row.connection, options: connections, onChange: connection => update({ connection }) }) }),
@@ -249,7 +245,8 @@ window.__ModuleLoader__.load({
           Field({ id: f('inst'), label: t('instance'), children: h(Select, { id: f('inst'), value: row.instance_type, options: instances, onChange: instance_type => update({ instance_type }) }) }),
           Field({ id: f('out'), label: t('outputs'), children: h('input', { id: f('out'), value: row.outputs, placeholder: t('outputsHint'), onChange: e => update({ outputs: e.target.value }) }) }),
           Field({ id: f('desc'), label: t('description'), children: h('input', { id: f('desc'), value: row.description, onChange: e => update({ description: e.target.value }) }) }),
-          Field({ id: f('in'), label: t('inputs'), wide: true, children: h('textarea', { id: f('in'), value: row.inputsText, spellCheck: false, onChange: e => update({ inputsText: e.target.value }) }) })));
+          Field({ id: f('in'), label: t('inputs'), wide: true, children: h('textarea', { id: f('in'), value: row.inputsText, spellCheck: false, onChange: e => update({ inputsText: e.target.value }) }) }),
+          h('div', { className: 'fmg-actions' }, h(Button, { size: 'sm', variant: 'ghost', onClick: remove }, t('remove')))));
     }
 
     function useList(setDraft, setDirty, field) {
@@ -313,28 +310,32 @@ window.__ModuleLoader__.load({
         finally { setBusy(false); }
       };
       const set = patch => { setDraft(d => ({ ...d, ...patch })); setDirty(true); };
-      let rank = 0;
+      const addProvider = () => {
+        const row = {
+          id: key(), from: null, name: '', enabled: true, transport: view.transports[0], base_url: '', model: '',
+          api_key: '', api_key_set: false, api_key_masked: '', api_key_env: '', revealed: null,
+        };
+        providers.add(row);
+        setOpen(prev => new Set(prev).add(row.id));
+      };
+      const addConnection = () => connections.add({
+        id: key(), from: null, name: '', base_url: view.runninghubOrigins[0], api_key: '', api_key_set: false, api_key_masked: '', revealed: null,
+      });
+      const addWorkflow = () => workflows.add({
+        id: key(), from: null, name: '', connection: connectionNames[0] || '', workflow_id: '', description: '', instance_type: 'default', outputs: '', inputsText: '{}',
+      });
       const tabs = [['providers', t('tabProviders')], ['workflows', t('tabWorkflows')], ['paths', t('tabPaths')]];
       const empty = list => list.length ? null : h('p', { className: 'fmg-empty' }, t('none'));
       const connectionNames = draft.connections.map(c => c.name).filter(Boolean);
       const panels = {
         providers: [
           h('ul', { key: 'l', className: 'fmg-list' }, draft.providers.map(row => h(ProviderCard, {
-            key: row.id, t, transports: view.transports, setError,
-            row: { ...row, rank: row.enabled ? ++rank : 0 },
+            key: row.id, t, row, transports: view.transports, setError,
             open: open.has(row.id), onToggle: () => toggleOpen(row.id),
             ...dragProps('providers', row.id, providers),
             update: (patch, d) => providers.update(row.id, patch, d), onRemove: () => providers.remove(row.id),
           }))),
           h(React.Fragment, { key: 'e' }, empty(draft.providers)),
-          h('div', { key: 'a' }, h(Button, { variant: 'outline', size: 'sm', onClick: () => {
-            const row = {
-              id: key(), from: null, name: '', enabled: true, transport: view.transports[0], base_url: '', model: '',
-              api_key: '', api_key_set: false, api_key_masked: '', api_key_env: '', revealed: null,
-            };
-            providers.add(row);
-            setOpen(prev => new Set(prev).add(row.id));
-          } }, t('add'))),
         ],
         workflows: [
           h('h4', { key: 'ch', style: { margin: 0 } }, t('connections')),
@@ -349,9 +350,6 @@ window.__ModuleLoader__.load({
             onRemove: () => connections.remove(row.id),
           }))),
           h(React.Fragment, { key: 'ce' }, empty(draft.connections)),
-          h('div', { key: 'ca' }, h(Button, { variant: 'outline', size: 'sm', onClick: () => connections.add({
-            id: key(), from: null, name: '', base_url: view.runninghubOrigins[0], api_key: '', api_key_set: false, api_key_masked: '', revealed: null,
-          }) }, t('addConnection'))),
           h('h4', { key: 'wh', style: { margin: '8px 0 0' } }, t('workflows')),
           h('ul', { key: 'wl', className: 'fmg-list' }, draft.workflows.map(row => h(WorkflowCard, {
             key: row.id, t, row, connections: connectionNames, instances: view.instanceTypes,
@@ -361,9 +359,6 @@ window.__ModuleLoader__.load({
             update: patch => workflows.update(row.id, patch), onRemove: () => workflows.remove(row.id),
           }))),
           h(React.Fragment, { key: 'we' }, empty(draft.workflows)),
-          h('div', { key: 'wa' }, h(Button, { variant: 'outline', size: 'sm', onClick: () => workflows.add({
-            id: key(), from: null, name: '', connection: connectionNames[0] || '', workflow_id: '', description: '', instance_type: 'default', outputs: '', inputsText: '{}',
-          }) }, t('addWorkflow'))),
         ],
         paths: [
           h('p', { key: 'i', className: 'fmg-intro' }, t('pathHint')),
@@ -382,6 +377,10 @@ window.__ModuleLoader__.load({
         }, label))),
         h('div', { role: 'tabpanel', id: `fmg-panel-${tab}`, 'aria-labelledby': `fmg-tab-${tab}`, className: 'fmg-panel' }, panels[tab]),
         h('div', { className: 'fmg-bar' },
+          // The add action belongs to the reserved button area, so nothing renders below it.
+          tab === 'providers' ? h(Button, { size: 'sm', variant: 'outline', onClick: addProvider }, t('add')) : null,
+          tab === 'workflows' ? h(Button, { size: 'sm', variant: 'outline', onClick: addConnection }, t('addConnection')) : null,
+          tab === 'workflows' ? h(Button, { size: 'sm', variant: 'outline', onClick: addWorkflow }, t('addWorkflow')) : null,
           h('span', { className: 'fmg-grow', role: 'status', 'aria-live': 'polite' },
             error ? h('span', { className: 'fmg-error' }, error) : dirty ? t('dirty') : notice ? h('span', { className: 'fmg-ok' }, notice) : null),
           h(Button, { size: 'sm', variant: 'ghost', disabled: busy, onClick: load }, dirty ? t('reset') : t('reload')),
