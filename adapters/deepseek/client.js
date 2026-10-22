@@ -34,23 +34,23 @@ window.__ModuleLoader__.load({
 .fmg-field{display:flex;flex-direction:column;gap:4px;min-width:0}
 .fmg-field>label{color:var(--dsw-alias-label-secondary);font-size:12px}
 .fmg-wide{grid-column:1/-1}
-.fmg input,.fmg select,.fmg textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:var(--dsw-alias-bg-l1,transparent);border:.5px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 8px}
+.fmg input,.fmg select,.fmg textarea{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l4);border-radius:8px;padding:6px 8px}
 .fmg textarea{min-height:90px;font-family:var(--dsw-font-mono,monospace);resize:vertical}
 .fmg input[readonly]{color:var(--dsw-alias-label-tertiary)}
 .fmg-key{display:flex;gap:6px;align-items:center}
 .fmg-icon{background:0 0;border:.5px solid var(--dsw-alias-border-l2);border-radius:8px;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--dsw-alias-label-secondary);flex:none}
 .fmg-icon:disabled{opacity:.35;cursor:default}
 .fmg-icon:focus-visible,.fmg-tab:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
-.fmg-bar{display:flex;gap:8px;align-items:center;position:sticky;bottom:0;padding:10px 0;background:var(--dsw-alias-bg-l0,var(--dsw-alias-bg-l1))}
+.fmg-bar{display:flex;gap:8px;align-items:center;position:sticky;bottom:0;z-index:1;padding:10px 0;margin-top:2px;background:var(--dsw-alias-bg-layer-2);border-top:.5px solid var(--dsw-alias-border-l4)}
+.fmg-panel{display:flex;flex-direction:column;gap:10px;padding-bottom:12px}
 .fmg-grow{flex:1}
 .fmg-error{color:var(--dsw-alias-state-danger-primary,#d33)}
 .fmg-ok{color:var(--dsw-alias-label-tertiary)}
 .fmg-empty{margin:0;color:var(--dsw-alias-label-tertiary)}
 `;
     const zh = {
-      nav: 'Fmage 生图', title: 'Fmage 生图', intro: '管理 Fmage 的提供商、RunningHub 工作流和输出目录。配置文件：',
+      nav: 'Fmage 生图', title: 'Fmage 生图',
       tabProviders: '提供商', tabWorkflows: '工作流', tabPaths: '目录',
-      providersIntro: '开启的提供商按从上到下的顺序作为优先级，第一个为默认提供商。拖动左侧手柄或使用箭头调整顺序。',
       add: '添加提供商', addConnection: '添加连接', addWorkflow: '添加工作流',
       name: '名称', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API Key',
       enable: '启用 {name}', remove: '删除', show: '显示密钥', hide: '隐藏密钥',
@@ -64,9 +64,8 @@ window.__ModuleLoader__.load({
       invalidJson: '{name} 的输入映射不是有效 JSON', confirmRemove: '删除“{name}”？保存后生效。',
     };
     const en = {
-      nav: 'Fmage images', title: 'Fmage images', intro: 'Manage Fmage providers, RunningHub workflows, and output folders. Config file: ',
+      nav: 'Fmage images', title: 'Fmage images',
       tabProviders: 'Providers', tabWorkflows: 'Workflows', tabPaths: 'Folders',
-      providersIntro: 'Enabled providers are tried top to bottom; the first one is the default. Drag the handle or use the arrows to reorder.',
       add: 'Add provider', addConnection: 'Add connection', addWorkflow: 'Add workflow',
       name: 'Name', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API key',
       enable: 'Enable {name}', remove: 'Delete', show: 'Show key', hide: 'Hide key',
@@ -198,10 +197,10 @@ window.__ModuleLoader__.load({
         onDrop: e => { e.preventDefault(); onDrop(); },
       },
         h('div', { className: 'fmg-head' },
-          h('span', { className: 'fmg-rank', 'aria-hidden': true }, rank),
           h(CardHandle, { t, id: row.id, onDragStart, onDragEnd }),
+          h('span', { className: 'fmg-rank', 'aria-hidden': true }, rank),
           h('span', { className: 'fmg-name' }, row.name || '—'),
-          open ? null : h('span', { className: 'fmg-sub' }, [row.transport, row.model].filter(Boolean).join(' · ')),
+          open ? null : h('span', { className: 'fmg-sub' }, row.model),
           h(Switch, { checked: row.enabled, label: t('enable', { name: row.name }), onChange: enabled => update({ enabled }) }),
           h(IconButton, {
             label: t(open ? 'collapse' : 'expand'), path: open ? ICON.chevronDown : ICON.chevronRight, onClick: onToggle, expanded: open,
@@ -320,7 +319,6 @@ window.__ModuleLoader__.load({
       const connectionNames = draft.connections.map(c => c.name).filter(Boolean);
       const panels = {
         providers: [
-          h('p', { key: 'i', className: 'fmg-intro' }, t('providersIntro')),
           h('ul', { key: 'l', className: 'fmg-list' }, draft.providers.map(row => h(ProviderCard, {
             key: row.id, t, transports: view.transports, setError,
             row: { ...row, rank: row.enabled ? ++rank : 0 },
@@ -376,13 +374,13 @@ window.__ModuleLoader__.load({
       };
       return h('section', { className: 'fmg', 'aria-labelledby': 'fmg-title' },
         h('h3', { id: 'fmg-title' }, t('title')),
-        h('p', { className: 'fmg-intro' }, t('intro'), h('span', { className: 'fmg-path' }, view.path)),
+        h('p', { className: 'fmg-intro' }, h('span', { className: 'fmg-path' }, view.path)),
         view.exists ? null : h('p', { className: 'fmg-intro' }, t('noFile')),
         h('div', { className: 'fmg-tabs', role: 'tablist' }, tabs.map(([id, label]) => h('button', {
           key: id, type: 'button', role: 'tab', id: `fmg-tab-${id}`, 'aria-selected': tab === id, 'aria-controls': `fmg-panel-${id}`,
           className: 'fmg-tab', onClick: () => setTab(id),
         }, label))),
-        h('div', { role: 'tabpanel', id: `fmg-panel-${tab}`, 'aria-labelledby': `fmg-tab-${tab}`, style: { display: 'flex', flexDirection: 'column', gap: 10 } }, panels[tab]),
+        h('div', { role: 'tabpanel', id: `fmg-panel-${tab}`, 'aria-labelledby': `fmg-tab-${tab}`, className: 'fmg-panel' }, panels[tab]),
         h('div', { className: 'fmg-bar' },
           h('span', { className: 'fmg-grow', role: 'status', 'aria-live': 'polite' },
             error ? h('span', { className: 'fmg-error' }, error) : dirty ? t('dirty') : notice ? h('span', { className: 'fmg-ok' }, notice) : null),
