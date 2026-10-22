@@ -222,6 +222,38 @@ class HarnessPluginsTests(unittest.TestCase):
             (root / "skills/fmage/SKILL.md").write_text("outdated", encoding="utf-8")
             self.assertIn("skills/fmage/SKILL.md", hp.sync_payload(files, root, True))
 
+    def test_sync_removes_files_the_payload_stops_shipping(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "private"
+            retired = "scripts/retired_transport.py"
+            first = hp.payload("vscode")
+            first[retired] = b"print('retired')\n"
+            marker = json.loads(first[".fmage-build.json"])
+            marker["files"] = sorted(first)
+            first[".fmage-build.json"] = hp.json_bytes(marker)
+            hp.sync_payload(first, root)
+            self.assertTrue((root / retired).is_file())
+            # The next build no longer ships it: check reports it, sync deletes it.
+            second = hp.payload("vscode")
+            self.assertIn(retired, hp.sync_payload(second, root, True))
+            hp.sync_payload(second, root)
+            self.assertFalse((root / retired).is_file())
+            self.assertEqual(hp.sync_payload(second, root, True), [])
+
+    def test_sync_drops_stray_scripts_from_a_legacy_marker(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "private"
+            legacy = hp.payload("vscode")
+            marker = json.loads(legacy[".fmage-build.json"])
+            del marker["files"]
+            legacy[".fmage-build.json"] = hp.json_bytes(marker)
+            hp.sync_payload(legacy, root)
+            stray = root / "scripts/json_images_transport.py"
+            stray.write_text("retired", encoding="utf-8")
+            self.assertIn("scripts/json_images_transport.py", hp.sync_payload(legacy, root, True))
+            hp.sync_payload(legacy, root)
+            self.assertFalse(stray.is_file())
+
     def test_jsonc_changes_preserve_unrelated_comments_strings_and_trailing_comma(self):
         cases = [
             '{\n // keep this\n "url": "https://host/,}",\n "arr": [1, 2,],\n}',

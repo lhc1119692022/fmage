@@ -149,19 +149,39 @@ def payload(host: str) -> dict[str, bytes]:
     digest = hashlib.sha256()
     for name, data in sorted(files.items()):
         digest.update(name.encode() + b"\0" + data)
-    files[".fmage-build.json"] = json_bytes({"host": host, "version": version, "sha256": digest.hexdigest()})
+    # Record the owned paths so a later build can delete files it stops shipping.
+    files[".fmage-build.json"] = json_bytes({
+        "host": host, "version": version, "sha256": digest.hexdigest(), "files": sorted(files),
+    })
     return files
+
+
+def stale_payload(files: dict[str, bytes], target: Path) -> list[str]:
+    """Files this payload owned before and no longer ships."""
+    try:
+        previous = read_json(target / ".fmage-build.json").get("files")
+    except (OSError, ValueError):
+        previous = None
+    # Markers written before the file list existed fall back to the scripts it owned.
+    owned = {name for name in previous if isinstance(name, str)} if isinstance(previous, list) else {
+        f"scripts/{path.name}" for path in (target / "scripts").glob("*.py")
+    }
+    return sorted(name for name in owned if name not in files and (target / name).is_file())
 
 
 def sync_payload(files: dict[str, bytes], target: Path, check: bool = False) -> list[str]:
     changed = [name for name, data in files.items() if not (target / name).is_file() or (target / name).read_bytes() != data]
+    stale = stale_payload(files, target)
     if not check:
+        # Drop retired files first so a removed module cannot linger in an installed copy.
+        for name in stale:
+            (target / name).unlink(missing_ok=True)
         # The marker is published last; watchers never see a partially written skill.
         for name in changed:
             if name != ".fmage-build.json":
                 atomic_write(target / name, files[name])
         atomic_write(target / ".fmage-build.json", files[".fmage-build.json"])
-    return changed
+    return changed + stale
 
 
 def build_archive(host: str, files: dict[str, bytes], out: Path) -> Path:

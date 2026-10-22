@@ -29,6 +29,8 @@ Host 半在 `connection` 服务可用时注册精确路由：`GET/PUT /api/fmage
 
 `python scripts/harness_plugins.py --build all` 导出 ZIP/TGZ，默认放在 `%LOCALAPPDATA%/Fmage/packages`。
 只打包明确列举的运行文件、示例配置、Skill 和适配器，不包含真实 providers.json、密钥、测试或本机安装记录。
+同步目录时，构建清单 `.fmage-build.json` 记录本次拥有的路径；下一次同步会删除上一版拥有、本次已不再打包的文件，
+所以移除某个模块（例如退役的传输）后，安装副本里不会留下旧文件。没有该清单的旧安装按 `scripts/*.py` 兜底清理一次。
 包仍需要 Node 和带 Pillow 的 Fmage Python 环境；本机优先使用已配置的 FMAGE_PYTHON，
 或现有 `~/.codex/runtimes/fmage-3.14/Scripts/python.exe`。不安装全局依赖、不修改 PATH。
 
