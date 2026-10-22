@@ -14,8 +14,6 @@ import urllib.request
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
-import json_images_support as banana_support
-import json_images_transport as banana
 import gemini_generate_content_transport as gemini
 import openai_images_async_transport as image808
 import openai_images_transport as openai
@@ -26,7 +24,7 @@ class TimeoutPolicyTests(unittest.TestCase):
     def test_direct_transport_arguments_use_defaults_and_preserve_explicit_values(self):
         for transport, model in (
             (openai, "gpt-image-2"), (image808, "gpt-image-2.5-sunburst"),
-            (gemini, "gemini-3-pro-image"), (banana, "nano-banana-pro"),
+            (gemini, "gemini-3-pro-image"),
         ):
             for supplied, expected in ((None, None), (60, 60), (900, 900)):
                 with self.subTest(transport=transport.__name__, supplied=supplied):
@@ -45,7 +43,6 @@ class TimeoutPolicyTests(unittest.TestCase):
         for supplied, expected in ((None, None), (60, 60), (900, 900)):
             for call in (
                 lambda: openai.perform_request(request, supplied),
-                lambda: banana_support.perform_request(request, supplied),
                 lambda: gemini.json_request("https://example.invalid", {}, "test-only-key", supplied),
                 lambda: common.download_image("https://example.invalid", supplied),
             ):
@@ -65,7 +62,6 @@ class TimeoutPolicyTests(unittest.TestCase):
                 ("openai-images", "gpt-image-2", None),
                 ("openai-images", "gpt-image-2.5-sunburst", "808"),
                 ("gemini-generate-content", "gemini-3-pro-image", None),
-                ("json-images", "nano-banana-pro", None),
             ):
                 for configured, effective in ((None, None), (60, 60), (900, 900)):
                     name = f"provider-{len(providers)}"

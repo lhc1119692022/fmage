@@ -36,7 +36,7 @@ MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
     for model, capability in CAPABILITY_SPEC["models"].items()
 }
 MODEL_ALIASES = dict(CAPABILITY_SPEC["aliases"])
-SUPPORTED_TRANSPORTS = {"json-images", "gemini-generate-content", "openai-images"}
+SUPPORTED_TRANSPORTS = {"gemini-generate-content", "openai-images"}
 
 
 def wire_models_for(contract: str) -> tuple[str, ...]:

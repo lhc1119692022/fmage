@@ -37,7 +37,7 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
 - If missing and creation is requested, copy from plugin `config/providers.example.json`.
 - Edit non-secret fields normally: active providers, transport, base_url, model, response_format,
   async_mode, auth_scheme, generation_config_format, image_field, timeout, and provider names.
-- Supported protocols are openai-images, json-images, gemini-generate-content, and midjourney.
+- Supported protocols are openai-images, gemini-generate-content, and midjourney.
   Choose the protocol from the provider's API contract, never its name or hostname.
   Old channel transport names and transport_profile are migration inputs only; do not create them.
 - Midjourney uses its independent midjourney transport with one shared v8.2 contract. Configure

@@ -29,6 +29,10 @@ if (typeof boot.evaluatePluginCompatibility === 'function') {
       Object.fromEntries(peers.map(name => [name, manifest.peerDependencies[name]])), version);
   }
 }
+// Settings page: the client module scanner needs dsh.client plus a ./client export on disk.
+assert.equal(manifest.dsh?.client?.platform, 'web', 'Fmage settings page must declare dsh.client');
+assert.equal(manifest.exports?.['./client'], './client.js');
+assert.match(readFileSync(join(installedProfile, 'node_modules/dsh-fmage/client.js'), 'utf8'), /__ModuleLoader__\.load\(\{\s*id: 'dsh-fmage'/);
 const installed = boot.loadProfileDirectory('dsh', installedProfile, anchor);
 assert(!installed.skippedBundles.some(b => b.packageName === 'dsh-fmage'), 'Installed Fmage bundle cannot resolve');
 const layer = installed.layers.find(l => l.packageName === 'dsh-fmage');

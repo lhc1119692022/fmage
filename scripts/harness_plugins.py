@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,8 +27,8 @@ DESCRIPTIONS = {
     "fmage-image-regression": "Fmage 图片退步：对本地图片执行固定的缩小、模糊与单色噪点处理；通过 regress_image 一次完成，不调用创意生图模型。",
 }
 RUNTIME_SCRIPTS = (
-    "banana_models.py", "gemini_generate_content_transport.py", "json_images_transport.py",
-    "midjourney_transport.py", "json_images_support.py", "transport_common.py",
+    "banana_models.py", "gemini_generate_content_transport.py",
+    "midjourney_transport.py", "transport_common.py",
     "openai_images_transport.py", "openai_images_async_transport.py",
 )
 CONFIG_FILES = ("providers.example.json", "workflows.example.json", "midjourney-v8.2-contract.json", "banana-model-capabilities.json", "gpt-image-model-families.json")
@@ -134,12 +135,15 @@ def payload(host: str) -> dict[str, bytes]:
         files["package.json"] = json_bytes({
             "name": "dsh-fmage", "version": version,
             "description": "Fmage：图片生成、直传生图、图片退步、RunningHub 工作流与配置；DeepSeek Harness 桌面版专用。",
-            "type": "module", "main": "index.mjs", "exports": {".": "./index.mjs", "./package.json": "./package.json"},
-            "dsh": {"bundle": {"patch": "./cordis.patch.yml"}},
+            "type": "module", "main": "index.mjs",
+            "exports": {".": "./index.mjs", "./client": "./client.js", "./package.json": "./package.json"},
+            # dsh.client publishes the settings page into the Desktop/Web client module graph.
+            "dsh": {"bundle": {"patch": "./cordis.patch.yml"}, "client": {"platform": "web"}},
             "peerDependencies": {"@deepseek-ai/dsh-skill": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/dsh-mcp-client": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/cordis": "~4.0.4"},
         })
         files["cordis.patch.yml"] = b'- insert:\n    - id: fmage\n      name: dsh-fmage\n'
-        files["index.mjs"] = (ROOT / "adapters/deepseek/index.mjs").read_bytes()
+        for name in ("index.mjs", "config-api.mjs", "client.js"):
+            files[name] = (ROOT / "adapters/deepseek" / name).read_bytes()
         files["catalog.json"] = json_bytes(catalog)
     files["mcp/launch.mjs"] = (ROOT / "adapters/launch.mjs").read_bytes()
     digest = hashlib.sha256()
@@ -375,9 +379,86 @@ def register_deepseek_source(source: Path) -> None:
     print(f"DeepSeek source runtime registered: {runtime.cwd}; Desktop profile preserved: {profile}; backup: {rollback}")
 
 
-def install_deepseek(files: dict[str, bytes], profile: Path, runtime: DeepSeekRuntime, package: Path) -> None:
-    if not deepseek_installation_errors(files, profile, package):
+def runtime_receipt(installed: Path) -> dict | None:
+    """The live plugin's heartbeat record, or None when no host has it loaded."""
+    try:
+        loaded = read_json(installed / ".fmage-runtime.json")
+    except (OSError, ValueError):
+        return None
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(loaded["heartbeatAt"].replace("Z", "+00:00"))).total_seconds()
+    except (KeyError, ValueError):
+        return None
+    return loaded if 0 <= age <= 15 else None
+
+
+def wait_for(predicate, timeout: float, interval: float = 0.5) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
+
+
+def select_bundle(profile: Path, selected: bool) -> None:
+    """Add or remove dsh-fmage in the profile's ordered bundle list."""
+    path = profile / "package.json"
+    config = read_json(path)
+    bundles = config.setdefault("dsh", {}).setdefault("profile", {}).setdefault("bundles", [])
+    if selected == ("dsh-fmage" in bundles):
         return
+    if selected:
+        bundles.append("dsh-fmage")
+    else:
+        bundles.remove("dsh-fmage")
+    atomic_write(path, json_bytes(config))
+
+
+def install_deepseek_hot(files: dict[str, bytes], profile: Path, runtime: DeepSeekRuntime, package: Path) -> str:
+    """Replace a loaded plugin through the host's own hot-reload path.
+
+    A running Desktop keeps the installed package open, so replacing the
+    directory behind its back fails and its HMR ignores dependency-only
+    manifest edits. Deselecting the bundle makes the host unload the plugin and
+    disposes its MCP process, the CLI then installs and reselects it, and the
+    host reloads the new files without a restart. Returns "hot" or "cold".
+    """
+    installed = profile / "node_modules/dsh-fmage"
+    if runtime_receipt(installed) is None:
+        return "cold"
+    version = json.loads(files[".fmage-build.json"])["version"]
+    rollback = local_root() / "backups" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    for name in ("package.json", "pnpm-lock.yaml", "cordis.patch.yml"):
+        backup(profile / name, rollback)
+    try:
+        select_bundle(profile, False)
+        if not wait_for(lambda: runtime_receipt(installed) is None, 45):
+            raise RuntimeError(
+                "DeepSeek Desktop did not unload Fmage, so nothing was replaced; "
+                f"quit the application and retry. Backup: {rollback}")
+        # The plugin's MCP child exits with its fiber; give the handle a moment to close.
+        time.sleep(2)
+        run_deepseek_pnpm(profile, runtime, package)
+    finally:
+        # Restore the selection even when the install failed, so Fmage keeps working;
+        # the reselect is also what makes the running host reload the new files.
+        try:
+            select_bundle(profile, True)
+        except (OSError, ValueError) as error:
+            print(f"DeepSeek Desktop bundle reselection failed: {error}")
+    if not wait_for(lambda: (runtime_receipt(installed) or {}).get("version") == version, 60):
+        raise RuntimeError(
+            "DeepSeek Desktop installed the package but did not activate the new version; "
+            f"reload the plugin. Backup: {rollback}")
+    failures = deepseek_installation_errors(files, profile, package)
+    if failures:
+        raise RuntimeError("; ".join(failures))
+    return "hot"
+
+
+def run_deepseek_pnpm(profile: Path, runtime: DeepSeekRuntime, package: Path) -> None:
+    """Install the TGZ into the profile; `dsh plugin` forwards to pnpm and never selects bundles."""
     rollback = local_root() / "backups" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     for name in ("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "cordis.patch.yml"):
         backup(profile / name, rollback)
@@ -390,6 +471,12 @@ def install_deepseek(files: dict[str, bytes], profile: Path, runtime: DeepSeekRu
                             cwd=runtime.cwd, env=deepseek_environment(profile), check=False)
     if result.returncode:
         raise RuntimeError(f"DeepSeek Desktop TGZ installation failed (exit {result.returncode}); backup: {rollback}")
+
+
+def install_deepseek(files: dict[str, bytes], profile: Path, runtime: DeepSeekRuntime, package: Path) -> None:
+    if not deepseek_installation_errors(files, profile, package):
+        return
+    run_deepseek_pnpm(profile, runtime, package)
     failures = deepseek_installation_errors(files, profile, package)
     if failures:
         raise RuntimeError("; ".join(failures))
@@ -407,6 +494,14 @@ def verify_deepseek_loader(runtime: DeepSeekRuntime, profile: Path) -> None:
     if result.returncode or '"nativeProfileLoader":true' not in result.stdout:
         raise RuntimeError(f"DeepSeek native profile activation probe failed: {result.stderr or result.stdout}")
     print(f"DeepSeek {runtime.kind} isolated native profile activation verified: 5 skills, 10 MCP tools (not the live desktop process)")
+    graph_temp = Path(temporary) / "client-graph"
+    graph = subprocess.run([
+        *runtime.probe, str(ROOT / "tests/deepseek_client_graph.mjs"),
+        str(runtime.anchor), str(profile), str(graph_temp),
+    ], cwd=runtime.cwd, env=environment, capture_output=True, text=True, encoding="utf-8", timeout=45, check=False)
+    if graph.returncode or '"clientModuleRow":"dsh-fmage"' not in graph.stdout:
+        raise RuntimeError(f"DeepSeek settings page is not discovered by the client module graph: {graph.stderr or graph.stdout}")
+    print("DeepSeek settings page verified: client module row dsh-fmage -> client.js")
 
 
 def deepseek_runtime_status(installed: Path, files: dict[str, bytes]) -> str:
@@ -438,6 +533,7 @@ def refresh_registered(*, check_only: bool = False) -> None:
     # Resolve the selected runtime before writing payloads or invoking an installer.
     deepseek = deepseek_runtime(state["hosts"]["deepseek"]) if "deepseek" in state["hosts"] else None
     failures = []
+    hot_verified = False
     for host, settings in state["hosts"].items():
         target = Path(settings["path"])
         files = payload(host)
@@ -460,7 +556,10 @@ def refresh_registered(*, check_only: bool = False) -> None:
             installed = profile / "node_modules/dsh-fmage"
             package = Path(state["packages"]) / f"dsh-fmage-{json.loads(files['.fmage-build.json'])['version']}.tgz"
             if not check_only:
-                install_deepseek(files, profile, deepseek, package)
+                mode = install_deepseek_hot(files, profile, deepseek, package)
+                hot_verified = hot_verified or mode == "hot"
+                print("DeepSeek Desktop install path: " + (
+                    "hot reload through the running host (no restart)" if mode == "hot" else "offline CLI (host not loaded)"))
             problems = deepseek_installation_errors(files, profile, package)
             failures.extend(problems)
             print(f"DeepSeek Desktop physical installation checked: {installed}")
@@ -470,7 +569,9 @@ def refresh_registered(*, check_only: bool = False) -> None:
     if failures:
         raise RuntimeError("; ".join(failures))
     if not check_only:
-        print("Installed artifacts updated. Existing host processes may require plugin/window reload; no active requests were interrupted.")
+        print("Installed artifacts updated through the running host's hot reload; no restart or reload was needed."
+              if hot_verified else
+              "Installed artifacts updated. Existing host processes may require plugin/window reload; no active requests were interrupted.")
 
 
 def configure_installations(deepseek_cli: Path) -> None:

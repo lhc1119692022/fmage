@@ -42,7 +42,6 @@ const CONFIG_PATH =
   join(process.env.CODEX_HOME || join(homedir(), ".codex"), "fmage", "providers.json");
 const TRANSPORT_OPENAI_IMAGES = "openai-images";
 const workflowService = createWorkflowService(CONFIG_PATH);
-const TRANSPORT_JSON_IMAGES = "json-images";
 const TRANSPORT_GEMINI_GENERATE_CONTENT = "gemini-generate-content";
 const TRANSPORT_MIDJOURNEY = "midjourney";
 const MIDJOURNEY_CONTRACT = JSON.parse(
@@ -58,17 +57,10 @@ const GPT_IMAGE_MODEL_PATTERNS = Object.fromEntries(
   )).map(([family, pattern]) => [family, new RegExp(pattern, "i")]),
 );
 const ASYNC_DEFAULT_RESPONSE_FORMAT = "url";
-const JSON_IMAGES_DEFAULT_RESPONSE_FORMAT = "url";
-const JSON_IMAGES_SUPPORTED_RESPONSE_FORMATS = new Set(["url", "b64_json"]);
 
 const TRANSPORTS = {
   [TRANSPORT_MIDJOURNEY]: join(PLUGIN_ROOT, "scripts", "midjourney_transport.py"),
   [TRANSPORT_OPENAI_IMAGES]: join(PLUGIN_ROOT, "scripts", "openai_images_transport.py"),
-  [TRANSPORT_JSON_IMAGES]: join(
-    PLUGIN_ROOT,
-    "scripts",
-    "json_images_transport.py",
-  ),
   [TRANSPORT_GEMINI_GENERATE_CONTENT]: join(
     PLUGIN_ROOT,
     "scripts",
@@ -78,7 +70,6 @@ const TRANSPORTS = {
 const EDIT_ARGUMENT_MAPPINGS = {
   [TRANSPORT_MIDJOURNEY]: { primaryImageIndex: "--primary-image-index" },
   [TRANSPORT_OPENAI_IMAGES]: { primaryImageIndex: "--primary-image-index" },
-  [TRANSPORT_JSON_IMAGES]: { primaryImageIndex: "--primary-image-index" },
   [TRANSPORT_GEMINI_GENERATE_CONTENT]: { primaryImageIndex: "--primary-image-index" },
 };
 const ASYNC_TRANSPORT_SCRIPT = join(PLUGIN_ROOT, "scripts", "openai_images_async_transport.py");
@@ -646,20 +637,6 @@ async function resolveProvider(requestedProvider, requireKey = true) {
   }
   const responseFormat = nonEmptyString(raw.response_format);
   if (responseFormat && !["url", "b64_json"].includes(responseFormat)) throw new Error("Unsupported response_format.");
-  let jsonImages = null;
-  if (transport === TRANSPORT_JSON_IMAGES) {
-    const responseFormat = nonEmptyString(raw.response_format) || JSON_IMAGES_DEFAULT_RESPONSE_FORMAT;
-    if (!JSON_IMAGES_SUPPORTED_RESPONSE_FORMATS.has(responseFormat)) {
-      throw new Error(
-        `Provider "${providerName}" has unsupported response_format "${responseFormat}". ` +
-          `Use ${Array.from(JSON_IMAGES_SUPPORTED_RESPONSE_FORMATS).map((item) => `"${item}"`).join(" or ")}.`,
-      );
-    }
-    jsonImages = {
-      responseFormat,
-      editInputModes: ["json_image_urls", "multipart_local_files"],
-    };
-  }
   if (requireKey && !apiKey) {
     throw new Error(
       `Provider "${providerName}" has no API key. Open ${normalizeDisplayPath(CONFIG_PATH)}, ` +
@@ -679,7 +656,6 @@ async function resolveProvider(requestedProvider, requireKey = true) {
     apiKey,
     apiKeyConfigured: Boolean(apiKey),
     apiKeySource: nonEmptyString(raw.api_key) ? "external_config" : apiKey ? `environment:${apiKeyEnv}` : "missing",
-    jsonImages,
     midjourney,
     config,
     raw,
@@ -832,16 +808,6 @@ function commonArguments(args, promptFile, provider) {
     appendOption(argv, "--background", args.background ?? "auto");
     appendOption(argv, "--output-format", args.output_format ?? "png");
     appendOption(argv, "--output-compression", args.output_compression);
-  } else if (provider.transport === TRANSPORT_JSON_IMAGES) {
-    appendOption(argv, "--output-format", args.output_format ?? "png");
-    appendOption(argv, "--thinking-level", args.thinking_level);
-    appendOption(
-      argv,
-      "--response-format",
-      nonEmptyString(args.response_format) ||
-        provider.jsonImages?.responseFormat ||
-        JSON_IMAGES_DEFAULT_RESPONSE_FORMAT,
-    );
   } else if (provider.transport === TRANSPORT_GEMINI_GENERATE_CONTENT) {
     appendOption(argv, "--generation-config-format", provider.raw.generation_config_format);
     appendOption(argv, "--output-format", args.output_format ?? "png");
@@ -1130,7 +1096,7 @@ function enforceModelCapabilityPolicy(args = {}, provider) {
   if (!thinkingLevel) return args;
 
   const capability = bananaModelCapability(provider);
-  const hasBananaContract = [TRANSPORT_JSON_IMAGES, TRANSPORT_GEMINI_GENERATE_CONTENT].includes(provider.transport);
+  const hasBananaContract = provider.transport === TRANSPORT_GEMINI_GENERATE_CONTENT;
   if (hasBananaContract && !capability) {
     return args;
   }
@@ -3237,12 +3203,6 @@ async function providerStatus(requestedProvider) {
     ...(provider.transport === TRANSPORT_OPENAI_IMAGES ? { response_format: provider.raw.response_format ?? (provider.asyncMode ? "url" : null), async_mode: provider.asyncMode } : {}),
     ...(provider.asyncMode ? { remote_async: { status_path: provider.midjourney ? "/v1/tasks/{task_id}" : "/images/tasks/{task_id}" } } : {}),
     ...(provider.midjourney ? { midjourney: { ...provider.midjourney, prompt_only_controls: true, native_dimensions: true } } : {}),
-    ...(provider.jsonImages
-      ? {
-          response_format: provider.jsonImages.responseFormat,
-          edit_input_modes: provider.jsonImages.editInputModes,
-        }
-      : {}),
   };
   return status;
 }

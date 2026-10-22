@@ -18,7 +18,6 @@ class PrimaryImageContractTests(unittest.TestCase):
     def test_all_edit_transports_accept_and_use_primary_image(self) -> None:
         cases = (
             ("gemini_generate_content_transport", "gemini-generate-content", "gemini-3.1-flash-image", None),
-            ("json_images_transport", "json-images", "nano-banana-2", None),
             ("openai_images_transport", "openai-images", "gpt-image-2.5", None),
             ("openai_images_async_transport", "openai-images", "gpt-image-2.5", "808"),
         )

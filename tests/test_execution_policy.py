@@ -20,7 +20,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import transport_common as common
 import openai_images_transport as openai
 import openai_images_async_transport as image808
-import json_images_support as banana
 import gemini_generate_content_transport as gemini
 
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6Z8sAAAAASUVORK5CYII=")
@@ -45,7 +44,6 @@ class RequestBudgetTests(unittest.TestCase):
         request = urllib.request.Request("https://example.invalid")
         calls = (
             lambda: openai.perform_request(request, 600),
-            lambda: banana.perform_request(request, 600),
             lambda: gemini.json_request("https://example.invalid", {}, "test-key", 600),
             lambda: common.download_image("https://example.invalid", 600),
         )

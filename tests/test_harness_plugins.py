@@ -94,19 +94,34 @@ class HarnessPluginsTests(unittest.TestCase):
             with patch.object(hp.shutil, "which", return_value="node.exe"):
                 runtime = hp.deepseek_runtime({"runtime": {"kind": "source", "root": str(source)}})
             profile = root / "real-home/profiles/desktop"
+            calls = []
+
+            def fake_run(argv, **kwargs):
+                calls.append((argv, kwargs))
+                output = (
+                    '{"clientModuleRow":"dsh-fmage","inject":[],"bundle":"client.js"}'
+                    if "deepseek_client_graph.mjs" in argv[3] else '{"nativeProfileLoader":true}')
+                return subprocess.CompletedProcess([], 0, output, "")
+
             with patch.dict(hp.os.environ, {"FMAGE_CONFIG": "real-providers.json", "ELECTRON_RUN_AS_NODE": "1"}), \
-                 patch.object(hp.subprocess, "run", return_value=subprocess.CompletedProcess(
-                     [], 0, '{"nativeProfileLoader":true}', "")) as run:
+                 patch.object(hp.subprocess, "run", side_effect=fake_run):
                 hp.verify_deepseek_loader(runtime, profile)
-            argv = run.call_args.args[0]
+            argv, kwargs = calls[0]
             self.assertEqual(argv[:3], ["node.exe", "--import", "tsx/esm"])
             self.assertEqual(argv[4], str(source / "apps/cli/package.json"))
             self.assertEqual(argv[5], str(profile))
-            environment = run.call_args.kwargs["env"]
+            environment = kwargs["env"]
             self.assertEqual(environment["DSH_HOME"], argv[6])
             self.assertEqual(environment["FMAGE_CONFIG"], str(Path(argv[6]) / "no-credentials.json"))
             self.assertNotIn("ELECTRON_RUN_AS_NODE", environment)
-            self.assertEqual(run.call_args.kwargs["cwd"], source)
+            self.assertEqual(kwargs["cwd"], source)
+            # The settings-page probe reuses the same anchor/profile with its own empty directory.
+            graph, graph_kwargs = calls[1]
+            self.assertTrue(graph[3].endswith("deepseek_client_graph.mjs"))
+            self.assertEqual(graph[4], argv[4])
+            self.assertEqual(graph[5], str(profile))
+            self.assertEqual(graph[6], str(Path(argv[6]) / "client-graph"))
+            self.assertEqual(graph_kwargs["env"], environment)
 
     def test_electron_registration_remains_supported_and_missing_cli_never_falls_back(self):
         with tempfile.TemporaryDirectory() as temp:

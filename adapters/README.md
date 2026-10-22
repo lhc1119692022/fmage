@@ -1,14 +1,31 @@
-# 三宿主适配与本机刷新
+# 宿主适配与本机刷新
 
-维护源只有仓库的 `skills/`、`mcp/`、`scripts/` 和 `config/`。
+DeepSeek Harness Desktop 是主宿主，功能与验证以它为基准；Codex 和 VS Code 为兼容宿主。
+维护源只有仓库的 `skills/`、`mcp/`、`scripts/`、`config/` 和 `adapters/`。
 Codex 使用原生 `.codex-plugin/plugin.json`；其他宿主由 `scripts/harness_plugins.py` 构建，
 不会直接修改 Codex Skill，也不会使用公共技能目录。
 
-| 宿主 | 产物 | 本机注册 |
-| --- | --- | --- |
-| Codex | 原生版本缓存 | `fmage@personal` |
-| VS Code 智能体窗口 | Agent Plugin ZIP | 用户设置 `chat.pluginLocations` 的私有目录 |
-| DeepSeek Harness Desktop | `dsh-fmage-<version>.tgz` Cordis bundle | 仅 `profiles/desktop` 的依赖与 bundles |
+| 宿主 | 角色 | 产物 | 本机注册 |
+| --- | --- | --- | --- |
+| DeepSeek Harness Desktop | 主宿主 | `dsh-fmage-<version>.tgz` Cordis bundle（含设置页） | 仅 `profiles/desktop` 的依赖与 bundles |
+| Codex | 兼容 | 原生版本缓存 | `fmage@personal` |
+| VS Code 智能体窗口 | 兼容 | Agent Plugin ZIP | 用户设置 `chat.pluginLocations` 的私有目录 |
+
+## DeepSeek 设置页
+
+`adapters/deepseek/` 包含三部分：`index.mjs`（Host 半：技能、MCP、运行心跳与配置路由）、
+`config-api.mjs`（`providers.json` 的读写、校验、掩码、备份与原子替换）和 `client.js`
+（浏览器半，经 `window.__ModuleLoader__.load` 注册，向 `settings.section` 插槽贡献「Fmage 生图」页）。
+包清单声明 `dsh.client.platform = web` 与 `exports["./client"]`，由宿主的 client 模块扫描器加载。
+浏览器半只 `require` 宿主共享的 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`，无需构建步骤。
+
+Host 半在 `connection` 服务可用时注册精确路由：`GET/PUT /api/fmage.config` 与
+`POST /api/fmage.config.reveal`。它们位于 Connection 认证栅栏内，只有 owner 会话可访问；
+读取结果只含掩码密钥，完整值仅在用户点击显示时单独返回。保存要求携带读取时的文件摘要，
+避免覆盖其他进程（如 `workflow_image set_default`）的并发修改。`tests/deepseek_config_api.test.mjs`
+与 `tests/deepseek_settings_client.test.mjs` 覆盖接口与页面注册；后者需要本机 DSH 源码的 React。
+`--check` 另外在隔离 profile 中启动真实 Cordis 服务，要求 client 模块图里有 `dsh-fmage` → `client.js` 这一行，
+因此“页面被宿主发现”是每次刷新都会复验的，而不是只看文件是否在包里。
 
 `python scripts/harness_plugins.py --build all` 导出 ZIP/TGZ，默认放在 `%LOCALAPPDATA%/Fmage/packages`。
 只打包明确列举的运行文件、示例配置、Skill 和适配器，不包含真实 providers.json、密钥、测试或本机安装记录。
@@ -20,7 +37,7 @@ DeepSeek 适配的 Harness 最低版本为 `0.2.0-rc.2`，两个 `@deepseek-ai/d
 beta、rc、正式版和更高主版本不会仅因版本号被拦截。Cordis 的独立依赖范围保持 `~4.0.4`。
 版本放行不代表已验证未来接口兼容；刷新时通过登记运行时的实际加载测试检查当前版本。
 适配器使用原生技能服务、`mcp__Fmage__*` 工具名和 Cordis 生命周期。注册五个 Skill，直传仅允许显式调用。
-Skill 文件变化后失效技能目录缓存；工具进程和插件 JS 的更新需宿主重载才能确认生效。
+Skill 文件变化后失效技能目录缓存；工具进程和插件 JS 由宿主的 HMR 按文件变化重载。
 `.fmage-runtime.json` 每五秒记录已加载版本、内容摘要、进程和 MCP 注册数量。
 检查要求心跳新鲜且摘要匹配，旧进程或旧版本记录不能作为当前运行成功的证据；记录不进入包。
 
@@ -34,7 +51,23 @@ Skill 文件变化后失效技能目录缓存；工具进程和插件 JS 的更�
 不要使用 `link:` 或 Windows Junction：本机桌面版曾在重启后无法解析链接包，实体目录对照可正常解析。
 `%LOCALAPPDATA%/Fmage/deepseek/dsh-fmage` 只作为构建副本，运行路径在 Desktop profile 内。
 后续刷新同时更新 TGZ 和实体安装内容，只操作登记的 Desktop profile，不复制到 Web profile 或宿主源码仓库。
-不使用其他 npm 安装的全局 dsh CLI，也不终止运行中的图像请求；宿主重载前，安装成功不等于运行中已生效。
+不使用其他 npm 安装的全局 dsh CLI，也不终止运行中的图像请求。
+
+### 热插拔更新（宿主运行中）
+
+Desktop 运行中时，直接在它背后替换 `node_modules/dsh-fmage` 会失败：宿主里的 MCP 子进程占着这个目录
+（插件的 `cwd` 就是包根目录），Windows 不允许重命名被占用的目录；而且 HMR 只监听 `dsh.profile.bundles`
+这类有序列表变化，单纯的依赖清单变化不会触发重新组合，所以外部 pnpm 装完也不会生效。
+
+因此宿主运行时的安装走宿主自己的重载语义：先从 `dsh.profile.bundles` 移除 `dsh-fmage`，宿主随即卸载插件、
+释放目录（插件的 disposer 会删除 `.fmage-runtime.json`，这就是卸载完成的握手信号）；再用登记的运行时执行
+`dsh plugin add`；最后把 `dsh-fmage` 放回列表，宿主重新组合并加载新版本。
+脚本等待新版本心跳出现才报告 `hot`，因此“安装成功”与“运行中已生效”一致。
+卸载后 45 秒内没等到卸载信号、或重装后 60 秒内没等到新版本，都会明确失败而不是假装成功；
+`finally` 会恢复 bundle 选择，安装失败时旧版本继续可用。宿主未加载该插件时退回原有的 CLI 安装路径。
+
+`dsh plugin` 只把参数转发给 pnpm，不会选入组合包，所以选择状态由脚本自己维护。
+刷新过程中 Fmage 的 MCP 工具会短暂下线；不要在生图请求进行时执行刷新。
 
 从 Electron 改为源码启动时，显式登记现有源码目录，再执行正常刷新：
 

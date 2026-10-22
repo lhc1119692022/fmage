@@ -1,6 +1,44 @@
-禁用 chatgpt app 原生生图 skill 并向个性化指令中添加下面的内容
+# Fmage：DeepSeek Harness Desktop 图片插件
 
-## Image Generation And Editing
+Fmage 是面向 DeepSeek Harness Desktop 的图片生成与编辑插件，提供五个原生技能
+（生图、直传生图、配置、RunningHub 工作流、图片退步）和十个 `mcp__Fmage__*` 工具。
+DeepSeek Desktop 是主要宿主，功能与验证都以它为基准；Codex 和 VS Code 智能体继续作为兼容宿主，
+构建与安装见 [宿主适配](adapters/README.md)。
+
+## DeepSeek Desktop 安装与刷新
+
+```text
+python scripts/refresh_local_runtime.py          # 刷新配置、重建并安装 Desktop 包（同时同步兼容宿主）
+python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内容和隔离加载
+```
+
+安装只写入 `~/.dsh/profiles/desktop`。Desktop 运行中时，刷新走宿主自己的热插拔：先卸载插件释放目录，
+再用登记的运行时安装，最后重新选入组合包，宿主加载新文件后由心跳确认新版本生效，无需重启，
+也不会中断正在进行的图片请求（但刷新期间 Fmage 工具会短暂下线，别在生图请求执行中刷新）。
+宿主的 HMR 只响应组合包列表变化，所以外部 pnpm 直接替换目录既不生效、还会因目录被占用而失败。
+
+## 设置页面：Fmage 生图
+
+在 Desktop 的「设置」左侧导航中打开「Fmage 生图」，即可可视化编辑 `providers.json`：
+
+- 提供商：添加、删除、启用/关闭、上移/下移调整优先级（启用列表从上到下即 `active_providers` 顺序，
+  第一个为默认）。也可以直接拖动卡片左侧手柄改顺序。卡片默认折叠，只显示优先级、名称与 transport/model
+  摘要；展开后名称与 transport 同行，其余是 Base URL、Model 和 API Key。只显示 `transport`（下拉选择）、
+  `base_url`、`model` 和 `api_key`，其他字段保存时原样保留。
+- API Key 默认以首尾字符加星号显示，点击眼睛图标才向本机 Host 读取并显示完整值；留空不改动即保留原密钥。
+- 工作流：管理 RunningHub 连接（仅允许 runninghub.cn / runninghub.ai）、工作流 ID、输出节点、实例类型、
+  输入映射，以及默认工作流。
+- 目录：`output_dir` 与 `cache_dir`，留空使用默认位置。
+
+保存前校验字段；文件在页面打开后被其他程序修改时会拒绝保存并提示重新读取。每次保存先在配置目录
+`backups/` 下备份原文件，再原子替换。页面接口 `/api/fmage.config` 位于 Desktop 的连接认证之内，
+仅本机所有者会话可访问。
+
+## Codex 兼容：个性化指令
+
+在 Codex / ChatGPT 应用中使用时，禁用原生生图 skill 并向个性化指令中添加下面的内容。
+
+### Image Generation And Editing
 
 - For raster image generation, image editing, color correction, color optimization, retouching, background changes, style transfer, or any other task that produces or edits an image, use the Fmage plugin.
 - Load and follow the `fmage:fmage` skill, then call `mcp__Fmage.generate_image`, `mcp__Fmage.edit_image`, `mcp__Fmage.generate_image_batch`, or `mcp__Fmage.edit_image_batch` as appropriate.
@@ -26,19 +64,13 @@ New image records and tool results put `provider`, `provider_transport`, `provid
 
 ## Local Runtime Refresh
 
-After changing the plugin manifest, skills, MCP server, or local transport code, refresh the installed cache and run the keyless MCP handshake:
-
-```text
-python scripts/refresh_local_runtime.py
-```
-
-Use `python scripts/refresh_local_runtime.py --check` for a read-only verification. The host keeps skill and MCP catalogs per task, so start a new Codex task after a refresh; this does not resubmit any image request.
-
-The same refresh now updates registered VS Code Agent Plugin and DeepSeek Harness Desktop
-payloads and distributable archives. They use host-private locations, never `~/.agents/skills`.
+`python scripts/refresh_local_runtime.py` refreshes the DeepSeek Desktop package first-class
+alongside the Codex plugin cache and the VS Code Agent Plugin. All of them use host-private
+locations, never `~/.agents/skills`. `--check` is read-only. Codex keeps skill and MCP catalogs
+per task, so start a new Codex task after a refresh; this does not resubmit any image request.
 See [host adapters](adapters/README.md) and [VS Code installation](vscode/README.md).
 
-Providers select a protocol: openai-images, json-images, gemini-generate-content, or midjourney.
+Providers select a protocol: openai-images, gemini-generate-content, or midjourney.
 There are no channel-specific execution profiles or model allowlists for OpenAI Images.
 For asynchronous OpenAI Images APIs, configure async_mode=true; this submits with
 async=true and polls /images/tasks/{task_id}. Configure image_field as auto,
@@ -147,7 +179,7 @@ PNG 结果同时返回宽高和格式，避免再执行命令读取尺寸。
 不能保证恢复，所以成功后应及时下载。第一版不支持视频、音频、加密工作流密码和输出重定向。
 测试使用模拟 API，不代表已对账号权限、模型环境和真实 CDN 完成验证。
 
-## VS Code adapter
+## VS Code adapter (compatibility)
 
 VS Code's MCP integration discovers Fmage tools but does not automatically load the Codex plugin manifest or its skills. Install the VS Code adapter to synchronize adapted skills and configure the local MCP server without replacing other servers:
 

@@ -55,7 +55,7 @@ class MigrateLocalConfigTests(unittest.TestCase):
             self.assertEqual(migrated["workflow_connections"]["runninghub"]["api_key"], "")
             self.assertEqual(migrate_file(path), [])
 
-    def test_migrates_legacy_json_transport_without_rewriting_model(self) -> None:
+    def test_legacy_json_transport_is_left_for_the_server_to_reject(self) -> None:
         payload = {
             "active_providers": ["EzAI-nano", "808-MJ"],
             "providers": {
@@ -85,11 +85,13 @@ class MigrateLocalConfigTests(unittest.TestCase):
         changes = migrate_payload(payload)
 
         provider = payload["providers"]["EzAI-nano"]
-        self.assertEqual(provider["transport"], "json-images")
+        # json-images was retired; the retired legacy transport is left untouched so the
+        # server reports it against the currently supported protocol list.
+        self.assertEqual(provider["transport"], "ezai-banana-images")
         self.assertEqual(provider["model"], "nano-banana-pro")
         self.assertEqual(provider["api_key"], "keep-this-secret")
         self.assertEqual(provider["response_format"], "url")
-        self.assertTrue(any("json-images" in change for change in changes))
+        self.assertFalse(any("json-images" in change for change in changes))
 
     def test_removes_midjourney_provider_and_active_entry(self) -> None:
         payload = {

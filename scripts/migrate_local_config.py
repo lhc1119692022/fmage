@@ -15,7 +15,6 @@ from typing import Any
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = Path.home() / ".codex" / "fmage" / "providers.json"
 OPENAI_IMAGES_TRANSPORT = "openai-images"
-LEGACY_EZAI_NANO_TRANSPORT = "ezai-banana-images"
 GEMINI_GENERATE_CONTENT_TRANSPORT = "gemini-generate-content"
 REMOVED_PROMPT_FIELDS = (
     "compatibility",
@@ -71,9 +70,6 @@ def _normalize_legacy_fields(provider: dict[str, Any], provider_name: str, chang
         changes.append(f"{provider_name}: migrated legacy profile to generic protocol options")
     elif legacy_profile is not None:
         raise ValueError(f"{provider_name}: unsupported legacy transport profile")
-    if provider.get("transport") == LEGACY_EZAI_NANO_TRANSPORT:
-        provider["transport"] = "json-images"
-        changes.append(f"{provider_name}: migrated legacy transport to json-images; preserved model ID")
 
     removed_fields = [field for field in REMOVED_PROMPT_FIELDS if field in provider]
     if removed_fields:
