@@ -15,7 +15,11 @@ window.__ModuleLoader__.load({
     const MAX_RETRY_COUNT = 10;
     const CSS_ID = 'dsh-fmage/settings.css';
     const CSS = `
-.fmg{max-width:760px;display:flex;flex-direction:column;gap:14px;color:var(--dsw-alias-label-primary);font-size:13px}
+/* The settings shell hands this section a fixed-height, already-scrolling
+   options column. Filling that height lets the title/tabs row and the action
+   bar stay put while only the tab panel scrolls inside. */
+.fmg{max-width:760px;display:flex;flex-direction:column;gap:14px;height:100%;color:var(--dsw-alias-label-primary);font-size:13px}
+.fmg-top{flex:none;display:flex;flex-direction:column;gap:14px;min-width:0}
 .fmg h3{margin:0;font-size:18px;font-weight:600}
 .fmg-intro{margin:0;color:var(--dsw-alias-label-tertiary)}
 .fmg-path{font-family:var(--dsw-font-mono,monospace);word-break:break-all}
@@ -56,8 +60,11 @@ window.__ModuleLoader__.load({
 .fmg-icon{background:0 0;border:.5px solid var(--dsw-alias-border-l2);border-radius:8px;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--dsw-alias-label-secondary);flex:none}
 .fmg-icon:disabled{opacity:.35;cursor:default}
 .fmg-icon:focus-visible,.fmg-tab:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
-.fmg-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0 0;margin-top:6px;background:var(--dsw-alias-bg-layer-2);border-top:.5px solid var(--dsw-alias-border-l4)}
-.fmg-panel{display:flex;flex-direction:column;gap:10px;padding-bottom:4px}
+.fmg-bar{flex:none;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0 0;margin-top:6px;background:var(--dsw-alias-bg-layer-2);border-top:.5px solid var(--dsw-alias-border-l4)}
+/* The only scroll region: flex-basis 0 keeps the shell at bay regardless of
+   how tall the tab content grows; the reserved gutter stops the cards from
+   shifting when a scrollbar appears. */
+.fmg-panel{flex:1 1 0;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:10px;padding-bottom:8px}
 .fmg-setting{display:flex;align-items:center;gap:14px;border:.5px solid var(--dsw-alias-border-l2);border-radius:12px;padding:10px 12px}
 .fmg-setting-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .fmg-setting-title{font-weight:600}
@@ -502,14 +509,18 @@ window.__ModuleLoader__.load({
         ],
       };
       return h('section', { className: 'fmg', 'aria-labelledby': 'fmg-title' },
-        h('h3', { id: 'fmg-title' }, t('title')),
-        h('p', { className: 'fmg-intro' }, h('span', { className: 'fmg-path' }, view.path)),
-        view.exists ? null : h('p', { className: 'fmg-intro' }, t('noFile')),
-        h('div', { className: 'fmg-tabs', role: 'tablist' }, tabs.map(([id, label]) => h('button', {
-          key: id, type: 'button', role: 'tab', id: `fmg-tab-${id}`, 'aria-selected': tab === id, 'aria-controls': `fmg-panel-${id}`,
-          className: 'fmg-tab', onClick: () => setTab(id),
-        }, label))),
-        h('div', { role: 'tabpanel', id: `fmg-panel-${tab}`, 'aria-labelledby': `fmg-tab-${tab}`, className: 'fmg-panel' }, panels[tab]),
+        // Title, path, and tabs stay outside the scroll region.
+        h('div', { className: 'fmg-top' },
+          h('h3', { id: 'fmg-title' }, t('title')),
+          h('p', { className: 'fmg-intro' }, h('span', { className: 'fmg-path' }, view.path)),
+          view.exists ? null : h('p', { className: 'fmg-intro' }, t('noFile')),
+          h('div', { className: 'fmg-tabs', role: 'tablist' }, tabs.map(([id, label]) => h('button', {
+            key: id, type: 'button', role: 'tab', id: `fmg-tab-${id}`, 'aria-selected': tab === id, 'aria-controls': `fmg-panel-${id}`,
+            className: 'fmg-tab', onClick: () => setTab(id),
+          }, label)))),
+        // Keyed by tab so a new panel starts at its own top instead of keeping
+        // the previous tab's scroll offset.
+        h('div', { key: tab, role: 'tabpanel', id: `fmg-panel-${tab}`, 'aria-labelledby': `fmg-tab-${tab}`, className: 'fmg-panel' }, panels[tab]),
         h('div', { className: 'fmg-bar' },
           // The add action belongs to the reserved button area, so nothing renders below it.
           tab === 'providers' ? h(Button, { size: 'sm', variant: 'outline', onClick: addProvider }, t('add')) : null,

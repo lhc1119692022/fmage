@@ -22,12 +22,12 @@ function loadClient(requireFrom) {
     Button: ({ children, ...props }) => requireFrom('react').createElement('button', props, children),
     Switch: ({ checked, label }) => requireFrom('react').createElement('button', { role: 'switch', 'aria-checked': checked, 'aria-label': label }),
   };
-  return registered.factory(id => id === '@deepseek-ai/dsh-client-ui-primitives' ? primitives : requireFrom(id));
+  return { plugin: registered.factory(id => id === '@deepseek-ai/dsh-client-ui-primitives' ? primitives : requireFrom(id)), style };
 }
 
 test('client registers the Fmage settings section and renders its loading state', { skip: !available && 'DSH checkout not found' }, () => {
   const requireReact = createRequire(join(reactDom, 'package.json'));
-  const plugin = loadClient(id => requireReact(id));
+  const { plugin, style } = loadClient(id => requireReact(id));
   assert.deepEqual([...plugin.inject], ['slots', 'locale']);
   let dictionaries; let registration; let component;
   const effects = [];
@@ -41,6 +41,12 @@ test('client registers the Fmage settings section and renders its loading state'
   assert.equal(registration.locale, 'settings.fmage');
   assert.equal(registration.label(), 'Fmage 生图');
   assert.deepEqual([...Object.keys(dictionaries.dicts.zh)].sort(), [...Object.keys(dictionaries.dicts.en)].sort());
+  // Fixed frame: the section fills the host's options column, the title/tabs
+  // and action bar stay out of the scroll region, and only the panel scrolls.
+  assert.match(style.textContent, /\.fmg\{[^}]*height:100%/);
+  assert.match(style.textContent, /\.fmg-top\{[^}]*flex:none/);
+  assert.match(style.textContent, /\.fmg-panel\{[^}]*flex:1 1 0[^}]*overflow-y:auto/);
+  assert.match(style.textContent, /\.fmg-bar\{[^}]*flex:none/);
   const { renderToString } = requireReact('react-dom/server');
   const html = renderToString(requireReact('react').createElement(component, { t: key => dictionaries.dicts.zh[key], close() {} }));
   assert.match(html, /Fmage 生图/);

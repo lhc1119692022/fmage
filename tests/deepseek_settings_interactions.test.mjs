@@ -96,6 +96,20 @@ test('settings page pins providers and lists fetched models', { skip: !available
   const cards = () => [...container.querySelectorAll('li.fmg-card')];
   assert.deepEqual(cards().map(card => card.querySelector('.fmg-name').textContent), ['First', 'Second', 'Third']);
 
+  // Fixed frame: title/tabs and the action bar are siblings of the scroll
+  // panel, so scrolling the list cannot carry them away.
+  const section = container.querySelector('section.fmg');
+  const top = section.querySelector('.fmg-top');
+  const panel = section.querySelector('.fmg-panel');
+  const bar = section.querySelector('.fmg-bar');
+  assert.ok(top && panel && bar, 'section keeps a top block, a scroll panel, and an action bar');
+  assert.equal(top.nextElementSibling, panel, 'the scroll panel follows the top block');
+  assert.equal(panel.nextElementSibling, bar, 'the action bar sits outside the scroll panel');
+  assert.equal(panel.getAttribute('role'), 'tabpanel');
+  assert.equal(top.querySelectorAll('button[role="tab"]').length, 4);
+  assert.equal(bar.parentElement, section);
+  assert.ok(panel.contains(cards()[0]), 'cards live inside the scroll panel');
+
   const pin = cards()[1].querySelector('button[title="置顶"]');
   assert.ok(pin, 'second provider has a pin button');
   assert.equal(pin.disabled, false);
