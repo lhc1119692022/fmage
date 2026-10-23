@@ -144,7 +144,7 @@ class HarnessPluginsTests(unittest.TestCase):
             files = hp.payload('deepseek')
             self.assertIn('NOT verified', hp.deepseek_runtime_status(root, files))
             receipt = {**json.loads(files['.fmage-build.json']), 'pid': 123,
-                       'skillCount': 5, 'toolCount': 10, 'mcpReady': True,
+                       'skillCount': 5, 'toolCount': hp.MCP_TOOL_COUNT, 'mcpReady': True,
                        'heartbeatAt': datetime.now(timezone.utc).isoformat()}
             hp.atomic_write(root / '.fmage-runtime.json', hp.json_bytes(receipt))
             self.assertIn('live activation verified', hp.deepseek_runtime_status(root, files))
@@ -171,6 +171,65 @@ class HarnessPluginsTests(unittest.TestCase):
             self.assertEqual(hp.deepseek_installation_errors(files, profile, package), [])
             (installed / 'index.mjs').write_text('stale', encoding='utf-8')
             self.assertTrue(hp.deepseek_installation_errors(files, profile, package))
+
+    def test_hot_unload_cycles_the_bundle_selection_when_a_notification_is_missed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            profile = Path(temp)
+            installed = profile / "node_modules/dsh-fmage"
+            selection: list[bool] = []
+            deselects = {"count": 0}
+            loaded = {"value": True}
+
+            def select_bundle(_profile, selected):
+                selection.append(selected)
+                if selected:
+                    loaded["value"] = True
+                    return
+                deselects["count"] += 1
+                # The first deselect is missed; only a fresh list change unloads.
+                loaded["value"] = deselects["count"] < 2
+
+            with patch.object(hp, "select_bundle", side_effect=select_bundle), \
+                 patch.object(hp, "wait_for", side_effect=lambda predicate, timeout, interval=0.5: predicate()), \
+                 patch.object(hp, "runtime_receipt", side_effect=lambda _i: {"version": "old"} if loaded["value"] else None), \
+                 patch("builtins.print"):
+                hp.unload_deepseek_bundle(profile, installed)
+            self.assertEqual(selection, [False, True, False])
+
+            loaded["value"] = True
+            with patch.object(hp, "select_bundle", side_effect=lambda _p, _s: None), \
+                 patch.object(hp, "wait_for", side_effect=lambda predicate, timeout, interval=0.5: predicate()), \
+                 patch.object(hp, "runtime_receipt", side_effect=lambda _i: {"version": "old"}), \
+                 patch("builtins.print"):
+                with self.assertRaisesRegex(RuntimeError, "did not unload Fmage after three deselections"):
+                    hp.unload_deepseek_bundle(profile, installed)
+
+    def test_hot_activation_retries_once_before_reporting_a_stale_host(self):
+        with tempfile.TemporaryDirectory() as temp:
+            profile = Path(temp)
+            installed = profile / "node_modules/dsh-fmage"
+            selection: list[bool] = []
+            loaded = {"version": "old"}
+
+            def select_bundle(_profile, selected):
+                selection.append(selected)
+                loaded["version"] = "old"
+                if selected:
+                    loaded["version"] = "new"
+
+            with patch.object(hp, "select_bundle", side_effect=select_bundle), \
+                 patch.object(hp, "wait_for", side_effect=lambda predicate, timeout, interval=0.5: predicate()), \
+                 patch.object(hp, "runtime_receipt", side_effect=lambda _i: {"version": loaded["version"]}), \
+                 patch("builtins.print"):
+                self.assertTrue(hp.activate_deepseek_version(profile, installed, "new"))
+            self.assertEqual(selection, [False, True])
+
+            loaded["version"] = "old"
+            with patch.object(hp, "select_bundle", side_effect=lambda _p, _s: None), \
+                 patch.object(hp, "wait_for", side_effect=lambda predicate, timeout, interval=0.5: predicate()), \
+                 patch.object(hp, "runtime_receipt", side_effect=lambda _i: {"version": "old"}), \
+                 patch("builtins.print"):
+                self.assertFalse(hp.activate_deepseek_version(profile, installed, "new"))
 
     def test_private_skill_invocation_and_descriptions(self):
         for host in ("vscode", "deepseek"):

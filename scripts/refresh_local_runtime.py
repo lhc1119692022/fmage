@@ -22,8 +22,6 @@ MAX_DEFAULT_PROMPTS = 3
 EXPECTED_MCP_TOOL_NAMES = {
     "workflow_image",
     "regress_image",
-    "trace_image_job_plan",
-    "probe_image_generation",
     "generate_image",
     "generate_image_batch",
     "edit_image",

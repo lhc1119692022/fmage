@@ -2140,13 +2140,13 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
   const outputDir = finalOutputRoot(args, provider);
   const taskId = createTaskId(`${command}_batch`);
   const batchRoot = join(root, taskId);
-  const needsLatestImages =
-    command === "edit" && (args.use_latest || jobs.some((job) => Boolean(job.use_latest)));
+  const jobWantsLatest = (job) => Boolean({ ...args, ...job }.use_latest);
+  const needsLatestImages = command === "edit" && jobs.some(jobWantsLatest);
   const latestImages = needsLatestImages ? await loadLatestImages(provider.config) : [];
   const normalizedJobs = jobs.map((job) => {
     let jobArgs = enforceDeliveryPolicy(jobArgsFromBatchArgs(args, job), provider);
     jobArgs = enforceModelCapabilityPolicy(jobArgs, provider);
-    if (command === "edit" && latestImages.length && (args.use_latest || jobArgs.use_latest)) {
+    if (command === "edit" && latestImages.length && jobArgs.use_latest) {
       const images = Array.isArray(jobArgs.images) ? jobArgs.images : [];
       jobArgs.images = [...images, ...latestImages];
       jobArgs.use_latest = false;
@@ -2695,8 +2695,26 @@ function commonProperties(editing = false) {
   return properties;
 }
 
+// Per-job copies of these fields keep only type/enum/range; the same-named
+// top-level field carries the full rule. Consent and thinking_level keep theirs.
+const COMPACT_JOB_FIELDS = [
+  "size", "aspect", "resolution", "quality", "moderation", "background",
+  "output_format", "output_compression", "response_format",
+];
+
+function batchJobsDescription(editing) {
+  return "Independent one-image jobs. Each job inherits omitted top-level fields; a field set in a job replaces " +
+    "the top-level value" + (editing ? " (job images replace shared images, not append)" : "") + ". A per-job output_format or " +
+    "output_compression that differs from the top level needs its own *_user_requested. " +
+    "Job fields follow the rules described on the same-named top-level fields.";
+}
+
 function jobProperties(editing = false) {
   const properties = { ...commonProperties(editing) };
+  for (const field of COMPACT_JOB_FIELDS) {
+    const { description: _description, ...constraints } = properties[field];
+    properties[field] = constraints;
+  }
   delete properties.prompt_mode;
   delete properties.provider;
   delete properties.output_dir;
@@ -2732,12 +2750,16 @@ function batchProperties(editing = false) {
       ],
       description: "Reference images shared by every edit job unless overridden per job.",
     };
+    properties.use_latest = {
+      type: "boolean",
+      description: "Use the latest output in every job that does not set its own use_latest.",
+    };
   }
   properties.jobs = {
     type: "array",
     minItems: 1,
     maxItems: 10,
-    description: "Independent one-image jobs.",
+    description: batchJobsDescription(editing),
     items: {
       type: "object",
       properties: jobProperties(editing),
@@ -3015,7 +3037,11 @@ function toolDefinitions() {
     },
   ];
 
-  return [...tools, ...workflowTools];
+  // Hidden diagnostics stay callable by name; only their per-session schemas are dropped.
+  return [
+    ...tools.filter((tool) => tool.name !== TOOL_TRACE_PLAN && tool.name !== TOOL_PROBE),
+    ...workflowTools,
+  ];
 }
 
 function resultText(result, options = {}) {

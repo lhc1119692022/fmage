@@ -11,6 +11,8 @@ import { createConfigApi, registerConfigRoutes } from './config-api.mjs';
 export const name = 'fmage';
 export const inject = ['skills', 'tools'];
 const root = fileURLToPath(new URL('./', import.meta.url));
+// Ten server tools minus the two diagnostics the server no longer lists.
+const EXPECTED_TOOL_COUNT = 8;
 
 export async function apply(ctx) {
   ctx.skills.registerProvider(control => {
@@ -51,7 +53,7 @@ export async function apply(ctx) {
   const report = () => {
     const toolCount = [...ctx.tools.view().visible.keys()].filter(n => n.startsWith('mcp__Fmage__')).length;
     writeFileSync(receipt + '.tmp', JSON.stringify({ version, sha256, pid: process.pid, loadedAt,
-      heartbeatAt: new Date().toISOString(), skillCount: 5, toolCount, mcpReady: toolCount === 10 }));
+      heartbeatAt: new Date().toISOString(), skillCount: 5, toolCount, mcpReady: toolCount === EXPECTED_TOOL_COUNT }));
     renameSync(receipt + '.tmp', receipt);
   };
   report();

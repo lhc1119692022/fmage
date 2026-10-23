@@ -21,11 +21,11 @@ STANDARD_IMAGE_TOOLS = {
 BASELINE_TOOL_NAMES = STANDARD_IMAGE_TOOLS | {
     "workflow_image",
     "regress_image",
-    "trace_image_job_plan",
-    "probe_image_generation",
     "get_image_task_status",
     "get_provider_status",
 }
+# Callable by name but deliberately absent from tools/list.
+HIDDEN_DIAGNOSTIC_TOOLS = {"trace_image_job_plan", "probe_image_generation"}
 BASELINE_INSTRUCTIONS = (
     "For Fmage 工作流 or configured workflow requests, use fmage-workflow and workflow_image; the following generation prompt rules apply only to ordinary generation/edit entries. "
     "Select the image skill before interpreting the request or inspecting attachments. Use fmage by default; "
@@ -223,12 +223,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual(prompt_mode["default"], "expand")
         batch_job_properties = tools["generate_image_batch"]["inputSchema"]["properties"]["jobs"]["items"]["properties"]
         self.assertNotIn("prompt_mode", batch_job_properties)
-
-        trace_properties = tools["trace_image_job_plan"]["inputSchema"]["properties"]
-        self.assertIn("prompts", trace_properties)
-        self.assertIn("input_images", trace_properties)
-        self.assertNotIn("revised_prompts", trace_properties)
-        self.assertNotIn("reference_images", trace_properties)
+        self.assertFalse(HIDDEN_DIAGNOSTIC_TOOLS & set(tools))
 
         initialize = call_server(
             config,
@@ -544,6 +539,48 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertNotIn("output_compression", result["request"])
         self.assertEqual(result["request"]["prompt"], "A box labelled Max.")
 
+    def test_batch_jobs_document_inheritance_and_keep_only_gate_descriptions(self) -> None:
+        tools = tool_map(call_server(self.clean_config(), "tools/list", {}))
+        compact_fields = (
+            "size", "aspect", "resolution", "quality", "moderation", "background",
+            "output_format", "output_compression", "response_format",
+        )
+        for name in ("generate_image_batch", "edit_image_batch"):
+            properties = tools[name]["inputSchema"]["properties"]
+            jobs = properties["jobs"]
+            self.assertIn("inherits omitted top-level fields", jobs["description"])
+            self.assertIn("same-named top-level fields", jobs["description"])
+            if name == "edit_image_batch":
+                self.assertIn("job images replace shared images, not append", jobs["description"])
+            job_fields = jobs["items"]["properties"]
+            # The duplicated delivery rules live on the top-level field; the job keeps the constraints.
+            for field in compact_fields:
+                self.assertNotIn("description", job_fields[field])
+                self.assertEqual(
+                    job_fields[field],
+                    {key: value for key, value in properties[field].items() if key != "description"},
+                )
+            for field in (
+                "prompt", "thinking_level", "resolution_user_requested", "quality_user_requested",
+                "output_format_user_requested", "output_compression_user_requested",
+                "thinking_level_user_requested",
+            ):
+                self.assertIn("description", job_fields[field])
+            # Every operating host sees the same text, so the rules must still ship with their field.
+            self.assertIn("8K超高分辨率", properties["resolution"]["description"])
+            self.assertIn("Midjourney", properties["output_format"]["description"])
+            self.assertIn("Never infer a format change from generation quality", properties["output_format"]["description"])
+
+    def test_hidden_diagnostics_stay_callable_by_name(self) -> None:
+        config = self.clean_config()
+        self.assertFalse(HIDDEN_DIAGNOSTIC_TOOLS & set(tool_map(call_server(config, "tools/list", {}))))
+        trace = call_server(config, "tools/call", {
+            "name": "trace_image_job_plan",
+            "arguments": {"image_job_plan": {}, "image_tool": "generate_image", "prompts": ["x"]},
+        })
+        self.assertNotIn("error", trace)
+        self.assertEqual(trace["result"]["structuredContent"]["prompts"], ["x"])
+
     def test_visual_resolution_language_is_documented_in_tool_schema(self) -> None:
         config = self.clean_config()
         tool = tool_map(call_server(config, "tools/list", {}))["generate_image"]
@@ -618,6 +655,34 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertEqual(result["completed_count"], 3)
         self.assertEqual(result["failed_count"], 0)
         self.assertEqual([job["status"] for job in result["job_statuses"]], ["completed"] * 3)
+
+    def test_edit_batch_use_latest_is_a_default_each_job_can_turn_off(self) -> None:
+        config = self.clean_config()
+        properties = tool_map(call_server(config, "tools/list", {}))["edit_image_batch"]["inputSchema"]["properties"]
+        self.assertIn("use_latest", properties)
+        self.assertNotIn(
+            "use_latest",
+            tool_map(call_server(config, "tools/list", {}))["generate_image_batch"]["inputSchema"]["properties"],
+        )
+
+        # No latest.json exists here, so a job that turns the default off must not read it.
+        overridden = self.call_image_tool(
+            config,
+            name="edit_image_batch",
+            use_latest=True,
+            jobs=[{"prompt": "job one", "use_latest": False}],
+        )
+        self.assertNotIn("error", overridden, json.dumps(overridden))
+        self.assertNotIn("use_latest_resolved_count", overridden["result"]["structuredContent"]["request"])
+
+        inherited = self.call_image_tool(
+            config,
+            name="edit_image_batch",
+            use_latest=True,
+            jobs=[{"prompt": "job one"}],
+        )
+        self.assertIn("error", inherited)
+        self.assertIn("latest.json", json.dumps(inherited))
 
     def test_image_2_5_preserves_explicit_extended_quality(self) -> None:
         for model in (

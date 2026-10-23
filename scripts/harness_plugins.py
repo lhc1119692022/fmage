@@ -35,6 +35,9 @@ CONFIG_FILES = ("providers.example.json", "workflows.example.json", "midjourney-
 # Harness checks dsh peers with includePrerelease=True. Keep the oldest
 # supported runtime as the floor, allowing future releases and prereleases.
 DEEPSEEK_PEER_VERSIONS = ">=0.2.0-rc.2"
+# The server lists eight tools: trace_image_job_plan and probe_image_generation
+# stay callable by name but are no longer part of the advertised surface.
+MCP_TOOL_COUNT = 8
 
 
 def local_root() -> Path:
@@ -435,6 +438,42 @@ def select_bundle(profile: Path, selected: bool) -> None:
     atomic_write(path, json_bytes(config))
 
 
+def unload_deepseek_bundle(profile: Path, installed: Path, attempts: int = 3, per_attempt: float = 20) -> None:
+    """Deselect the bundle until the running host has disposed it.
+
+    HMR normally unloads within a couple of seconds, but a missed manifest
+    notification leaves the old selection running. Cycling the selection emits
+    a real bundle-list change each time, unlike rewriting the same deselection.
+    """
+    for attempt in range(1, attempts + 1):
+        select_bundle(profile, False)
+        if wait_for(lambda: runtime_receipt(installed) is None, per_attempt):
+            return
+        print(f"DeepSeek Desktop kept Fmage loaded after deselect (attempt {attempt}/{attempts}); cycling the bundle selection.")
+        select_bundle(profile, True)
+        wait_for(lambda: runtime_receipt(installed) is not None, per_attempt)
+    raise RuntimeError(
+        "DeepSeek Desktop did not unload Fmage after three deselections, so nothing was replaced; "
+        f"quit the application and retry. Backup: {local_root() / 'backups'}")
+
+
+def activate_deepseek_version(profile: Path, installed: Path, version: str, attempts: int = 2, per_attempt: float = 45) -> bool:
+    """Wait for the running host to load the installed version, retriggering once if needed."""
+    def active() -> bool:
+        return (runtime_receipt(installed) or {}).get("version") == version
+
+    if wait_for(active, per_attempt):
+        return True
+    for _ in range(attempts - 1):
+        print("DeepSeek Desktop did not activate the installed version; cycling the bundle selection.")
+        select_bundle(profile, False)
+        wait_for(lambda: runtime_receipt(installed) is None, 20)
+        select_bundle(profile, True)
+        if wait_for(active, per_attempt):
+            return True
+    return False
+
+
 def install_deepseek_hot(files: dict[str, bytes], profile: Path, runtime: DeepSeekRuntime, package: Path) -> str:
     """Replace a loaded plugin through the host's own hot-reload path.
 
@@ -452,11 +491,7 @@ def install_deepseek_hot(files: dict[str, bytes], profile: Path, runtime: DeepSe
     for name in ("package.json", "pnpm-lock.yaml", "cordis.patch.yml"):
         backup(profile / name, rollback)
     try:
-        select_bundle(profile, False)
-        if not wait_for(lambda: runtime_receipt(installed) is None, 45):
-            raise RuntimeError(
-                "DeepSeek Desktop did not unload Fmage, so nothing was replaced; "
-                f"quit the application and retry. Backup: {rollback}")
+        unload_deepseek_bundle(profile, installed)
         # The plugin's MCP child exits with its fiber; give the handle a moment to close.
         time.sleep(2)
         run_deepseek_pnpm(profile, runtime, package)
@@ -467,10 +502,10 @@ def install_deepseek_hot(files: dict[str, bytes], profile: Path, runtime: DeepSe
             select_bundle(profile, True)
         except (OSError, ValueError) as error:
             print(f"DeepSeek Desktop bundle reselection failed: {error}")
-    if not wait_for(lambda: (runtime_receipt(installed) or {}).get("version") == version, 60):
+    if not activate_deepseek_version(profile, installed, version):
         raise RuntimeError(
             "DeepSeek Desktop installed the package but did not activate the new version; "
-            f"reload the plugin. Backup: {rollback}")
+            f"quit the application and retry. Backup: {rollback}")
     failures = deepseek_installation_errors(files, profile, package)
     if failures:
         raise RuntimeError("; ".join(failures))
@@ -513,7 +548,7 @@ def verify_deepseek_loader(runtime: DeepSeekRuntime, profile: Path) -> None:
             capture_output=True, text=True, encoding="utf-8", timeout=45, check=False)
     if result.returncode or '"nativeProfileLoader":true' not in result.stdout:
         raise RuntimeError(f"DeepSeek native profile activation probe failed: {result.stderr or result.stdout}")
-    print(f"DeepSeek {runtime.kind} isolated native profile activation verified: 5 skills, 10 MCP tools (not the live desktop process)")
+    print(f"DeepSeek {runtime.kind} isolated native profile activation verified: 5 skills, {MCP_TOOL_COUNT} MCP tools (not the live desktop process)")
     graph_temp = Path(temporary) / "client-graph"
     graph = subprocess.run([
         *runtime.probe, str(ROOT / "tests/deepseek_client_graph.mjs"),
@@ -536,9 +571,9 @@ def deepseek_runtime_status(installed: Path, files: dict[str, bytes]) -> str:
             return "NOT verified: activation heartbeat is stale"
         if loaded.get("sha256") != expected["sha256"] or loaded.get("version") != expected["version"]:
             return "RELOAD REQUIRED: desktop still has a previous payload loaded"
-        if loaded.get("skillCount") != 5 or loaded.get("toolCount") != 10 or not loaded.get("mcpReady"):
+        if loaded.get("skillCount") != 5 or loaded.get("toolCount") != MCP_TOOL_COUNT or not loaded.get("mcpReady"):
             return "NOT ready: skill/MCP registration is incomplete"
-        return f"live activation verified: {loaded['version']}, pid={loaded['pid']}, 5 skills, 10 tools"
+        return f"live activation verified: {loaded['version']}, pid={loaded['pid']}, 5 skills, {MCP_TOOL_COUNT} tools"
     except (OSError, ValueError, KeyError):
         return "NOT verified: invalid or legacy activation receipt"
 

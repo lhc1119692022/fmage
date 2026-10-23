@@ -65,8 +65,10 @@ try {
   assert.equal(skills.length, 5);
   assert.equal(skills.find(s => s.name === 'fmage-direct').invocation.modelInvocable, false);
   const names = [...ctx.tools.view().visible.keys()].filter(n => n.startsWith('mcp__Fmage__'));
-  assert.equal(names.length, 10);
+  assert.equal(names.length, 8);
   assert(names.includes('mcp__Fmage__generate_image'));
+  assert(!names.includes('mcp__Fmage__probe_image_generation'));
+  assert(!names.includes('mcp__Fmage__trace_image_job_plan'));
   assert(names.includes('mcp__Fmage__regress_image'));
   const receipt = JSON.parse(readFileSync(join(target, '.fmage-runtime.json'), 'utf8'));
   assert.equal(receipt.pid, process.pid);

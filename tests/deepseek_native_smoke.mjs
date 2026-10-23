@@ -43,8 +43,10 @@ try {
     assert(skill.content.includes('DeepSeek Harness 桌面版适配'));
     assert(!skill.content.includes('$fmage'));
   }
-  assert.equal(tools.size, 10);
+  assert.equal(tools.size, 8);
   assert(tools.has('mcp__Fmage__generate_image'));
+  assert(!tools.has('mcp__Fmage__probe_image_generation'));
+  assert(!tools.has('mcp__Fmage__trace_image_job_plan'));
   assert(tools.has('mcp__Fmage__regress_image'));
   console.log(JSON.stringify({ nativeDesktopBridge: true, skillCount: catalog.length, tools: [...tools.keys()] }));
 } finally {
