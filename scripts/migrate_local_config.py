@@ -23,6 +23,8 @@ REMOVED_PROMPT_FIELDS = (
     "prompt_policy",
 )
 REMOVED_TRANSPORTS = {"zenmux-vertex"}
+# A fresh retry is a new paid provider request, so it stays opt-in.
+RETRY_DEFAULTS = {"retry_on_failure": False, "retry_count": 2}
 
 
 def resolve_config_path(explicit: str | None = None) -> Path:
@@ -129,6 +131,11 @@ def migrate_payload(payload: dict[str, Any]) -> list[str]:
     if isinstance(active_provider, str) and active_provider in removed_provider_names:
         payload["active_provider"] = None
         changes.append(f'removed "{active_provider}" from active_provider')
+
+    for name, value in RETRY_DEFAULTS.items():
+        if name not in payload:
+            payload[name] = value
+            changes.append(f"added retry configuration field: {name}")
 
     return changes
 

@@ -19,10 +19,12 @@ Codex 使用原生 `.codex-plugin/plugin.json`；其他宿主由 `scripts/harnes
 包清单声明 `dsh.client.platform = web` 与 `exports["./client"]`，由宿主的 client 模块扫描器加载。
 浏览器半只 `require` 宿主共享的 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`，无需构建步骤。
 
-Host 半在 `connection` 服务可用时注册精确路由：`GET/PUT /api/fmage.config` 与
-`POST /api/fmage.config.reveal`。它们位于 Connection 认证栅栏内，只有 owner 会话可访问；
-读取结果只含掩码密钥，完整值仅在用户点击显示时单独返回。保存要求携带读取时的文件摘要，
-避免覆盖其他进程（如 `workflow_image set_default`）的并发修改。`tests/deepseek_config_api.test.mjs`
+Host 半在 `connection` 服务可用时注册精确路由：`GET/PUT /api/fmage.config`、
+`POST /api/fmage.config.reveal` 与 `POST /api/fmage.models`。它们位于 Connection 认证栅栏内，
+只有 owner 会话可访问；读取结果只含掩码密钥，完整值仅在用户点击显示时单独返回。模型列表接口
+按当前表单的 Base URL / API Key 向上游请求模型清单，未保存的改动也可直接拉取；如果未填写新密钥，
+Host 使用已存条目或 `api_key_env` 指向的环境变量，且不会把密钥回传给浏览器。保存要求携带读取时的
+文件摘要，避免覆盖其他进程（如 `workflow_image set_default`）的并发修改。`tests/deepseek_config_api.test.mjs`
 与 `tests/deepseek_settings_client.test.mjs` 覆盖接口与页面注册；后者需要本机 DSH 源码的 React。
 `--check` 另外在隔离 profile 中启动真实 Cordis 服务，要求 client 模块图里有 `dsh-fmage` → `client.js` 这一行，
 因此“页面被宿主发现”是每次刷新都会复验的，而不是只看文件是否在包里。

@@ -111,7 +111,7 @@ def payload(host: str) -> dict[str, bytes]:
     if host not in ("vscode", "deepseek"):
         raise ValueError(f"Unknown harness: {host}")
     files: dict[str, bytes] = {}
-    for directory, names in (("mcp", ("server.mjs", "workflows.mjs", "timeout-policy.mjs")),
+    for directory, names in (("mcp", ("server.mjs", "workflows.mjs", "timeout-policy.mjs", "retry-policy.mjs")),
                              ("scripts", RUNTIME_SCRIPTS), ("config", CONFIG_FILES)):
         for name in names:
             files[f"{directory}/{name}"] = (ROOT / directory / name).read_bytes()

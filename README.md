@@ -21,18 +21,40 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 
 在 Desktop 的「设置」左侧导航中打开「Fmage 生图」，即可可视化编辑 `providers.json`：
 
-- 提供商：添加、删除、启用/关闭、上移/下移调整优先级（启用列表从上到下即 `active_providers` 顺序，
-  第一个为默认）。也可以直接拖动卡片左侧手柄改顺序。卡片默认折叠，只显示优先级、名称与 transport/model
-  摘要；展开后名称与 transport 同行，其余是 Base URL、Model 和 API Key。只显示 `transport`（下拉选择）、
-  `base_url`、`model` 和 `api_key`，其他字段保存时原样保留。
+- 提供商：添加、删除、启用/关闭，拖动或置顶调整优先级（启用列表从上到下即 `active_providers` 顺序，
+  第一个为默认）。也可以直接拖动卡片左侧手柄改顺序，或点卡片右侧的置顶按钮把该提供商移到最前。
+  卡片默认折叠，只显示优先级、名称与 transport/model 摘要；展开后名称与 transport 同行，其余是
+  Base URL、Model 和 API Key。只显示 `transport`（下拉选择）、`base_url`、`model` 和 `api_key`，
+  其他字段保存时原样保留。
+- Model 输入框右侧的拉取按钮会按当前 Base URL 和 API Key 请求上游模型列表，结果显示在输入框下方；
+  点击某个模型即可切换，输入框本身仍可手动编辑。上游不可用或返回 404 时会明确提示，不会阻塞手工填写。
 - API Key 默认以首尾字符加星号显示，点击眼睛图标才向本机 Host 读取并显示完整值；留空不改动即保留原密钥。
 - 工作流：管理 RunningHub 连接（仅允许 runninghub.cn / runninghub.ai）、工作流 ID、输出节点、实例类型、
   输入映射，以及默认工作流。
 - 目录：`output_dir` 与 `cache_dir`，留空使用默认位置。
 
+### 生成失败重试
+
+`providers.json` 顶层提供两个字段，控制一次生图失败后是否重新提交，以及最多重新提交几次：
+
+```json
+{
+  "retry_on_failure": false,
+  "retry_count": 2
+}
+```
+
+`retry_on_failure` 是开关，默认 `false`；`retry_count` 是额外尝试次数（0–10），默认 `2`。
+每次重试都会启动一次**全新的上游请求**，不会轮询或复用已经失败的请求结果。重试只针对限流、
+并发不足、网关 5xx、超时和网络中断等临时失败；鉴权、参数校验等永久失败会立即返回。
+已经拿到远端任务 ID 的失败、以及结果未知的提交（`submission_uncertain`）不会重试，
+以免重复生成或重复计费。重试间隔按次数递增（约 1 秒、2 秒…），让出并发槽位。
+成功后的结果会带 `generation_attempts` 和重试警告；失败时报错会注明总尝试次数。
+`get_provider_status` 的 `generation_retry` 字段显示当前生效值。
+
 保存前校验字段；文件在页面打开后被其他程序修改时会拒绝保存并提示重新读取。每次保存先在配置目录
-`backups/` 下备份原文件，再原子替换。页面接口 `/api/fmage.config` 位于 Desktop 的连接认证之内，
-仅本机所有者会话可访问。
+`backups/` 下备份原文件，再原子替换。页面接口 `/api/fmage.config`、`/api/fmage.config.reveal` 和
+`/api/fmage.models` 位于 Desktop 的连接认证之内，仅本机所有者会话可访问。
 
 配置改动**下一次请求即生效，不需要重启 DSH**：MCP 服务端每次工具调用都重新读取 `providers.json`
 （服务端与工作流各自按调用读取，没有进程内缓存），所以页面保存或手工编辑后，下一次生图就会用新值。
@@ -51,7 +73,7 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 - Do not use Codex native `image_generation_call`, the `~/.codex/generated_images` output path, or a disabled generic image generation skill for these tasks.
 - Do not use Shell/Python/PIL/ImageMagick scripts as a fallback for image generation or image editing unless the user explicitly asks for deterministic local pixel processing.
 - If Fmage tools are not visible, first run proper tool discovery and `get_provider_status`. If the tools still cannot be called, report the blocker instead of silently switching to another image tool or local script.
-- After any Fmage image call fails or returns partial results, stop and report the failure. Do not retry, change parameters, query providers to find an alternative, or switch providers unless the user explicitly asks or approves it.
+- After any Fmage image call fails or returns partial results, stop and report the failure. Do not retry, change parameters, query providers to find an alternative, or switch providers unless the user explicitly asks or approves it. The only exception is Fmage's own `retry_on_failure`/`retry_count` configuration, which resubmits a fresh request internally before returning a failure.
 - Treat Fmage `1k`/`2k`/`3k`/`4k` values as resolution tiers. For `openai-images`, the normalized `requested_size` is authoritative; when actual dimensions match it and no size warning is present, do not describe the output as undersized or compare it with `4096x4096`.
 - Pixel dimensions outrank ratios: a stated `1920x1080` is sent as pixels rather than re-derived from a tier. A generate request defaults to the `2k` tier at the chosen aspect, while an edit with no explicit canvas keeps the reference's own pixels normalized to a legal size. `quality` never moves the tier. When a generate request names no canvas, `requested_size` is `auto` and the provider's returned dimensions stand as delivered.
 
@@ -87,13 +109,13 @@ Explicit /v1 and /v1beta paths are preserved; an unversioned base URL uses /v1be
 generation_config_format selects image-config (default, imageConfig) or response-format
 (responseFormat.image, used by the supplied v1 documentation). The example 2.1 provider uses the latter.
 
-Midjourney uses one independent v8.2 adapter and a shared protocol contract, based on the
-high-speed API with the stable documentation as supplementary information. Configure provider
-KC-MJ with transport=midjourney, base_url=https://newapi.prompt-hubs.com, and
-model=Midjourney v8.2 高速. Keep the API key in the local providers.json. The configured model
+Midjourney uses one independent adapter and one shared protocol contract that does not depend on
+the model ID. Configure provider KC-MJ with transport=midjourney,
+base_url=https://newapi.prompt-hubs.com, and the model ID taken from the relay's own model list
+(for example mj-v8.2). Keep the API key in the local providers.json. The configured model
 ID is an opaque server identifier: it is sent unchanged, without a local model allowlist or
-model-dependent routing. Switching to mj-v8.2 or another server-side ID does not change the
-client contract. The server selects the upstream. All requests submit JSON to
+model-dependent routing. Switching to another server-side ID does not change the client contract.
+The relay selects the upstream. All requests submit JSON to
 /v1/midjourney/generations and query /v1/tasks/{task_id}; no automatic model fallback occurs.
 Generation controls remain in prompt, including --ar, --raw, --stylize, --q and unknown flags.
 Existing --ar wins over natural-language ratios. No size, quality, resolution, n, or raw JSON

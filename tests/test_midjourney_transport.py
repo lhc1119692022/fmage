@@ -17,8 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import midjourney_transport as mj
 
-FAST = "Midjourney v8.2 高速"
-STABLE = "mj-v8.2"
+PRIMARY = "mj-v8.2"  # Any relay-exposed ID; the client contract must not depend on it.
+ALTERNATE = "Midjourney v8.2-特惠"
 SERVER_ALIAS = "channel-specific-v8.2-id"
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlD7xkAAAAASUVORK5CYII=")
 PROMPT = "  使用16:9，海报画幅 --ar 1:1 --raw --stylize 100 --q .5 --unknown future\n"
@@ -40,12 +40,12 @@ class MidjourneyTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
-    def args(self, model=FAST, command="generate", *extra):
+    def args(self, model=PRIMARY, command="generate", *extra):
         return mj.build_parser().parse_args([command, "--base-url", "https://relay.invalid",
             "--model", model, "--output-dir", str(self.root), "--prompt", PROMPT, *extra])
 
     def test_model_id_only_changes_wire_model_for_shared_v82_contract(self):
-        for model in [FAST, STABLE, SERVER_ALIAS]:
+        for model in [PRIMARY, ALTERNATE, SERVER_ALIAS]:
             with self.subTest(model=model):
                 result = mj.run(self.args(model, "generate", "--dry-run"))
                 self.assertEqual(result["request"], {"model": model, "prompt": PROMPT})
@@ -57,7 +57,7 @@ class MidjourneyTests(unittest.TestCase):
 
     def test_base_path_and_encoded_task_id(self):
         self.assertEqual(mj.endpoint("https://relay.invalid/prefix/v1/", "/tasks/a"), "https://relay.invalid/prefix/v1/tasks/a")
-        result = mj.run(self.args(FAST, "recover", "--remote-task-id", "a/b?x", "--dry-run"))
+        result = mj.run(self.args(PRIMARY, "recover", "--remote-task-id", "a/b?x", "--dry-run"))
         self.assertTrue(result["endpoint"].endswith("/tasks/a%2Fb%3Fx"))
         self.assertEqual(result["method"], "GET")
 
@@ -71,14 +71,14 @@ class MidjourneyTests(unittest.TestCase):
         local = self.root / "参考.png"
         local.write_bytes(PNG)
         data = "data:image/png;base64," + base64.b64encode(PNG).decode()
-        result = mj.run(self.args(FAST, "edit", "--image", "https://images.invalid/a.png",
+        result = mj.run(self.args(PRIMARY, "edit", "--image", "https://images.invalid/a.png",
             "--image", str(local), "--image", data, "--primary-image-index", "1", "--dry-run"))
         self.assertEqual(result["request"]["images"], ["https://images.invalid/a.png", data, data])
         self.assertTrue(result["endpoint"].endswith("/midjourney/generations"))
         self.assertEqual(result["request"]["prompt"], PROMPT)
 
     def test_reference_limit_is_shared_and_checked_before_network(self):
-        for model in [FAST, STABLE, SERVER_ALIAS]:
+        for model in [PRIMARY, ALTERNATE, SERVER_ALIAS]:
             with self.subTest(model=model):
                 result = mj.run(self.args(model, "edit", "--image", "https://images.invalid/a.png", "--dry-run"))
                 self.assertIn("image", result["request"])
@@ -106,7 +106,7 @@ class MidjourneyTests(unittest.TestCase):
     def test_header_only_task_submission_and_missing_image_warning(self):
         with mock.patch.object(mj, "http_json", side_effect=[({}, "task-test"), (complete(3, True), "")]), \
              mock.patch.object(mj.time, "sleep"), mock.patch.object(mj, "download_image", return_value=PNG):
-            result = mj.run(self.args(STABLE))
+            result = mj.run(self.args(ALTERNATE))
         self.assertEqual(len(result["images"]), 3)
         self.assertTrue(result["warnings"])
         self.assertFalse(result["generation_resubmitted"])
@@ -160,8 +160,8 @@ class MidjourneyTests(unittest.TestCase):
         original_checkpoint.write_text(json.dumps(original_state), encoding="utf-8")
         with mock.patch.object(mj, "http_json", return_value=(complete(), "")) as network, \
              mock.patch.object(mj, "download_image", return_value=PNG):
-            result = mj.run(self.args(STABLE, "recover", "--remote-task-id", "task-test"))
-        self.assertEqual(result["model"], FAST)
+            result = mj.run(self.args(ALTERNATE, "recover", "--remote-task-id", "task-test"))
+        self.assertEqual(result["model"], PRIMARY)
         self.assertEqual(len(result["images"]), 4)
         recovered_state = json.loads(Path(result["checkpoint"]).read_text(encoding="utf-8"))
         self.assertNotIn("error", recovered_state)
@@ -175,7 +175,7 @@ class MidjourneyTests(unittest.TestCase):
             result = mj.run(self.args())
         self.assertNotIn("test-key", Path(result["checkpoint"]).read_text(encoding="utf-8"))
         for new_key, base in [("changed-key", "https://relay.invalid"), ("test-key", "https://other.invalid")]:
-            args = self.args(FAST, "recover", "--remote-task-id", "task-test")
+            args = self.args(PRIMARY, "recover", "--remote-task-id", "task-test")
             args.base_url = base
             with mock.patch.dict(os.environ, {"FMAGE_ACTIVE_API_KEY": new_key}), mock.patch.object(mj, "http_json") as network:
                 with self.assertRaisesRegex(ValueError, "original service URL"):
@@ -252,7 +252,7 @@ class MidjourneyMcpTests(unittest.TestCase):
         self.config = self.root / "providers.json"
         self.configure()
 
-    def configure(self, model=FAST, url="https://relay.invalid"):
+    def configure(self, model=PRIMARY, url="https://relay.invalid"):
         self.config.write_text(json.dumps({"active_providers": ["KC-MJ"],
             "output_dir": str(self.root / "outputs"), "cache_dir": str(self.root / "cache"),
             "providers": {"KC-MJ": {"transport": "midjourney", "model": model, "base_url": url, "api_key": "test-key"}}}), encoding="utf-8")
@@ -271,7 +271,7 @@ class MidjourneyMcpTests(unittest.TestCase):
         return response["result"]["structuredContent"]
 
     def test_dry_runs_switch_models_keep_flags_and_native_resolution(self):
-        for model in [FAST, STABLE, SERVER_ALIAS]:
+        for model in [PRIMARY, ALTERNATE, SERVER_ALIAS]:
             self.configure(model)
             result = self.call("generate_image", {"provider": "KC-MJ", "prompt": PROMPT, "prompt_mode": "direct", "aspect": "16:9", "dry_run": True})
             self.assertEqual(result["request"], {"model": model, "prompt": PROMPT})
@@ -311,13 +311,13 @@ class MidjourneyMcpTests(unittest.TestCase):
             self.assertTrue(all(Path(path).is_file() for path in result["images"]))
             self.assertEqual(result["remote_task_id"], "task-http")
             self.assertEqual([call[1] for call in calls[:2]], ["/v1/midjourney/generations", "/v1/tasks/task-http"])
-            self.assertEqual(calls[0][2], {"model": FAST, "prompt": PROMPT})
+            self.assertEqual(calls[0][2], {"model": PRIMARY, "prompt": PROMPT})
             self.assertEqual(calls[1][3], "Bearer test-key")
             self.assertIsNone(calls[2][3])  # CDN gets no API credential.
             self.assertEqual(calls[2][4], "fmage-midjourney/1.0")
-            self.configure(STABLE, url)
+            self.configure(ALTERNATE, url)
             recovered = self.call("get_image_task_status", {"provider": "KC-MJ", "remote_task_id": "task-http"})
-            self.assertEqual(recovered["provider_model"], FAST)
+            self.assertEqual(recovered["provider_model"], PRIMARY)
             self.assertEqual(len([c for c in calls if c[0] == "POST"]), 1)
 
     def test_download_failure_reaches_mcp_with_task_context_and_sanitized_diagnostics(self):
@@ -359,7 +359,7 @@ class MidjourneyMcpTests(unittest.TestCase):
 
     def test_partial_result_warning_and_grid_survive_compact_delivery(self):
         with local_relay(count=3, grid=True) as (url, calls):
-            self.configure(STABLE, url)
+            self.configure(ALTERNATE, url)
             result = self.call("generate_image", {"prompt": "apple --ar 1:1"})
             self.assertEqual(result["status"], "partial")
             self.assertEqual(len(result["images"]), 3)
@@ -369,7 +369,7 @@ class MidjourneyMcpTests(unittest.TestCase):
 
     def test_invalid_edit_batch_stops_before_any_submission(self):
         with local_relay() as (url, calls):
-            self.configure(STABLE, url)
+            self.configure(ALTERNATE, url)
             self.call("edit_image_batch", {"jobs": [
                 {"prompt": "valid", "images": [url + "/a"]},
                 {"prompt": "invalid", "images": [url + f"/{i}" for i in range(6)]},
@@ -381,11 +381,14 @@ class MidjourneyMcpTests(unittest.TestCase):
         payload = json.loads(self.config.read_text())
         before = json.loads(json.dumps(payload))
         migrate_payload(payload)
-        self.assertEqual(payload, before)
+        self.assertEqual(payload["providers"], before["providers"])
+        self.assertEqual(payload["active_providers"], before["active_providers"])
+        self.assertEqual(payload["retry_on_failure"], False)
+        self.assertEqual(payload["retry_count"], 2)
 
     def test_partial_batch_exposes_count_mismatch_and_separate_grids(self):
         with local_relay(count=3, grid=True) as (url, calls):
-            self.configure(STABLE, url)
+            self.configure(ALTERNATE, url)
             result = self.call("generate_image_batch", {"jobs": [{"prompt": "one"}, {"prompt": "two"}], "return_when": "completed"})
             self.assertEqual(result["status"], "partial")
             self.assertEqual(result["partial_count"], 2)

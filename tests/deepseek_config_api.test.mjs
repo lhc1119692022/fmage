@@ -4,7 +4,8 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  createConfigApi, maskSecret, ConfigError, registerConfigRoutes, CONFIG_ROUTE, REVEAL_ROUTE,
+  createConfigApi, maskSecret, ConfigError, registerConfigRoutes,
+  CONFIG_ROUTE, REVEAL_ROUTE, MODELS_ROUTE,
 } from '../adapters/deepseek/config-api.mjs';
 
 const SECRET = 'sk-abcdefghijklmnop1234';
@@ -19,6 +20,7 @@ async function fixture(t, config) {
 
 const base = () => ({
   active_providers: ['b', 'a'],
+  retry_on_failure: true, retry_count: 3,
   output_dir: '', cache_dir: '',
   providers: {
     a: { transport: 'openai-images', base_url: 'https://a.example/v1', model: 'gpt-image-2', api_key: SECRET, async_mode: true, image_field: 'image[]' },
@@ -68,6 +70,8 @@ test('update reorders, toggles, renames, deletes and preserves unshown fields', 
   assert.equal(saved.providers.b.api_key, 'new-key');
   assert.equal(saved.providers.n.api_key, '');
   assert.deepEqual(saved.unrelated, { keep: true });
+  assert.equal(saved.retry_on_failure, true, 'top-level retry settings survive provider edits');
+  assert.equal(saved.retry_count, 3);
   assert.equal(saved.workflows.up.extra, 1, 'sections not submitted stay untouched');
   assert.equal((await readdir(join(dir, 'backups'))).length, 1);
 });
@@ -120,7 +124,7 @@ test('fetch routes answer JSON and map errors to status codes', async t => {
   const { api } = await fixture(t, base());
   const routes = new Map();
   registerConfigRoutes({ connection: { fetch: { register: r => { routes.set(r.path, r); return async () => {}; } } } }, api);
-  assert.deepEqual([...routes.keys()], [CONFIG_ROUTE, REVEAL_ROUTE]);
+  assert.deepEqual([...routes.keys()], [CONFIG_ROUTE, REVEAL_ROUTE, MODELS_ROUTE]);
   const get = await routes.get(CONFIG_ROUTE).fetch(new Request('http://h' + CONFIG_ROUTE));
   assert.equal(get.status, 200);
   assert.equal(get.headers.get('cache-control'), 'no-store');
@@ -128,4 +132,60 @@ test('fetch routes answer JSON and map errors to status codes', async t => {
   assert.equal(stale.status, 409);
   const bad = await routes.get(REVEAL_ROUTE).fetch(new Request('http://h' + REVEAL_ROUTE, { method: 'POST', body: 'not json' }));
   assert.equal(bad.status, 400);
+  const models = await routes.get(MODELS_ROUTE).fetch(new Request('http://h' + MODELS_ROUTE, { method: 'POST', body: JSON.stringify({}) }));
+  assert.equal(models.status, 400);
+});
+
+test('model list uses the stored key and normalizes OpenAI-compatible payloads', async t => {
+  const { path } = await fixture(t, base());
+  const calls = [];
+  const api = createConfigApi(path, { fetch: async (url, init) => {
+    calls.push({ url, init });
+    return new Response(JSON.stringify({ data: [{ id: 'gpt-image-2.5' }, { id: 'gpt-image-2.5-sunburst' }] }), { status: 200 });
+  } });
+  const result = await api.listModels({ provider: 'a', transport: 'openai-images', base_url: 'https://a.example/v1' });
+  assert.deepEqual(result.models, ['gpt-image-2.5', 'gpt-image-2.5-sunburst']);
+  assert.equal(calls[0].url, 'https://a.example/v1/models');
+  assert.equal(calls[0].init.headers.authorization, `Bearer ${SECRET}`);
+  assert.ok(!JSON.stringify(result).includes(SECRET));
+});
+
+test('model list follows Gemini naming and keeps generateContent models only', async t => {
+  const { path } = await fixture(t, base());
+  const calls = [];
+  const api = createConfigApi(path, { fetch: async (url, init) => {
+    calls.push({ url, init });
+    return new Response(JSON.stringify({ models: [
+      { name: 'models/gemini-3-pro-image', supportedGenerationMethods: ['generateContent'] },
+      { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] },
+    ] }), { status: 200 });
+  } });
+  const result = await api.listModels({ provider: 'b', transport: 'gemini-generate-content', base_url: 'https://b.example', api_key: 'fresh-key' });
+  assert.deepEqual(result.models, ['gemini-3-pro-image']);
+  assert.equal(calls[0].url, 'https://b.example/v1beta/models');
+  assert.equal(calls[0].init.headers['x-goog-api-key'], 'fresh-key');
+  assert.equal(calls[0].init.headers.authorization, undefined);
+});
+
+test('model list retries another path on 404 and reports upstream failures', async t => {
+  const { path } = await fixture(t, base());
+  const urls = [];
+  const api = createConfigApi(path, { fetch: async url => {
+    urls.push(url);
+    if (url.endsWith('/v1/models')) return new Response('not found', { status: 404 });
+    return new Response(JSON.stringify([{ id: 'mj-v8.2' }]), { status: 200 });
+  } });
+  const result = await api.listModels({ provider: 'c', transport: 'midjourney', base_url: 'https://c.example' });
+  assert.deepEqual(result.models, ['mj-v8.2']);
+  assert.deepEqual(urls, ['https://c.example/v1/models', 'https://c.example/models']);
+
+  const failing = createConfigApi(path, { fetch: async () => new Response('busy', { status: 429 }) });
+  await assert.rejects(
+    failing.listModels({ provider: 'c', transport: 'midjourney', base_url: 'https://c.example' }),
+    error => error instanceof ConfigError && error.status === 502 && /HTTP 429/.test(error.message),
+  );
+  await assert.rejects(
+    failing.listModels({ provider: 'c', transport: 'midjourney', base_url: 'https://c.example', api_key: '' }),
+    /Fill in an API key/,
+  );
 });

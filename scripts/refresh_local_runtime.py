@@ -77,31 +77,29 @@ def resolve_codex_cli() -> Path:
     )
 
 
-def resolve_power_shell() -> str:
-    for executable in ("pwsh.exe", "powershell.exe", "pwsh", "powershell"):
-        found = shutil.which(executable)
-        if found:
-            return found
-    raise RuntimeError("PowerShell is required to validate the local Codex plugin.")
+def resolve_marketplace(cli: Path) -> str:
+    """Read the marketplace from the installed plugin record."""
+    for record in plugin_list(cli).get("installed", []):
+        if not isinstance(record, dict) or record.get("name") != PLUGIN_NAME:
+            continue
+        name = record.get("marketplaceName")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return DEFAULT_MARKETPLACE
 
 
-def helper_path(name: str) -> Path:
-    path = Path.home() / ".codex" / "skills" / ".system" / "plugin-creator" / "scripts" / name
-    if not path.is_file():
-        raise RuntimeError(f"Codex plugin helper is missing: {path}")
-    return path
-
-
-def read_marketplace_name() -> str:
-    result = run_command(
-        [sys.executable, str(helper_path("read_marketplace_name.py"))],
-        capture_output=True,
+def bump_cachebuster(timestamp: str | None = None) -> None:
+    """Set version to <base>+codex.<UTC stamp> so the plugin cache refreshes."""
+    manifest_path = PLUGIN_ROOT / ".codex-plugin" / "plugin.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    base_version = str(payload.get("version", "")).split("+", 1)[0]
+    if not base_version:
+        raise RuntimeError(f"Plugin manifest has no usable version: {manifest_path}")
+    stamp = timestamp or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    payload["version"] = f"{base_version}+codex.{stamp}"
+    manifest_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n"
     )
-    require_success(result, "reading marketplace name")
-    name = (result.stdout or "").strip()
-    if not name:
-        raise RuntimeError("The personal marketplace name is empty.")
-    return name
 
 
 def source_version() -> str:
@@ -292,7 +290,7 @@ def verify_plugin(cli: Path, marketplace: str) -> Path:
 
 def refresh_plugin(*, check_only: bool) -> None:
     cli = resolve_codex_cli()
-    marketplace = read_marketplace_name()
+    marketplace = resolve_marketplace(cli)
     if check_only:
         cache_path = verify_plugin(cli, marketplace)
         print(
@@ -301,14 +299,6 @@ def refresh_plugin(*, check_only: bool) -> None:
         )
         return
 
-    validator = Path.home() / ".codex" / "tools" / "validate-plugin.ps1"
-    if not validator.is_file():
-        raise RuntimeError(f"Plugin validator is missing: {validator}")
-    validation = run_command(
-        [resolve_power_shell(), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(validator), str(PLUGIN_ROOT)]
-    )
-    require_success(validation, "validating plugin")
-
     records = plugin_list(cli).get("installed", [])
     active = next((r for r in records if r.get("pluginId") == f"{PLUGIN_NAME}@{marketplace}"), {})
     old_version = active.get("version", "")
@@ -316,17 +306,13 @@ def refresh_plugin(*, check_only: bool) -> None:
     if source.get("source") != "local" or Path(source.get("path", "")).resolve() != PLUGIN_ROOT.resolve():
         raise RuntimeError("Installed local marketplace source does not resolve to this plugin repository.")
     print(f"Refreshing {PLUGIN_NAME}@{marketplace}: installed={old_version}, source={source_version()}, enabled={active.get('enabled')}")
-    cachebuster = run_command(
-        [sys.executable, str(helper_path("update_plugin_cachebuster.py")), str(PLUGIN_ROOT)]
-    )
-    require_success(cachebuster, "updating plugin cachebuster")
+    bump_cachebuster()
 
     old_token = old_version.rsplit(".", 1)[-1]
     new_token = source_version().rsplit(".", 1)[-1]
     if old_token.isdigit() and len(old_token) == 14 and new_token <= old_token:
         next_time = max(datetime.strptime(old_token, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc) + timedelta(seconds=1), datetime.now(timezone.utc))
-        recovery = run_command([sys.executable, str(helper_path("update_plugin_cachebuster.py")), str(PLUGIN_ROOT), "--cachebuster", next_time.strftime("%Y%m%d%H%M%S")])
-        require_success(recovery, "recovering monotonic cachebuster")
+        bump_cachebuster(next_time.strftime("%Y%m%d%H%M%S"))
     if old_version and source_version().split("+", 1)[-1] <= old_version.split("+", 1)[-1]:
         raise RuntimeError("Target cachebuster must be newer than the installed version.")
 

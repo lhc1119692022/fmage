@@ -83,7 +83,7 @@ def build_payload(args):
     if args.command == "edit" and not references:
         raise ValueError("Reference generation requires at least one image.")
     if len(references) > CONTRACT["max_reference_images"]:
-        raise ValueError(f"Midjourney v8.2 accepts at most {CONTRACT['max_reference_images']} reference images; select the intended image(s).")
+        raise ValueError(f"Midjourney accepts at most {CONTRACT['max_reference_images']} reference images per request; select the intended image(s).")
     if args.primary_image_index < 0 or (args.primary_image_index and args.primary_image_index >= len(references)):
         raise ValueError("primary_image_index is outside the reference image list.")
     # Keep input order: image roles are already described in the opaque prompt.

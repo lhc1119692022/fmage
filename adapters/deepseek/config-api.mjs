@@ -11,6 +11,10 @@ export const RUNNINGHUB_ORIGINS = ['https://www.runninghub.cn', 'https://www.run
 export const INSTANCE_TYPES = ['default', 'plus', 'ultra'];
 const NAME = /^[^\u0000-\u001f]{1,100}$/;
 const DIGITS = /^\d{1,40}$/;
+const MODEL_LIST_TIMEOUT_MS = 15000;
+const MODEL_LIST_LIMIT = 500;
+const MODEL_AUTH_SCHEMES = ['bearer', 'x-goog-api-key'];
+const MODEL_LIST_USER_AGENT = 'fmage-model-list/1.0';
 
 export class ConfigError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
@@ -30,6 +34,128 @@ export function maskSecret(value) {
 }
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+function modelEndpoints(transport, base) {
+  const versioned = /\/v\d+(?:beta)?$/i.test(base);
+  if (transport === 'gemini-generate-content') {
+    return versioned ? [`${base}/models`] : [`${base}/v1beta/models`, `${base}/v1/models`];
+  }
+  return versioned ? [`${base}/models`] : [`${base}/v1/models`, `${base}/models`];
+}
+
+function modelHeaders(transport, apiKey, authScheme) {
+  const headers = { accept: 'application/json', 'user-agent': MODEL_LIST_USER_AGENT };
+  if (transport === 'gemini-generate-content' && authScheme !== 'bearer') {
+    headers['x-goog-api-key'] = apiKey;
+  } else {
+    headers.authorization = `Bearer ${apiKey}`;
+  }
+  return headers;
+}
+
+function modelIds(payload, transport) {
+  const rows = Array.isArray(payload) ? payload
+    : Array.isArray(payload?.data) ? payload.data
+      : Array.isArray(payload?.models) ? payload.models
+        : [];
+  const ids = [];
+  for (const row of rows) {
+    if (typeof row === 'string') {
+      ids.push(row);
+      continue;
+    }
+    if (!isObject(row)) continue;
+    const methods = row.supportedGenerationMethods ?? row.supported_generation_methods;
+    if (
+      transport === 'gemini-generate-content' &&
+      Array.isArray(methods) &&
+      !methods.includes('generateContent')
+    ) continue;
+    const id = row.id ?? row.name ?? row.model;
+    if (typeof id === 'string') ids.push(id);
+  }
+  const seen = new Set();
+  return ids
+    .map(id => id.trim())
+    .map(id => transport === 'gemini-generate-content' ? id.replace(/^models\//i, '') : id)
+    .filter(id => id && !seen.has(id) && seen.add(id))
+    .slice(0, MODEL_LIST_LIMIT);
+}
+
+async function fetchModelPayload(url, headers, fetchImpl, timeoutMs = MODEL_LIST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  timer.unref?.();
+  try {
+    const response = await fetchImpl(url, {
+      method: 'GET', headers, cache: 'no-store', signal: controller.signal,
+    });
+    const body = await response.text();
+    if (!response.ok) {
+      const detail = body.trim().slice(0, 300);
+      const error = new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+      error.status = response.status;
+      throw error;
+    }
+    if (!body.trim()) return {};
+    try { return JSON.parse(body); }
+    catch { throw new ConfigError('Provider model list did not return JSON.', 502); }
+  } catch (error) {
+    if (error instanceof ConfigError) throw error;
+    if (controller.signal.aborted) throw new ConfigError('Provider model list request timed out.', 502);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Resolve the key for a model-list request without returning it to the browser. */
+function modelApiKey(body, stored) {
+  if (typeof body.api_key === 'string') {
+    const provided = body.api_key.trim();
+    if (!provided) throw new ConfigError('Fill in an API key before fetching models.');
+    return provided;
+  }
+  if (!isObject(stored)) throw new ConfigError('Fill in an API key before fetching models.');
+  const storedKey = typeof stored.api_key === 'string' ? stored.api_key.trim() : '';
+  if (storedKey) return storedKey;
+  const envName = typeof stored.api_key_env === 'string' ? stored.api_key_env.trim() : '';
+  const envKey = envName ? String(process.env[envName] ?? '').trim() : '';
+  if (envKey) return envKey;
+  throw new ConfigError('Fill in an API key before fetching models.');
+}
+
+/** Fetch the upstream model list for the current (possibly unsaved) provider form. */
+export async function listProviderModels(path, body, options = {}) {
+  if (!isObject(body)) throw new ConfigError('Model list request must be a JSON object.');
+  const transport = text(body.transport, 'transport', { required: true });
+  if (!TRANSPORTS.includes(transport)) throw new ConfigError(`Unsupported transport: ${transport}.`);
+  const base = httpUrl(body.base_url, 'base_url');
+  const { config } = await load(path);
+  const storedName = typeof body.provider === 'string' ? body.provider : '';
+  const stored = storedName && isObject(config.providers?.[storedName]) ? config.providers[storedName] : null;
+  const apiKey = modelApiKey(body, stored);
+  const authScheme = body.auth_scheme === undefined
+    ? (typeof stored?.auth_scheme === 'string' ? stored.auth_scheme : 'x-goog-api-key')
+    : body.auth_scheme;
+  if (!MODEL_AUTH_SCHEMES.includes(authScheme)) throw new ConfigError(`Unsupported auth_scheme: ${authScheme}.`);
+  const fetchImpl = options.fetch ?? globalThis.fetch;
+  if (typeof fetchImpl !== 'function') throw new ConfigError('Model list fetching is unavailable.', 500);
+
+  const headers = modelHeaders(transport, apiKey, authScheme);
+  let lastError = null;
+  for (const url of modelEndpoints(transport, base)) {
+    try {
+      const payload = await fetchModelPayload(url, headers, fetchImpl, options.timeoutMs);
+      return { models: modelIds(payload, transport), endpoint: url };
+    } catch (error) {
+      lastError = error;
+      if ([404, 405].includes(error.status)) continue;
+      throw new ConfigError(`Could not fetch models: ${error.message}`, 502);
+    }
+  }
+  throw new ConfigError(`Could not fetch models: ${lastError?.message ?? 'no endpoint answered'}.`, 502);
+}
 
 async function load(path) {
   let bytes;
@@ -226,6 +352,7 @@ async function save(path, current, next) {
 
 export const CONFIG_ROUTE = '/api/fmage.config';
 export const REVEAL_ROUTE = '/api/fmage.config.reveal';
+export const MODELS_ROUTE = '/api/fmage.models';
 const NO_STORE = { 'cache-control': 'no-store' };
 
 async function respond(task) {
@@ -251,15 +378,21 @@ export function registerConfigRoutes(ctx, api) {
     path: REVEAL_ROUTE, methods: ['POST'], requestBody: 'buffered',
     fetch: request => respond(async () => api.reveal(await jsonBody(request))),
   });
+  ctx.connection.fetch.register({
+    path: MODELS_ROUTE, methods: ['POST'], requestBody: 'buffered',
+    fetch: request => respond(async () => api.listModels(await jsonBody(request))),
+  });
 }
 
 /** Config operations used by the Fetch routes; `path` is fixed at construction. */
-export function createConfigApi(path = resolveConfigPath()) {
+export function createConfigApi(path = resolveConfigPath(), options = {}) {
+  const fetchImpl = options.fetch ?? globalThis.fetch;
   let queue = Promise.resolve();
   const serial = task => { const run = queue.then(task, task); queue = run.catch(() => {}); return run; };
   return {
     path,
     async read() { return view(path, await load(path)); },
+    listModels(body) { return listProviderModels(path, body, { fetch: fetchImpl }); },
     update(body) {
       return serial(async () => {
         const current = await load(path);

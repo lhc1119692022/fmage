@@ -9,6 +9,7 @@ window.__ModuleLoader__.load({
     const NS = 'settings.fmage';
     const ROUTE = 'api/fmage.config';
     const REVEAL = 'api/fmage.config.reveal';
+    const MODELS = 'api/fmage.models';
     const CSS_ID = 'dsh-fmage/settings.css';
     const CSS = `
 .fmg{max-width:760px;display:flex;flex-direction:column;gap:14px;color:var(--dsw-alias-label-primary);font-size:13px}
@@ -43,6 +44,12 @@ window.__ModuleLoader__.load({
 .fmg textarea{min-height:90px;font-family:var(--dsw-font-mono,monospace);resize:vertical}
 .fmg input[readonly]{color:var(--dsw-alias-label-tertiary)}
 .fmg-key{display:flex;gap:6px;align-items:center}
+.fmg-key>input{flex:1;min-width:0}
+.fmg-models{display:flex;flex-wrap:wrap;gap:6px;max-height:150px;overflow:auto;padding:2px 0}
+.fmg-model{font:inherit;font-size:12px;padding:3px 9px;border-radius:999px;border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fmg-model[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-primary)}
+.fmg-model:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
+.fmg-hint{margin:0;font-size:12px;color:var(--dsw-alias-label-tertiary)}
 .fmg-icon{background:0 0;border:.5px solid var(--dsw-alias-border-l2);border-radius:8px;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--dsw-alias-label-secondary);flex:none}
 .fmg-icon:disabled{opacity:.35;cursor:default}
 .fmg-icon:focus-visible,.fmg-tab:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
@@ -59,6 +66,9 @@ window.__ModuleLoader__.load({
       add: '添加提供商', addConnection: '添加连接', addWorkflow: '添加工作流',
       name: '名称', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API Key',
       enable: '启用 {name}', remove: '移除', show: '显示密钥', hide: '隐藏密钥',
+      pin: '置顶', pinned: '已置顶',
+      fetchModels: '拉取上游模型', fetchingModels: '拉取中…', noModels: '上游未返回模型。',
+      modelsHint: '点击模型即可切换；输入框仍可手动编辑。',
       drag: '拖动排序', expand: '展开', collapse: '折叠',
       keyEmpty: '未设置', keyEnv: '使用环境变量 {env}', default: '默认', setDefault: '设为默认',
       connections: 'RunningHub 连接', workflows: '工作流', connection: '连接', workflowId: '工作流 ID',
@@ -74,6 +84,9 @@ window.__ModuleLoader__.load({
       add: 'Add provider', addConnection: 'Add connection', addWorkflow: 'Add workflow',
       name: 'Name', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API key',
       enable: 'Enable {name}', remove: 'Remove', show: 'Show key', hide: 'Hide key',
+      pin: 'Move to top', pinned: 'Already first',
+      fetchModels: 'Fetch upstream models', fetchingModels: 'Fetching…', noModels: 'The provider returned no models.',
+      modelsHint: 'Click a model to use it; the field stays editable.',
       drag: 'Drag to reorder', expand: 'Expand', collapse: 'Collapse',
       keyEmpty: 'Not set', keyEnv: 'Uses environment variable {env}', default: 'Default', setDefault: 'Make default',
       connections: 'RunningHub connections', workflows: 'Workflows', connection: 'Connection', workflowId: 'Workflow ID',
@@ -88,6 +101,8 @@ window.__ModuleLoader__.load({
       eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
       eyeOff: 'M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
       grip: 'M9 6h6M9 12h6M9 18h6',
+      pin: 'M9 3h6l-1 7 4 4v2H6v-2l4-4-1-7zM12 16v5',
+      download: 'M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
     };
     const IconButton = ({ label, path, onClick, disabled }) => h('button', {
       type: 'button', className: 'fmg-icon', 'aria-label': label, title: label, onClick, disabled,
@@ -200,9 +215,33 @@ window.__ModuleLoader__.load({
       }, icon(ICON.grip));
     }
 
-    function ProviderCard({ t, row, transports, update, onRemove, setError, open, onToggle, dragging, drop, onDragStart, onDragOver, onDrop, onDragEnd }) {
+    function ProviderCard({ t, row, transports, update, onRemove, onPin, isFirst, setError, open, onToggle, dragging, drop, onDragStart, onDragOver, onDrop, onDragEnd }) {
       const f = field => `fmg-${row.id}-${field}`;
       const remove = () => { if (window.confirm(t('confirmRemove', { name: row.name || '?' }))) onRemove(); };
+      const IDLE_MODELS = { base: '', transport: '', loading: false, error: '', items: null };
+      const [modelList, setModelList] = useState(IDLE_MODELS);
+      const fetchModels = async () => {
+        const base = row.base_url;
+        const transport = row.transport;
+        setModelList({ base, transport, loading: true, error: '', items: null });
+        try {
+          const data = await request(MODELS, { method: 'POST', body: JSON.stringify({
+            provider: row.from || undefined, transport, base_url: base,
+            ...(row.api_key === undefined ? {} : { api_key: row.api_key }),
+          }) });
+          setModelList({ base, transport, loading: false, error: '', items: Array.isArray(data?.models) ? data.models : [] });
+        } catch (error) {
+          setModelList({ base, transport, loading: false, error: error.message, items: null });
+        }
+      };
+      // A fetched list belongs to the form values it was requested for.
+      const currentModels = modelList.base === row.base_url && modelList.transport === row.transport ? modelList : null;
+      const models = currentModels && currentModels.items && currentModels.items.length
+        ? h('div', { className: 'fmg-models' }, currentModels.items.map(model => h('button', {
+          key: model, type: 'button', className: 'fmg-model', 'aria-pressed': row.model === model,
+          onClick: () => update({ model }),
+        }, model)))
+        : null;
       return h('li', {
         className: 'fmg-card',
         'data-off': String(!row.enabled), 'data-dragging': String(dragging), 'data-drop': drop || undefined,
@@ -217,12 +256,24 @@ window.__ModuleLoader__.load({
           },
             h('span', { className: 'fmg-name' }, row.name || '—'),
             open ? null : h('span', { className: 'fmg-sub' }, row.model)),
+          h(IconButton, {
+            label: t(isFirst ? 'pinned' : 'pin'), path: ICON.pin, onClick: onPin,
+            disabled: !row.enabled || isFirst,
+          }),
           h(Switch, { checked: row.enabled, label: t('enable', { name: row.name }), onChange: enabled => update({ enabled }) })),
         open ? h('div', { className: 'fmg-fields' },
           Field({ id: f('name'), label: t('name'), children: h('input', { id: f('name'), value: row.name, onChange: e => update({ name: e.target.value }) }) }),
           Field({ id: f('transport'), label: t('transport'), children: h(Select, { id: f('transport'), value: row.transport, options: transports, onChange: transport => update({ transport }) }) }),
           Field({ id: f('base'), label: t('baseUrl'), wide: true, children: h('input', { id: f('base'), value: row.base_url, spellCheck: false, onChange: e => update({ base_url: e.target.value }) }) }),
-          Field({ id: f('model'), label: t('model'), wide: true, children: h('input', { id: f('model'), value: row.model, spellCheck: false, onChange: e => update({ model: e.target.value }) }) }),
+          Field({ id: f('model'), label: t('model'), wide: true, children: h(React.Fragment, null,
+            h('div', { className: 'fmg-key' },
+              h('input', { id: f('model'), value: row.model, spellCheck: false, onChange: e => update({ model: e.target.value }) }),
+              h(IconButton, { label: t('fetchModels'), path: ICON.download, onClick: fetchModels, disabled: currentModels?.loading })),
+            currentModels?.loading ? h('p', { className: 'fmg-hint' }, t('fetchingModels')) : null,
+            currentModels?.error ? h('p', { className: 'fmg-hint fmg-error', role: 'alert' }, currentModels.error) : null,
+            currentModels?.items && !currentModels.items.length ? h('p', { className: 'fmg-hint' }, t('noModels')) : null,
+            models,
+            models ? h('p', { className: 'fmg-hint' }, t('modelsHint')) : null) }),
           Field({ id: f('key'), label: t('apiKey'), wide: true, children: h(SecretField, { t, row, kind: 'provider', id: f('key'), onChange: update, setError }) })) : null,
         open ? h('div', { className: 'fmg-actions' },
           h(Button, { size: 'sm', variant: 'ghost', onClick: remove }, t('remove'))) : null);
@@ -275,6 +326,17 @@ window.__ModuleLoader__.load({
           if (dirty) setDirty(true);
         },
         moveTo: (fromId, toId, pos) => { setDraft(d => ({ ...d, [field]: reorder(d[field], fromId, toId, pos) })); setDirty(true); },
+        toTop: id => {
+          setDraft(d => {
+            const from = d[field].findIndex(r => r.id === id);
+            if (from <= 0) return d;
+            const next = d[field].slice();
+            const [row] = next.splice(from, 1);
+            next.unshift(row);
+            return { ...d, [field]: next };
+          });
+          setDirty(true);
+        },
         remove: id => { setDraft(d => ({ ...d, [field]: d[field].filter(r => r.id !== id) })); setDirty(true); },
         add: row => { setDraft(d => ({ ...d, [field]: [...d[field], row] })); setDirty(true); },
       };
@@ -356,9 +418,10 @@ window.__ModuleLoader__.load({
       const connectionNames = draft.connections.map(c => c.name).filter(Boolean);
       const panels = {
         providers: [
-          h('ul', { key: 'l', className: 'fmg-list', ...listProps('providers', providers) }, draft.providers.map(row => h(ProviderCard, {
+          h('ul', { key: 'l', className: 'fmg-list', ...listProps('providers', providers) }, draft.providers.map((row, index) => h(ProviderCard, {
             key: row.id, t, row, transports: view.transports, setError,
             open: open.has(row.id), onToggle: () => toggleOpen(row.id),
+            isFirst: index === 0, onPin: () => providers.toTop(row.id),
             ...dragProps('providers', row.id, providers, draft.providers),
             update: (patch, d) => providers.update(row.id, patch, d), onRemove: () => providers.remove(row.id),
           }))),

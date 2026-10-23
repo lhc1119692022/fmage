@@ -40,11 +40,11 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
 - Supported protocols are openai-images, gemini-generate-content, and midjourney.
   Choose the protocol from the provider's API contract, never its name or hostname.
   Old channel transport names and transport_profile are migration inputs only; do not create them.
-- Midjourney uses its independent midjourney transport with one shared v8.2 contract. Configure
-  base_url, api_key, and model. KC-MJ defaults to Midjourney v8.2 高速; mj-v8.2 is an alternative
-  server model ID. Model IDs pass through unchanged, without a local allowlist or model routing.
+- Midjourney uses its independent midjourney transport with one shared protocol contract. Configure
+  only base_url, api_key, and model. The model is an opaque server-side identifier: write whatever
+  ID the relay exposes and let it pass through unchanged, without a local allowlist or model routing.
   Every ID uses /v1/midjourney/generations, /v1/tasks/{task_id}, and the same reference/output rules;
-  the server selects the upstream. Do not add async_mode, size, resolution, quality, raw, or
+  the relay selects the upstream. Do not add async_mode, size, resolution, quality, raw, or
   response_format to MJ configuration. MJ controls stay in prompt and pixels come from the backend.
   No post-generation actions.
 - For OpenAI Images async submission and /images/tasks/{task_id} polling, set async_mode=true.
@@ -58,6 +58,11 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
   gemini-3.1-flash-image[-preview]; nano-banana-2.1 and gemini-nano-banana-2.1.
   Always preserve the configured wire model ID. Pro supports 1K/2K/4K; 2 adds 512px;
   2.1 supports 1K/2K/4K and minimal/medium/high thinking (default medium).
+- Top-level retry_on_failure (boolean, default false) and retry_count (integer 0-10, default 2)
+  control retries after a transient generation failure. Every retry submits a fresh request; it never
+  polls the failed request. Rate limits, concurrency limits, gateway 5xx, timeouts and network errors
+  are retried; auth and validation errors are not. Failures that already own a remote task or have
+  unknown submission state are never retried. Preserve both fields during unrelated edits.
 - Omit timeout to use runtime defaults. Explicit positive values are preserved and request-level
   values override provider values. Migration removes the former forced 600 value; it never adds
   a timeout. Explicit budgets cover download, submission, polling and delivery together.

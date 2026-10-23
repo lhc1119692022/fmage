@@ -38,13 +38,15 @@
     "openai-image-2",
     "ezai-nano"
   ],
+  "retry_on_failure": false,
+  "retry_count": 2,
   "output_dir": "",
   "cache_dir": "",
   "providers": {
     "KC-MJ": {
       "transport": "midjourney",
       "base_url": "https://newapi.prompt-hubs.com",
-      "model": "Midjourney v8.2 高速",
+      "model": "mj-v8.2",
       "api_key": ""
     },
     "openai-image-2": {

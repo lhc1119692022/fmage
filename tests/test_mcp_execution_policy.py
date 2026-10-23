@@ -287,5 +287,58 @@ class McpExecutionPolicyTests(unittest.TestCase):
                 self.assertNotIn("next_action", terminal)
 
 
+    def test_configured_retry_sends_a_fresh_request_instead_of_polling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = io.BytesIO()
+            Image.new("RGB", (8, 8), (12, 34, 56)).save(image, format="PNG")
+            encoded = base64.b64encode(image.getvalue()).decode()
+            posts = []
+
+            class Handler(BaseHTTPRequestHandler):
+                def do_POST(self):
+                    posts.append(self.path)
+                    self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                    if len(posts) == 1:
+                        payload = json.dumps({"error": {"message": "concurrency limit"}}).encode()
+                        status = 429
+                    else:
+                        payload = json.dumps({"data": [{"b64_json": encoded}]}).encode()
+                        status = 200
+                    self.send_response(status)
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+
+                def log_message(self, *args):
+                    pass
+
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                config = root / "providers.json"
+                config.write_text(json.dumps({
+                    "active_providers": ["test"], "cache_dir": str(root / "cache"),
+                    "output_dir": str(root / "output"), "retry_on_failure": True, "retry_count": 1,
+                    "providers": {"test": {
+                        "transport": "openai-images", "model": "gpt-image-2",
+                        "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+                        "api_key": "test-only-key",
+                    }},
+                }), encoding="utf-8")
+                result = self.call(config, "generate_image", {"prompt": "retry this request", "verbose": True})
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join()
+            self.assertEqual(len(posts), 2)
+            self.assertEqual(posts[0], posts[1])
+            self.assertEqual(result["generation_attempts"], 2)
+            self.assertEqual(result["generation_retry"], {"enabled": True, "retries": 1})
+            self.assertTrue(any("retried 1 time" in warning for warning in result["warnings"]))
+            self.assertTrue(Path(result["images"][0]).is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

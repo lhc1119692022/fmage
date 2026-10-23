@@ -6,6 +6,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createWorkflowService, workflowTools } from "./workflows.mjs";
+import { generationRetryPolicy, withGenerationRetry } from "./retry-policy.mjs";
 import { timeoutSeconds } from "./timeout-policy.mjs";
 
 const SERVER_NAME = "Fmage";
@@ -2387,6 +2388,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     output_sequence: positiveInteger(args.output_sequence, 1),
   };
   const submittedPrompt = prompt;
+  const retryPolicy = generationRetryPolicy(provider.config);
   const scriptPath = providerTransportScript(provider);
   const tempDir = await mkdtemp(join(tmpdir(), "fmage-"));
   const promptFile = join(tempDir, "prompt.txt");
@@ -2426,15 +2428,31 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
         FMAGE_OUTPUT_SEQUENCE: String(args.output_sequence),
       });
     }
-    const result = await runProcess(
-      pythonCommand(),
-      argv,
-      helperEnvironment,
-      { timeoutSeconds: helperTimeoutSeconds },
+    const { result, attempts } = await withGenerationRetry(
+      () => runProcess(
+        pythonCommand(),
+        argv,
+        helperEnvironment,
+        { timeoutSeconds: helperTimeoutSeconds },
+      ),
+      { retries: retryPolicy.retries },
     );
     const enriched = await enrichResult(result, submittedPrompt, provider);
     enriched.timeout_seconds = timeoutSeconds(args.timeout, provider.raw.timeout);
     enriched.prompt_mode = args.prompt_mode;
+    if (attempts > 1) {
+      enriched.generation_attempts = attempts;
+      enriched.warnings = [
+        ...normalizedStringArray(enriched.warnings),
+        `Provider request was retried ${attempts - 1} time(s) as a fresh request before succeeding.`,
+      ];
+    }
+    if (retryPolicy.enabled) {
+      enriched.generation_retry = {
+        enabled: true,
+        retries: retryPolicy.retries,
+      };
+    }
     if (args._quality_policy_warning) {
       enriched.warnings = [
         ...normalizedStringArray(enriched.warnings),
@@ -3183,6 +3201,7 @@ async function imageContent(result, options = {}) {
 async function providerStatus(requestedProvider) {
   const provider = await resolveProvider(requestedProvider, false);
   const activeProviders = configuredActiveProviders(provider.config);
+  const retry = generationRetryPolicy(provider.config);
   const status = {
     config_path: CONFIG_PATH,
     active_provider: provider.config.active_provider,
@@ -3196,6 +3215,7 @@ async function providerStatus(requestedProvider) {
     api_key_configured: provider.apiKeyConfigured,
     api_key_source: provider.apiKeySource,
     available_providers: Object.keys(provider.config.providers),
+    generation_retry: { enabled: retry.enabled, retries: retry.retries },
     output_dir: finalOutputRoot({}, provider),
     cache_dir: transportOutputRoot({}, provider),
     task_dir: taskStoreRoot(),

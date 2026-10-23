@@ -43,13 +43,15 @@ class MigrateLocalConfigTests(unittest.TestCase):
     def test_workflow_defaults_are_added_once_and_existing_entries_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "providers.json"
-            payload = {"providers": {}, "workflow_connections": {"custom": {"api_key": "test-secret"}}, "workflows": {"custom": {"workflow_id": "123"}}, "active_workflow": "custom"}
+            payload = {"providers": {}, "workflow_connections": {"custom": {"api_key": "test-secret"}}, "workflows": {"custom": {"workflow_id": "123"}}, "active_workflow": "custom", "retry_on_failure": True, "retry_count": 4}
             path.write_text(json.dumps(payload), encoding="utf-8")
             migrate_file(path)
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), payload)
             path.write_text(json.dumps({"providers": {}}), encoding="utf-8")
             self.assertTrue(migrate_file(path))
             migrated = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(migrated["retry_on_failure"], False)
+            self.assertEqual(migrated["retry_count"], 2)
             self.assertEqual(migrated["workflows"]["SeedVR2 放大"]["output_node_ids"], ["170"])
             self.assertEqual(migrated["workflows"]["SeedVR2 放大"]["inputs"]["resolution_k"]["default"], 4)
             self.assertEqual(migrated["workflow_connections"]["runninghub"]["api_key"], "")
