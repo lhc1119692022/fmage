@@ -351,61 +351,234 @@ def size_from_aspect(aspect: float, resolution: str | None) -> tuple[str, list[s
     return f"{width}x{height}", notes
 
 
-def normalize_edit_reference(path: Path, target_size: str, output_dir: Path) -> tuple[Path, list[str]]:
+CROP_INTENT_PATTERN = re.compile(r"裁成|裁切|裁剪|裁掉|(?<![a-z])crop", re.IGNORECASE)
+CROP_NEGATION = ("不要", "不用", "别裁", "不裁", "avoid", "do not", "don't", "no ")
+
+
+def has_crop_intent(prompt: str) -> bool:
+    # "裁成 16:9" asks for a crop of the existing frame; "改成 16:9" asks for a
+    # wider canvas. The requested canvas is the same, but the reference image
+    # must be fitted differently so the two intents do not collapse into one.
+    text = prompt.lower()
+    for match in CROP_INTENT_PATTERN.finditer(text):
+        context = re.split(r"[，。;；、,.!?！？\n]", text[max(0, match.start() - 24):match.start()])[-1]
+        if any(word in context for word in CROP_NEGATION):
+            continue
+        return True
+    return False
+
+
+def crop_reference_to_canvas(
+    path: Path,
+    dimensions: tuple[int, int],
+    target: tuple[int, int],
+    output_dir: Path,
+) -> tuple[Path, list[str]]:
+    from PIL import Image
+    width, height = dimensions
+    target_width, target_height = target
+    target_ratio = target_width / target_height
+    if width / height > target_ratio:
+        crop_width = max(1, min(width, round(height * target_ratio)))
+        crop_height = height
+    else:
+        crop_width = width
+        crop_height = max(1, min(height, round(width / target_ratio)))
+    left = (width - crop_width) // 2
+    top = (height - crop_height) // 2
+    with Image.open(path) as source:
+        cropped = source.convert("RGBA").crop((left, top, left + crop_width, top + crop_height))
+        cropped = cropped.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        output = output_dir / f"{path.stem}-cropped.png"
+        cropped.save(output, format="PNG")
+    return output, ["reference_center_cropped_to_requested_ratio"]
+
+
+def extend_reference_to_canvas(
+    path: Path,
+    dimensions: tuple[int, int],
+    target: tuple[int, int],
+    output_dir: Path,
+) -> tuple[Path, list[str]]:
+    from PIL import Image
+    width, height = dimensions
+    target_width, target_height = target
+    scale = min(target_width / width, target_height / height)
+    scaled_width = max(1, min(target_width, round(width * scale)))
+    scaled_height = max(1, min(target_height, round(height * scale)))
+    left = (target_width - scaled_width) // 2
+    top = (target_height - scaled_height) // 2
+    right = target_width - left - scaled_width
+    bottom = target_height - top - scaled_height
+    with Image.open(path) as source:
+        image = source.convert("RGBA").resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
+        # Opaque bars used to arrive back from the provider as black letterbox
+        # rows, because transparent padding reads as empty canvas. The stretched
+        # base guarantees no transparent gap, and every edge region is then
+        # overwritten with replicated border pixels so the canvas looks like a
+        # plausible continuation the model can repaint.
+        canvas = image.resize((target_width, target_height), Image.Resampling.BILINEAR)
+        canvas.paste(image, (left, top))
+        if left:
+            canvas.paste(image.crop((0, 0, 1, scaled_height)).resize((left, scaled_height)), (0, top))
+        if right:
+            canvas.paste(image.crop((scaled_width - 1, 0, scaled_width, scaled_height)).resize((right, scaled_height)), (left + scaled_width, top))
+        if top:
+            canvas.paste(image.crop((0, 0, scaled_width, 1)).resize((scaled_width, top)), (left, 0))
+        if bottom:
+            canvas.paste(image.crop((0, scaled_height - 1, scaled_width, scaled_height)).resize((scaled_width, bottom)), (left, top + scaled_height))
+        for box, position, size in (
+            ((0, 0, 1, 1), (0, 0), (left, top)),
+            ((scaled_width - 1, 0, scaled_width, 1), (left + scaled_width, 0), (right, top)),
+            ((0, scaled_height - 1, 1, scaled_height), (0, top + scaled_height), (left, bottom)),
+            ((scaled_width - 1, scaled_height - 1, scaled_width, scaled_height), (left + scaled_width, top + scaled_height), (right, bottom)),
+        ):
+            if size[0] > 0 and size[1] > 0:
+                canvas.paste(image.crop(box).resize(size), position)
+        output = output_dir / f"{path.stem}-extended.png"
+        canvas.save(output, format="PNG")
+    notes = ["reference_image_scaled_without_cropping"]
+    if left or right or top or bottom:
+        notes.append("reference_image_edges_extended_without_cropping")
+    return output, notes
+
+
+def prepare_edit_reference(
+    path: Path,
+    target_size: str,
+    output_dir: Path,
+    crop: bool = False,
+) -> tuple[Path, list[str]]:
     dimensions = image_dimensions(path)
     target = parse_size(target_size)
     if not dimensions or not target or dimensions == target:
         return path, []
-    from PIL import Image
-    width, height = dimensions
-    target_width, target_height = target
-    scale = min(1.0, target_width / width, target_height / height)
-    resized = (max(1, int(width * scale)), max(1, int(height * scale)))
-    notes = []
-    if resized != dimensions:
-        notes.append("reference_image_scaled_without_cropping")
-    if resized != target:
-        notes.append("reference_image_padded_without_cropping")
-    with Image.open(path) as source:
-        source = source.convert("RGBA").resize(resized, Image.Resampling.LANCZOS)
-        canvas = Image.new("RGBA", target, (0, 0, 0, 0))
-        canvas.paste(source, ((target_width-resized[0])//2, (target_height-resized[1])//2), source)
-        output = output_dir / f"{path.stem}-normalized.png"
-        canvas.save(output, format="PNG")
-    return output, notes
+    if crop:
+        return crop_reference_to_canvas(path, dimensions, target, output_dir)
+    return extend_reference_to_canvas(path, dimensions, target, output_dir)
+
+
+def aspect_keyword_pattern(keyword: str) -> re.Pattern[str]:
+    # Word-boundary matching keeps "icon" out of "iconic", "story" out of
+    # "storyboard", and "car" out of "cargo"; spaces and hyphens interchange.
+    escaped = r"[\s\-]+".join(re.escape(part) for part in keyword.split())
+    return re.compile(rf"(?<![0-9a-z]){escaped}(?![0-9a-z])")
+
+
+# Framing cues only. Subject nouns such as "car", "suv", "landscape",
+# "character" or "fashion" describe what is in frame, not how wide it is, so
+# they must never select an aspect ratio. Narrower framing cues come first so
+# "ultra wide" resolves to 3:1 instead of losing to the 16:9 rule.
+ASPECT_KEYWORD_RULES: tuple[tuple[float, str, tuple[re.Pattern[str], ...]], ...] = tuple(
+    (aspect, note, tuple(aspect_keyword_pattern(keyword) for keyword in keywords))
+    for aspect, note, keywords in (
+        (9 / 16, "semantic_mobile_story", ("9:16", "reel", "reels", "tiktok", "shorts", "mobile wallpaper", "phone wallpaper", "vertical poster", "phone screen")),
+        (3.0, "semantic_ultrawide", ("3:1", "ultra wide", "ultrawide", "banner", "header image", "wide panorama")),
+        (3 / 4, "semantic_portrait", ("3:4", "portrait", "headshot", "full body", "vertical product")),
+        (16 / 9, "semantic_widescreen", ("16:9", "cinematic", "widescreen", "film still", "panorama", "panoramic", "storyboard")),
+        (4 / 3, "semantic_standard_landscape", ("4:3", "standard horizontal")),
+        (1.0, "semantic_square", ("1:1", "square format", "square canvas", "square crop", "square composition", "icon design", "app icon", "avatar", "sticker")),
+    )
+)
 
 
 def infer_aspect_from_prompt(prompt: str) -> tuple[float | None, str | None]:
     text = prompt.lower()
-    rules: list[tuple[float, str, tuple[str, ...]]] = [
-        (9 / 16, "semantic_mobile_story", ("9:16", "story", "reel", "tiktok", "shorts", "mobile wallpaper", "phone wallpaper", "vertical poster", "phone screen")),
-        (3 / 4, "semantic_portrait", ("3:4", "portrait", "headshot", "full-body", "full body", "character", "fashion", "editorial portrait", "vertical product")),
-        (16 / 9, "semantic_widescreen", ("16:9", "cinematic", "widescreen", "film still", "landscape", "vehicle", "car", "suv", "environment", "panorama", "storyboard")),
-        (4 / 3, "semantic_standard_landscape", ("4:3", "interior", "room", "documentary", "catalog", "standard horizontal")),
-        (1.0, "semantic_square", ("1:1", "square", "icon", "avatar", "logo mark", "pattern tile", "sticker", "centered product")),
-        (3.0, "semantic_ultrawide", ("3:1", "ultra-wide", "ultrawide", "banner", "header image", "wide panorama")),
-    ]
-    for aspect, note, keywords in rules:
-        if any(keyword in text for keyword in keywords):
+    for aspect, note, patterns in ASPECT_KEYWORD_RULES:
+        if any(pattern.search(text) for pattern in patterns):
             return aspect, note
     return None, None
 
 
-def infer_resolution_from_quality(
-    quality: str | None,
-    model: str | None = None,
-) -> tuple[str | None, str | None]:
-    if quality == "low":
-        return "1k", "resolution_inferred_from_low_quality"
-    if quality in {"high", "xhigh", "max"}:
-        resolution = default_resolution_for_model(model)
-        return resolution, f"resolution_inferred_from_{quality}_quality"
-    if quality in {"medium", "auto"} and is_gpt_image_model(model):
-        return "2k", f"resolution_inferred_from_{quality}_quality"
-    if quality in {"medium", "auto", None}:
-        resolution = default_resolution_for_model(model)
-        return resolution, f"resolution_{resolution}_inferred_from_model_default"
+# A literal ratio in the prompt is an instruction, not a hint: "改成 16:9" or a
+# bare trailing "16:9" must win over both the reference image and the semantic
+# keywords. Only recognizable ratios qualify, so a timestamp such as "19:24"
+# is not mistaken for 19:24.
+KNOWN_ASPECT_PAIRS = {
+    (1, 1), (2, 1), (1, 2), (3, 1), (1, 3), (4, 1), (1, 4),
+    (3, 2), (2, 3), (4, 3), (3, 4), (5, 3), (3, 5), (5, 4), (4, 5),
+    (6, 5), (5, 6), (7, 5), (5, 7), (8, 5), (5, 8), (9, 5), (5, 9),
+    (16, 9), (9, 16), (16, 10), (10, 16), (21, 9), (9, 21),
+    (32, 9), (9, 32), (32, 18), (18, 32),
+}
+KNOWN_DECIMAL_ASPECTS = (
+    0.5, 0.5625, 0.625, 0.6667, 0.75, 0.8, 1.0, 1.25, 1.3333, 1.4, 1.5,
+    1.6, 1.6667, 1.7778, 1.85, 1.9, 2.0, 2.2, 2.35, 2.39, 2.4, 2.5, 2.76, 3.0,
+)
+EXPLICIT_RATIO_CONTEXT = (
+    "ratio", "aspect", "画幅", "比例", "改成", "改为", "转为", "换成", "变成",
+    "裁成", "裁剪", "裁切", "扩展", "扩图", "铺满", "outpaint", "reframe", "crop",
+)
+RATIO_TOKEN_PATTERN = re.compile(
+    r"(?<![\d.:/])(\d{1,5}(?:\.\d+)?)\s*[:：/×x比]\s*(\d{1,5}(?:\.\d+)?)(?![\d:])",
+    re.IGNORECASE,
+)
+RATIO_NEGATION = ("不要", "不用", "别用", "别要", "避免", "not ", "avoid", "instead of")
+
+
+def is_known_aspect(left: float, right: float) -> bool:
+    if left.is_integer() and right.is_integer():
+        divisor = math.gcd(int(left), int(right))
+        return (int(left) // divisor, int(right) // divisor) in KNOWN_ASPECT_PAIRS
+    ratio = left / right
+    return any(math.isclose(ratio, value, rel_tol=0.01) for value in KNOWN_DECIMAL_ASPECTS)
+
+
+PIXEL_SIZE_PATTERN = re.compile(
+    r"(?<![\d.])(\d{2,5})\s*[x×*]\s*(\d{2,5})(?![\d.])",
+    re.IGNORECASE,
+)
+
+
+def parse_prompt_size(prompt: str) -> tuple[int, int] | None:
+    # GPT Image takes pixels, not ratios; a ratio is only how we map a request
+    # onto a canvas. A pixel pair in the prompt is therefore a size instruction
+    # and outranks any ratio wording, while small pairs such as 16x9 stay ratios.
+    for match in PIXEL_SIZE_PATTERN.finditer(prompt):
+        width, height = int(match.group(1)), int(match.group(2))
+        if min(width, height) < 100:
+            continue
+        if max(width, height) > 8192:
+            continue
+        return width, height
+    return None
+
+
+def parse_prompt_aspect(prompt: str) -> tuple[float | None, str | None]:
+    text = prompt.lower()
+    for match in RATIO_TOKEN_PATTERN.finditer(text):
+        left_text, right_text = match.group(1), match.group(2)
+        left, right = float(left_text), float(right_text)
+        if left <= 0 or right <= 0:
+            continue
+        ratio = left / right
+        if not 0.2 <= ratio <= 5.0:
+            continue
+        context = text[max(0, match.start() - 24):match.start()]
+        context = re.split(r"[，。;；、,.!?！？\n]", context)[-1]
+        without_negation = context
+        for word in RATIO_NEGATION:
+            without_negation = without_negation.replace(word, " ")
+        contrast = ("but", "而是", "要", "use", "用", "改")
+        if any(word in context for word in RATIO_NEGATION) and not any(
+            word in without_negation for word in contrast
+        ):
+            continue
+        if is_known_aspect(left, right):
+            return ratio, f"{left_text}:{right_text}"
+        if any(word in context for word in EXPLICIT_RATIO_CONTEXT):
+            return ratio, f"{left_text}:{right_text}"
     return None, None
+
+
+def selected_resolution(args: argparse.Namespace) -> tuple[str, list[str]]:
+    resolution = (args.resolution or "").strip()
+    if resolution and resolution.lower() != "auto":
+        return resolution, []
+    # Quality is fidelity, not canvas: `low` still renders at the default tier
+    # and only an explicit `resolution` moves it.
+    default = default_resolution_for_model(args.model)
+    return default, [f"default_resolution_{default}"]
 
 
 def resolve_size(args: argparse.Namespace, image_paths: list[Path], primary_index: int = 0) -> tuple[str, list[str]]:
@@ -417,7 +590,37 @@ def resolve_size(args: argparse.Namespace, image_paths: list[Path], primary_inde
         return f"{width}x{height}", notes
 
     notes: list[str] = []
+    # A pixel pair in the prompt is a size instruction, not a ratio hint, so it
+    # outranks every later reading of the same numbers.
+    prompt_size = parse_prompt_size(read_prompt(args))
+    if prompt_size:
+        width, height, padding_notes = normalize_padding(*prompt_size)
+        notes.append(f"explicit_prompt_size_{prompt_size[0]}x{prompt_size[1]}")
+        return f"{width}x{height}", notes + padding_notes
+
     aspect = parse_aspect(args.aspect) if args.aspect else None
+
+    # A literal ratio written in the prompt is an explicit instruction, so it
+    # outranks the reference image and the semantic keyword guess.
+    if aspect is None:
+        prompt_aspect, prompt_token = parse_prompt_aspect(read_prompt(args))
+        if prompt_aspect is not None:
+            aspect = prompt_aspect
+            notes.append(f"explicit_prompt_aspect_{prompt_token}")
+
+    # An edit is anchored to the supplied image: with no explicit size, aspect,
+    # or tier, its own pixels normalized to legal dimensions ARE the canvas.
+    # Only a stated ratio or tier makes the transport compute a new size.
+    if aspect is None and args.command == "edit" and image_paths:
+        dimensions = image_dimensions(image_paths[primary_index])
+        if dimensions:
+            aspect = dimensions[0] / dimensions[1]
+            reference_note = "from_first_reference_image" if primary_index == 0 else "from_primary_reference_image"
+            if not args.resolution or args.resolution.lower() == "auto":
+                width, height, padding_notes = normalize_padding(dimensions[0], dimensions[1])
+                return f"{width}x{height}", [reference_note] + padding_notes
+            notes.append(reference_note)
+
     if aspect is None:
         inferred_aspect, aspect_note = infer_aspect_from_prompt(read_prompt(args))
         if inferred_aspect is not None:
@@ -425,20 +628,9 @@ def resolve_size(args: argparse.Namespace, image_paths: list[Path], primary_inde
             if aspect_note:
                 notes.append(aspect_note)
 
-    if aspect is None and args.command == "edit" and image_paths:
-        dimensions = image_dimensions(image_paths[primary_index])
-        if dimensions:
-            aspect = dimensions[0] / dimensions[1]
-            if not args.resolution:
-                width, height, notes = normalize_padding(dimensions[0], dimensions[1])
-                return f"{width}x{height}", ["from_first_reference_image"] + notes
-
     if aspect is not None:
-        resolution = args.resolution
-        if not resolution or resolution.lower() == "auto":
-            resolution, resolution_note = infer_resolution_from_quality(args.quality, args.model)
-            if resolution_note:
-                notes.append(resolution_note)
+        resolution, resolution_notes = selected_resolution(args)
+        notes.extend(resolution_notes)
         size, size_notes = size_from_aspect(aspect, resolution)
         return size, notes + size_notes
 
@@ -446,13 +638,10 @@ def resolve_size(args: argparse.Namespace, image_paths: list[Path], primary_inde
         size, size_notes = size_from_aspect(1.0, args.resolution)
         return size, ["square_size_from_resolution_without_aspect"] + size_notes
 
-    resolution, resolution_note = infer_resolution_from_quality(args.quality, args.model)
-    effective_resolution = resolution or default_resolution_for_model(args.model)
-    size, size_notes = size_from_aspect(1.0, effective_resolution)
-    notes = [f"fallback_{effective_resolution}_square"]
-    if resolution_note:
-        notes.append(resolution_note)
-    return size, notes + size_notes
+    # Nothing names a canvas at all. A square is an invented shape, so defer to
+    # the provider and report what comes back. The agent is expected to choose
+    # the framing, which keeps this path rare.
+    return "auto", ["auto_size_without_framing_signal"]
 
 
 def read_prompt(args: argparse.Namespace) -> str:
@@ -967,7 +1156,12 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     run_dir.mkdir(parents=True, exist_ok=True)
     timing["output_dir_created_at"] = iso_now()
     if not args.size and not args.aspect:
-        output, notes = normalize_edit_reference(image_paths[primary_index], size, run_dir)
+        output, notes = prepare_edit_reference(
+            image_paths[primary_index],
+            size,
+            run_dir,
+            crop=has_crop_intent(prompt),
+        )
         image_paths[primary_index] = output
         size_notes.extend(notes)
 

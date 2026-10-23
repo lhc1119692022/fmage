@@ -455,14 +455,14 @@ class ServerRoutingTests(unittest.TestCase):
             ["true"],
         )
         self.assertEqual(image808["request"]["response_format"], "url")
-        self.assertEqual(image808["request"]["size"], "2048x2048")
+        self.assertEqual(image808["request"]["size"], "auto")
         self.assertEqual(image808["request"]["quality"], "high")
         self.assertEqual(image808["remote_async"]["total_timeout_seconds"], 321)
 
         self.assertEqual(lookalike["provider_transport"], "openai-images")
         self.assertNotIn("async", urllib.parse.parse_qs(urllib.parse.urlsplit(lookalike["endpoint"]).query))
         self.assertNotIn("response_format", lookalike["request"])
-        self.assertEqual(lookalike["request"]["size"], "2048x2048")
+        self.assertEqual(lookalike["request"]["size"], "auto")
         self.assertEqual(lookalike["request"]["quality"], "high")
 
         explicit_medium = call_server(
@@ -475,7 +475,7 @@ class ServerRoutingTests(unittest.TestCase):
                 "dry_run": True,
             },
         )
-        self.assertEqual(explicit_medium["request"]["size"], "2048x2048")
+        self.assertEqual(explicit_medium["request"]["size"], "auto")
         self.assertEqual(explicit_medium["request"]["quality"], "medium")
 
     def test_legacy_transport_name_is_rejected(self) -> None:

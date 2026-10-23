@@ -279,13 +279,13 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         self.assertIn("error", response)
         self.assertIn("prompt_mode must be", response["error"]["message"])
 
-    def test_default_quality_high_keeps_resolution_at_2k(self) -> None:
+    def test_default_quality_high_does_not_invent_a_canvas(self) -> None:
         config = self.clean_config()
         response = self.call_image_tool(config, prompt="plain test image")
         self.assertNotIn("error", response)
         request = response["result"]["structuredContent"]["request"]
         self.assertEqual(request["quality"], "high")
-        self.assertEqual(request["size"], "2048x2048")
+        self.assertEqual(request["size"], "auto")
 
     def test_image_family_versions_keep_default_quality_and_wire_id(self) -> None:
         for model in (
@@ -344,7 +344,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
                             if tool.endswith("_batch"):
                                 self.assertEqual(result["completed_count"], 2)
                                 self.assertEqual(result["failed_count"], 0)
-                                self.assertIn(f"resolution_inferred_from_{quality or 'high'}_quality", result["notes"])
+                                self.assertIn("default_resolution_2k", result["notes"])
                             self.assertNotIn("Mapped quality=", json.dumps(response))
 
     def test_model_lookalikes_do_not_inherit_image_family_default_quality(self) -> None:
@@ -379,7 +379,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         result = response["result"]["structuredContent"]
         self.assertEqual(result["request"]["prompt"], prompt)
         self.assertNotIn("resolution", result["request"])
-        self.assertEqual(result["request"]["size"], "2048x2048")
+        self.assertEqual(result["request"]["size"], "auto")
         self.assertTrue(any("visual-quality language" in warning for warning in result["warnings"]))
 
     def test_unrequested_jpeg_falls_back_to_png(self) -> None:

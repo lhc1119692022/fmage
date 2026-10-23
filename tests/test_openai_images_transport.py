@@ -43,24 +43,29 @@ def shape_args(model: str, command: str = "generate") -> argparse.Namespace:
 
 
 class Image2DefaultResolutionTests(unittest.TestCase):
-    def test_image_models_default_to_2k(self) -> None:
-        size, notes = transport.resolve_size(shape_args("gpt-image-2"), [])
-        self.assertEqual(size, "2048x2048")
-        self.assertIn("fallback_2k_square", notes)
+    def test_unframed_image_requests_defer_to_auto_size(self) -> None:
+        for model in ("gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
+            with self.subTest(model=model):
+                size, notes = transport.resolve_size(shape_args(model), [])
+                self.assertEqual(size, "auto")
+                self.assertIn("auto_size_without_framing_signal", notes)
 
-    def test_image_2_5_models_default_to_2k(self) -> None:
-        for model in ("gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
-            size, notes = transport.resolve_size(shape_args(model), [])
-            self.assertEqual(size, "2048x2048")
-            self.assertIn("fallback_2k_square", notes)
+    def test_quality_does_not_invent_a_canvas(self) -> None:
+        for quality in ("low", "medium", "high", "xhigh", "max"):
+            with self.subTest(quality=quality):
+                args = shape_args("gpt-image-2.5-sunburst")
+                args.quality = quality
+                size, _ = transport.resolve_size(args, [])
+                self.assertEqual(size, "auto")
 
-    def test_edit_uses_primary_image_dimensions_without_resolution(self) -> None:
+    def test_edit_uses_reference_pixels_when_nothing_is_stated(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             image_path = Path(temp_dir) / "reference.png"
             Image.new("RGB", (2048, 1024), (1, 2, 3)).save(image_path)
             openai_size, notes = transport.resolve_size(shape_args("gpt-image-2-token", "edit"), [image_path])
             self.assertEqual(openai_size, "2048x1024")
             self.assertIn("from_first_reference_image", notes)
+            self.assertNotIn("default_resolution_2k", notes)
 
     def test_edit_resolution_keeps_primary_image_aspect(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -79,22 +84,25 @@ class Image2DefaultResolutionTests(unittest.TestCase):
     def test_explicit_resolution_still_overrides_image_2_default(self) -> None:
         args = shape_args("gpt-image-2")
         args.resolution = "1k"
-        size, _ = transport.resolve_size(args, [])
-        self.assertLessEqual(transport.parse_size(size)[0] * transport.parse_size(size)[1], 1_048_576)
-
-    def test_explicit_medium_quality_keeps_image_2_at_2k(self) -> None:
-        args = shape_args("gpt-image-2")
-        args.quality = "medium"
         size, notes = transport.resolve_size(args, [])
-        self.assertEqual(size, "2048x2048")
-        self.assertIn("resolution_inferred_from_medium_quality", notes)
+        self.assertLessEqual(transport.parse_size(size)[0] * transport.parse_size(size)[1], 1_048_576)
+        self.assertIn("square_size_from_resolution_without_aspect", notes)
 
-    def test_quality_maps_resolution_without_explicit_aspect(self) -> None:
-        openai_args = shape_args("gpt-image-2")
-        openai_args.quality = "high"
-        openai_size, openai_notes = transport.resolve_size(openai_args, [])
-        self.assertEqual(openai_size, "2048x2048")
-        self.assertIn("resolution_inferred_from_high_quality", openai_notes)
+    def test_quality_maps_resolution_once_an_aspect_exists(self) -> None:
+        args = shape_args("gpt-image-2")
+        args.quality = "high"
+        args.aspect = "16:9"
+        size, notes = transport.resolve_size(args, [])
+        self.assertEqual(size, "2736x1536")
+        self.assertIn("default_resolution_2k", notes)
+
+    def test_low_quality_keeps_the_default_tier(self) -> None:
+        args = shape_args("gpt-image-2")
+        args.quality = "low"
+        args.aspect = "16:9"
+        size, notes = transport.resolve_size(args, [])
+        self.assertEqual(size, "2736x1536")
+        self.assertIn("default_resolution_2k", notes)
 
     def test_extended_quality_keeps_default_resolution_with_and_without_aspect(self) -> None:
         for quality in ("xhigh", "max"):
@@ -104,8 +112,179 @@ class Image2DefaultResolutionTests(unittest.TestCase):
                     args.quality = quality
                     args.aspect = aspect
                     size, notes = transport.resolve_size(args, [])
-                    self.assertEqual(size, "2736x1536" if aspect else "2048x2048")
-                    self.assertIn(f"resolution_inferred_from_{quality}_quality", notes)
+                    self.assertEqual(size, "2736x1536" if aspect else "auto")
+                    if aspect:
+                        self.assertIn("default_resolution_2k", notes)
+
+
+class AspectSelectionTests(unittest.TestCase):
+    def test_edit_reference_aspect_beats_expanded_prompt_keywords(self) -> None:
+        prompt = (
+            "Image 1: edit target - a production-style automotive photograph of a lilac-purple "
+            "car on a wet apron with a cinematic wide panoramic sky and landscape behind it."
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            Image.new("RGB", (2095, 726), (1, 2, 3)).save(reference)
+            args = shape_args("gpt-image-2.5-sunburst", "edit")
+            args.prompt = prompt
+            args.resolution = "1k"
+            size, notes = transport.resolve_size(args, [reference])
+            self.assertEqual(size, "1744x608")
+            self.assertIn("from_first_reference_image", notes)
+            self.assertFalse([note for note in notes if note.startswith("semantic_")])
+
+    def test_explicit_aspect_still_overrides_reference_image(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            Image.new("RGB", (2095, 726), (1, 2, 3)).save(reference)
+            args = shape_args("gpt-image-2.5-sunburst", "edit")
+            args.resolution = "1k"
+            args.aspect = "16:9"
+            size, _ = transport.resolve_size(args, [reference])
+            self.assertEqual(size, "1360x768")
+
+    def test_subject_nouns_do_not_select_aspect(self) -> None:
+        for prompt in (
+            "a car on a wet road",
+            "an suv parked beside a vehicle",
+            "a landscape with a character in fashion clothing",
+            "a room interior, documentary still",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assertEqual(transport.infer_aspect_from_prompt(prompt), (None, None))
+
+    def test_framing_keywords_need_word_boundaries(self) -> None:
+        cases = (
+            ("an iconic brutalist tower", None),
+            ("a cargo ship at dusk", None),
+            ("storyboard of a chase", 16 / 9),
+            ("a phone wallpaper gradient", 9 / 16),
+        )
+        for prompt, expected in cases:
+            with self.subTest(prompt=prompt):
+                aspect, _ = transport.infer_aspect_from_prompt(prompt)
+                if expected is None:
+                    self.assertIsNone(aspect)
+                else:
+                    self.assertAlmostEqual(aspect, expected)
+
+    def test_ultrawide_phrase_resolves_to_three_to_one(self) -> None:
+        aspect, note = transport.infer_aspect_from_prompt("ultra-wide banner of sand dunes")
+        self.assertEqual(aspect, 3.0)
+        self.assertEqual(note, "semantic_ultrawide")
+        size, _ = transport.size_from_aspect(aspect, "1k")
+        width, height = transport.parse_size(size)
+        self.assertGreater(width / height, 2.9)
+
+
+class PromptRatioTests(unittest.TestCase):
+    def test_trailing_bare_ratio_sets_edit_canvas(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            Image.new("RGB", (2095, 726), (1, 2, 3)).save(reference)
+            args = shape_args("gpt-image-2.5-sunburst", "edit")
+            args.prompt = "给天空增加一点蓝 16:9"
+            args.resolution = "1k"
+            size, notes = transport.resolve_size(args, [reference])
+            self.assertEqual(size, "1360x768")
+            self.assertIn("explicit_prompt_aspect_16:9", notes)
+            self.assertNotIn("from_first_reference_image", notes)
+
+    def test_ratio_wording_overrides_reference_image(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            Image.new("RGB", (2095, 726), (1, 2, 3)).save(reference)
+            args = shape_args("gpt-image-2.5-sunburst", "edit")
+            args.prompt = "把图片改成4:3"
+            args.resolution = "1k"
+            size, notes = transport.resolve_size(args, [reference])
+            self.assertEqual(size, "1184x880")
+            self.assertIn("explicit_prompt_aspect_4:3", notes)
+
+    def test_reference_ratio_survives_without_a_stated_ratio(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            Image.new("RGB", (2095, 726), (1, 2, 3)).save(reference)
+            args = shape_args("gpt-image-2.5-sunburst", "edit")
+            args.prompt = "拍摄于 19:24 的黄昏，给天空增加一点蓝"
+            args.resolution = "1k"
+            size, notes = transport.resolve_size(args, [reference])
+            self.assertEqual(size, "1744x608")
+            self.assertIn("from_first_reference_image", notes)
+
+    def test_prompt_pixel_size_outranks_ratio_wording(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            Image.new("RGB", (2095, 726), (1, 2, 3)).save(reference)
+            args = shape_args("gpt-image-2.5-sunburst", "edit")
+            args.prompt = "改成 4:3，输出 1920x1080"
+            args.resolution = "1k"
+            size, notes = transport.resolve_size(args, [reference])
+            self.assertEqual(size, "1920x1088")
+            self.assertIn("explicit_prompt_size_1920x1080", notes)
+            self.assertNotIn("explicit_prompt_aspect_4:3", notes)
+
+    def test_prompt_pixel_size_ignores_the_resolution_tier(self) -> None:
+        args = shape_args("gpt-image-2.5-sunburst")
+        args.prompt = "3840x2160 的海报"
+        args.resolution = "1k"
+        size, _ = transport.resolve_size(args, [])
+        self.assertEqual(size, "3840x2160")
+
+    def test_small_pairs_remain_ratios_not_pixel_sizes(self) -> None:
+        self.assertIsNone(transport.parse_prompt_size("改成 16x9"))
+        self.assertEqual(transport.parse_prompt_aspect("改成 16x9"), (16 / 9, "16:9"))
+
+    def test_negated_ratio_is_skipped(self) -> None:
+        self.assertEqual(transport.parse_prompt_aspect("不要16比9，要4比3"), (4 / 3, "4:3"))
+        self.assertEqual(transport.parse_prompt_aspect("不要 16:9"), (None, None))
+
+    def test_pixel_dimensions_read_as_a_ratio(self) -> None:
+        aspect, token = transport.parse_prompt_aspect("输出 1920x1080")
+        self.assertAlmostEqual(aspect, 16 / 9)
+        self.assertEqual(token, "1920:1080")
+
+
+class EditReferencePreparationTests(unittest.TestCase):
+    @staticmethod
+    def horizontal_gradient(path: Path, size: tuple[int, int]) -> None:
+        width, height = size
+        strip = Image.new("L", (width, 1))
+        strip.putdata([round(255 * index / (width - 1)) for index in range(width)])
+        strip.resize(size).convert("RGB").save(path)
+
+    def test_extend_replicates_edges_instead_of_padding_transparent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            self.horizontal_gradient(reference, (600, 200))
+            output, notes = transport.prepare_edit_reference(reference, "320x240", Path(temp_dir))
+            with Image.open(output) as image:
+                self.assertEqual(image.size, (320, 240))
+                self.assertEqual(image.mode, "RGBA")
+                self.assertEqual(image.getpixel((0, 0))[3], 255)
+                self.assertLess(image.getpixel((0, 0))[0], 10)
+            self.assertIn("reference_image_edges_extended_without_cropping", notes)
+            self.assertNotIn("reference_image_padded_without_cropping", notes)
+
+    def test_crop_intent_center_crops_to_the_requested_canvas(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            self.horizontal_gradient(reference, (600, 200))
+            output, notes = transport.prepare_edit_reference(
+                reference, "320x240", Path(temp_dir), crop=True
+            )
+            with Image.open(output) as image:
+                self.assertEqual(image.size, (320, 240))
+                self.assertGreater(image.getpixel((0, 0))[0], 40)
+            self.assertIn("reference_center_cropped_to_requested_ratio", notes)
+
+    def test_crop_intent_detection_distinguishes_resize_from_crop(self) -> None:
+        self.assertTrue(transport.has_crop_intent("裁成16:9"))
+        self.assertTrue(transport.has_crop_intent("crop it to 16:9"))
+        self.assertFalse(transport.has_crop_intent("改成16:9"))
+        self.assertFalse(transport.has_crop_intent("给天空增加一点蓝"))
+        self.assertFalse(transport.has_crop_intent("Do not crop; keep the full frame."))
 
 
 class Image25QualityTests(unittest.TestCase):

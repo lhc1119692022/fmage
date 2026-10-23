@@ -53,6 +53,7 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 - If Fmage tools are not visible, first run proper tool discovery and `get_provider_status`. If the tools still cannot be called, report the blocker instead of silently switching to another image tool or local script.
 - After any Fmage image call fails or returns partial results, stop and report the failure. Do not retry, change parameters, query providers to find an alternative, or switch providers unless the user explicitly asks or approves it.
 - Treat Fmage `1k`/`2k`/`3k`/`4k` values as resolution tiers. For `openai-images`, the normalized `requested_size` is authoritative; when actual dimensions match it and no size warning is present, do not describe the output as undersized or compare it with `4096x4096`.
+- Pixel dimensions outrank ratios: a stated `1920x1080` is sent as pixels rather than re-derived from a tier. A generate request defaults to the `2k` tier at the chosen aspect, while an edit with no explicit canvas keeps the reference's own pixels normalized to a legal size. `quality` never moves the tier. When a generate request names no canvas, `requested_size` is `auto` and the provider's returned dimensions stand as delivered.
 
 ## Image Entry Points
 
