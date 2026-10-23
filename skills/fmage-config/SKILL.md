@@ -63,6 +63,7 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
   polls the failed request. Rate limits, concurrency limits, gateway 5xx, timeouts and network errors
   are retried; auth and validation errors are not. Failures that already own a remote task or have
   unknown submission state are never retried. Preserve both fields during unrelated edits.
+  The Desktop settings page offers the same two fields on its 重试 tab.
 - Omit timeout to use runtime defaults. Explicit positive values are preserved and request-level
   values override provider values. Migration removes the former forced 600 value; it never adds
   a timeout. Explicit budgets cover download, submission, polling and delivery together.

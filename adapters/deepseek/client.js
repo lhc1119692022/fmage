@@ -10,6 +10,9 @@ window.__ModuleLoader__.load({
     const ROUTE = 'api/fmage.config';
     const REVEAL = 'api/fmage.config.reveal';
     const MODELS = 'api/fmage.models';
+    // Mirrors adapters/deepseek/config-api.mjs; the Host rejects anything else.
+    const DEFAULT_RETRY_COUNT = 2;
+    const MAX_RETRY_COUNT = 10;
     const CSS_ID = 'dsh-fmage/settings.css';
     const CSS = `
 .fmg{max-width:760px;display:flex;flex-direction:column;gap:14px;color:var(--dsw-alias-label-primary);font-size:13px}
@@ -55,6 +58,11 @@ window.__ModuleLoader__.load({
 .fmg-icon:focus-visible,.fmg-tab:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}
 .fmg-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0 0;margin-top:6px;background:var(--dsw-alias-bg-layer-2);border-top:.5px solid var(--dsw-alias-border-l4)}
 .fmg-panel{display:flex;flex-direction:column;gap:10px;padding-bottom:4px}
+.fmg-setting{display:flex;align-items:center;gap:14px;border:.5px solid var(--dsw-alias-border-l2);border-radius:12px;padding:10px 12px}
+.fmg-setting-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.fmg-setting-title{font-weight:600}
+.fmg-setting .fmg-hint{margin:0}
+.fmg-count{max-width:120px}
 .fmg-grow{flex:1}
 .fmg-error{color:var(--dsw-alias-state-danger-primary,#d33)}
 .fmg-ok{color:var(--dsw-alias-label-tertiary)}
@@ -62,7 +70,7 @@ window.__ModuleLoader__.load({
 `;
     const zh = {
       nav: 'Fmage 生图', title: 'Fmage 生图',
-      tabProviders: '提供商', tabWorkflows: '工作流', tabPaths: '目录',
+      tabProviders: '提供商', tabWorkflows: '工作流', tabPaths: '目录', tabRetry: '重试',
       add: '添加提供商', addConnection: '添加连接', addWorkflow: '添加工作流',
       name: '名称', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API Key',
       enable: '启用 {name}', remove: '移除', show: '显示密钥', hide: '隐藏密钥',
@@ -74,13 +82,17 @@ window.__ModuleLoader__.load({
       connections: 'RunningHub 连接', workflows: '工作流', connection: '连接', workflowId: '工作流 ID',
       outputs: '输出节点', outputsHint: '多个节点 ID 用逗号分隔', instance: '实例类型', description: '说明', inputs: '输入映射 (JSON)',
       outputDir: '输出目录', cacheDir: '缓存目录', pathHint: '留空使用 Fmage 默认位置。',
+      retryEnabled: '失败后自动重试', retryEnabledHint: '每次重试都发起一次全新的上游请求，不会复用已失败的结果。',
+      retryHint: '对所有提供商生效：仅对限流、并发不足、网关 5xx、超时和网络中断等临时失败重试；鉴权或参数错误会立即返回，已提交到远端的任务不会重复提交。',
+      retryCount: '重试次数', retryCountHint: '额外尝试次数，0–10，默认 2；0 表示不额外尝试，开关关闭时该值不生效。',
+      retryInvalid: '重试次数必须是 0 到 10 之间的整数。',
       save: '保存', saving: '保存中…', reset: '放弃修改', reload: '重新读取', loading: '读取中…', saved: '已保存，新请求即生效。',
       dirty: '有未保存的修改', none: '暂无条目', noFile: '配置文件尚不存在，保存后自动创建。',
       invalidJson: '{name} 的输入映射不是有效 JSON', confirmRemove: '移除“{name}”？保存后生效。',
     };
     const en = {
       nav: 'Fmage images', title: 'Fmage images',
-      tabProviders: 'Providers', tabWorkflows: 'Workflows', tabPaths: 'Folders',
+      tabProviders: 'Providers', tabWorkflows: 'Workflows', tabPaths: 'Folders', tabRetry: 'Retry',
       add: 'Add provider', addConnection: 'Add connection', addWorkflow: 'Add workflow',
       name: 'Name', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API key',
       enable: 'Enable {name}', remove: 'Remove', show: 'Show key', hide: 'Hide key',
@@ -92,6 +104,10 @@ window.__ModuleLoader__.load({
       connections: 'RunningHub connections', workflows: 'Workflows', connection: 'Connection', workflowId: 'Workflow ID',
       outputs: 'Output nodes', outputsHint: 'Separate node IDs with commas', instance: 'Instance type', description: 'Description', inputs: 'Input mapping (JSON)',
       outputDir: 'Output folder', cacheDir: 'Cache folder', pathHint: 'Leave empty to use the Fmage default.',
+      retryEnabled: 'Retry failed generations', retryEnabledHint: 'Each retry sends a fresh upstream request and never reuses the failed result.',
+      retryHint: 'Applies to every provider: only transient failures are retried — rate limits, concurrency limits, gateway 5xx, timeouts, and network errors. Auth and validation errors return immediately, and a task already submitted upstream is never resubmitted.',
+      retryCount: 'Retries', retryCountHint: 'Extra attempts, 0–10, default 2. 0 means no extra attempt; ignored while the switch is off.',
+      retryInvalid: 'Retries must be a whole number from 0 to 10.',
       save: 'Save', saving: 'Saving…', reset: 'Discard changes', reload: 'Reload', loading: 'Loading…', saved: 'Saved. New requests use it.',
       dirty: 'Unsaved changes', none: 'No entries', noFile: 'The config file does not exist yet; saving creates it.',
       invalidJson: 'Input mapping for {name} is not valid JSON', confirmRemove: 'Delete "{name}"? Takes effect after saving.',
@@ -128,8 +144,17 @@ window.__ModuleLoader__.load({
         // Default workflow tracked by row id, so renaming it keeps the marker.
         defaultWorkflow: (workflows.find(w => w.name === view.active_workflow) || {}).id || null,
         output_dir: view.output_dir, cache_dir: view.cache_dir,
+        retry_on_failure: view.retry_on_failure === true,
+        retry_count: String(view.retry_count ?? DEFAULT_RETRY_COUNT),
       };
     };
+    /** Retry count stays a string while editing, so the field can be empty mid-edit. */
+    function retryCountOf(value, t) {
+      const raw = String(value).trim();
+      const count = Number(raw);
+      if (!raw || !Number.isInteger(count) || count < 0 || count > MAX_RETRY_COUNT) throw new Error(t('retryInvalid'));
+      return count;
+    }
     function toChanges(draft, t) {
       const active = draft.workflows.find(w => w.id === draft.defaultWorkflow);
       const secret = row => row.api_key === undefined ? {} : { api_key: row.api_key };
@@ -144,6 +169,7 @@ window.__ModuleLoader__.load({
             instance_type: w.instance_type, output_node_ids: w.outputs.split(/[,\s]+/).filter(Boolean), inputs };
         }),
         active_workflow: active ? active.name : null, output_dir: draft.output_dir, cache_dir: draft.cache_dir,
+        retry_on_failure: draft.retry_on_failure === true, retry_count: retryCountOf(draft.retry_count, t),
       };
     }
     /** Insertion slot in the original list for dropping before/after a target row. */
@@ -413,7 +439,7 @@ window.__ModuleLoader__.load({
       const addWorkflow = () => workflows.add({
         id: key(), from: null, name: '', connection: connectionNames[0] || '', workflow_id: '', description: '', instance_type: 'default', outputs: '', inputsText: '{}',
       });
-      const tabs = [['providers', t('tabProviders')], ['workflows', t('tabWorkflows')], ['paths', t('tabPaths')]];
+      const tabs = [['providers', t('tabProviders')], ['workflows', t('tabWorkflows')], ['paths', t('tabPaths')], ['retry', t('tabRetry')]];
       const empty = list => list.length ? null : h('p', { className: 'fmg-empty' }, t('none'));
       const connectionNames = draft.connections.map(c => c.name).filter(Boolean);
       const panels = {
@@ -455,6 +481,24 @@ window.__ModuleLoader__.load({
           h('div', { key: 'f', className: 'fmg-fields' },
             Field({ id: 'fmg-out', label: t('outputDir'), children: h('input', { id: 'fmg-out', value: draft.output_dir, spellCheck: false, onChange: e => set({ output_dir: e.target.value }) }) }),
             Field({ id: 'fmg-cache', label: t('cacheDir'), children: h('input', { id: 'fmg-cache', value: draft.cache_dir, spellCheck: false, onChange: e => set({ cache_dir: e.target.value }) }) })),
+        ],
+        retry: [
+          h('p', { key: 'i', className: 'fmg-intro' }, t('retryHint')),
+          h('div', { key: 's', className: 'fmg-setting' },
+            h('div', { className: 'fmg-setting-main' },
+              h('span', { className: 'fmg-setting-title' }, t('retryEnabled')),
+              h('p', { className: 'fmg-hint' }, t('retryEnabledHint'))),
+            h(Switch, {
+              checked: draft.retry_on_failure, label: t('retryEnabled'),
+              onChange: retry_on_failure => set({ retry_on_failure }),
+            })),
+          h('div', { key: 'f', className: 'fmg-fields' },
+            Field({ id: 'fmg-retry-count', label: t('retryCount'), wide: true, children: h(React.Fragment, null,
+              h('input', {
+                id: 'fmg-retry-count', className: 'fmg-count', type: 'number', min: 0, max: MAX_RETRY_COUNT, step: 1,
+                inputMode: 'numeric', value: draft.retry_count, onChange: e => set({ retry_count: e.target.value }),
+              }),
+              h('p', { className: 'fmg-hint' }, t('retryCountHint'))) })),
         ],
       };
       return h('section', { className: 'fmg', 'aria-labelledby': 'fmg-title' },

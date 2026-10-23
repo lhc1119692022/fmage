@@ -37,13 +37,21 @@ test('settings page pins providers and lists fetched models', { skip: !available
     ],
     workflow_connections: [], active_workflow: null, workflows: [],
     output_dir: '', cache_dir: '',
+    retry_on_failure: false, retry_count: 2,
   };
   let modelRequests = 0;
+  let saved = null;
   const calls = [];
   const response = body => ({ ok: true, status: 200, json: async () => body });
   const fetchStub = async (url, init) => {
     calls.push(String(url));
-    if (url === 'api/fmage.config') return response(view);
+    if (url === 'api/fmage.config') {
+      if (init && init.method === 'PUT') {
+        saved = JSON.parse(init.body);
+        return response({ ...view, retry_on_failure: true, retry_count: 4 });
+      }
+      return response(view);
+    }
     if (url === 'api/fmage.models') {
       modelRequests += 1;
       const body = JSON.parse(init.body);
@@ -61,7 +69,10 @@ test('settings page pins providers and lists fetched models', { skip: !available
   vm.runInNewContext(source, { window, document: window.document, fetch: fetchStub });
   const primitives = {
     Button: ({ children, ...props }) => React.createElement('button', props, children),
-    Switch: ({ checked, label }) => React.createElement('button', { role: 'switch', 'aria-checked': checked, 'aria-label': label }),
+    Switch: ({ checked, label, onChange }) => React.createElement('button', {
+      role: 'switch', 'aria-checked': checked, 'aria-label': label,
+      onClick: () => onChange?.(!checked),
+    }),
   };
   const plugin = registered.factory(id => id === '@deepseek-ai/dsh-client-ui-primitives' ? primitives : requireReact(id));
   let dictionaries; let registration; let component;
@@ -113,6 +124,47 @@ test('settings page pins providers and lists fetched models', { skip: !available
   assert.equal(modelInput.value, 'gpt-image-2.5-sunburst');
   assert.equal(modelRequests, 1);
   assert.ok(calls.includes('api/fmage.models'));
+
+  const retryTab = [...container.querySelectorAll('button[role="tab"]')].find(button => button.textContent === '重试');
+  assert.ok(retryTab, 'retry tab is rendered');
+  await act(async () => { retryTab.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
+  const retrySwitch = container.querySelector('button[role="switch"][aria-label="失败后自动重试"]');
+  assert.ok(retrySwitch, 'retry switch is rendered');
+  assert.equal(retrySwitch.getAttribute('aria-checked'), 'false');
+  await act(async () => { retrySwitch.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
+  assert.equal(container.querySelector('button[role="switch"]').getAttribute('aria-checked'), 'true');
+
+  const countLabel = [...container.querySelectorAll('label')].find(label => label.textContent === '重试次数');
+  assert.ok(countLabel, 'retry count field is visible');
+  const countInput = window.document.getElementById(countLabel.htmlFor);
+  assert.equal(countInput.value, '2');
+  assert.equal(countInput.max, '10');
+  const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  await act(async () => {
+    setValue.call(countInput, '4');
+    countInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+  assert.equal(countInput.value, '4');
+
+  const saveButton = [...container.querySelectorAll('button')].find(button => button.textContent === '保存');
+  assert.ok(saveButton, 'save button is rendered');
+  assert.equal(saveButton.disabled, false);
+  await act(async () => { saveButton.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
+  await act(async () => {});
+  assert.equal(saved.changes.retry_on_failure, true);
+  assert.equal(saved.changes.retry_count, 4);
+  assert.equal(saved.changes.output_dir, '');
+
+  const accepted = saved;
+  const countAfterSave = window.document.getElementById('fmg-retry-count');
+  await act(async () => {
+    setValue.call(countAfterSave, '11');
+    countAfterSave.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+  const saveAgain = [...container.querySelectorAll('button')].find(button => button.textContent === '保存');
+  await act(async () => { saveAgain.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
+  assert.equal(saved, accepted, 'an out-of-range retry count is rejected before the request');
+  assert.match(container.querySelector('.fmg-error').textContent, /0 到 10/);
 
   await act(async () => { root.unmount(); });
   dom.window.close();

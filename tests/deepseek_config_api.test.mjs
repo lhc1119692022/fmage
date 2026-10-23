@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import {
   createConfigApi, maskSecret, ConfigError, registerConfigRoutes,
   CONFIG_ROUTE, REVEAL_ROUTE, MODELS_ROUTE,
+  DEFAULT_RETRY_COUNT, MAX_RETRY_COUNT,
 } from '../adapters/deepseek/config-api.mjs';
+import { DEFAULT_RETRY_COUNT as POLICY_DEFAULT_RETRY_COUNT, MAX_RETRY_COUNT as POLICY_MAX_RETRY_COUNT } from '../mcp/retry-policy.mjs';
 
 const SECRET = 'sk-abcdefghijklmnop1234';
 
@@ -74,6 +76,44 @@ test('update reorders, toggles, renames, deletes and preserves unshown fields', 
   assert.equal(saved.retry_count, 3);
   assert.equal(saved.workflows.up.extra, 1, 'sections not submitted stay untouched');
   assert.equal((await readdir(join(dir, 'backups'))).length, 1);
+});
+
+test('retry settings read, validate and round-trip', async t => {
+  const { api, path } = await fixture(t, base());
+  const view = await api.read();
+  assert.equal(view.retry_on_failure, true);
+  assert.equal(view.retry_count, 3);
+
+  await api.update({ revision: view.revision, changes: { retry_on_failure: false, retry_count: 0 } });
+  const saved = JSON.parse(await readFile(path, 'utf8'));
+  assert.equal(saved.retry_on_failure, false);
+  assert.equal(saved.retry_count, 0);
+
+  const next = await api.read();
+  for (const bad of [-1, 11, 1.5, '3', null]) {
+    await assert.rejects(
+      api.update({ revision: next.revision, changes: { retry_count: bad } }),
+      error => error instanceof ConfigError && /integer from 0 to 10/.test(error.message),
+    );
+  }
+  await assert.rejects(api.update({ revision: next.revision, changes: { retry_on_failure: 'yes' } }), /must be a boolean/);
+});
+
+test('retry defaults apply to missing and invalid stored values', async t => {
+  const missing = await fixture(t, { providers: {} });
+  const missingView = await missing.api.read();
+  assert.equal(missingView.retry_on_failure, false);
+  assert.equal(missingView.retry_count, DEFAULT_RETRY_COUNT);
+
+  const invalid = await fixture(t, { providers: {}, retry_on_failure: 'yes', retry_count: 12 });
+  const invalidView = await invalid.api.read();
+  assert.equal(invalidView.retry_on_failure, false);
+  assert.equal(invalidView.retry_count, DEFAULT_RETRY_COUNT);
+});
+
+test('retry bounds match the generation retry policy', () => {
+  assert.equal(DEFAULT_RETRY_COUNT, POLICY_DEFAULT_RETRY_COUNT);
+  assert.equal(MAX_RETRY_COUNT, POLICY_MAX_RETRY_COUNT);
 });
 
 test('update rejects stale revisions, bad transports and duplicate names', async t => {

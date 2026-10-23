@@ -32,6 +32,7 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 - 工作流：管理 RunningHub 连接（仅允许 runninghub.cn / runninghub.ai）、工作流 ID、输出节点、实例类型、
   输入映射，以及默认工作流。
 - 目录：`output_dir` 与 `cache_dir`，留空使用默认位置。
+- 重试：`retry_on_failure` 开关与 `retry_count`（额外尝试次数，0–10），规则见下一节。
 
 ### 生成失败重试
 
@@ -45,6 +46,7 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 ```
 
 `retry_on_failure` 是开关，默认 `false`；`retry_count` 是额外尝试次数（0–10），默认 `2`。
+这两项也能在设置页的「重试」标签里修改，保存后下一次生图请求即生效。
 每次重试都会启动一次**全新的上游请求**，不会轮询或复用已经失败的请求结果。重试只针对限流、
 并发不足、网关 5xx、超时和网络中断等临时失败；鉴权、参数校验等永久失败会立即返回。
 已经拿到远端任务 ID 的失败、以及结果未知的提交（`submission_uncertain`）不会重试，

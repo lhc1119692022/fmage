@@ -9,6 +9,10 @@ import { dirname, join } from 'node:path';
 export const TRANSPORTS = ['openai-images', 'gemini-generate-content', 'midjourney'];
 export const RUNNINGHUB_ORIGINS = ['https://www.runninghub.cn', 'https://www.runninghub.ai'];
 export const INSTANCE_TYPES = ['default', 'plus', 'ultra'];
+// Mirrors mcp/retry-policy.mjs; the adapter is packaged at the bundle root, so
+// the bounds are repeated here and a test keeps both copies identical.
+export const DEFAULT_RETRY_COUNT = 2;
+export const MAX_RETRY_COUNT = 10;
 const NAME = /^[^\u0000-\u001f]{1,100}$/;
 const DIGITS = /^\d{1,40}$/;
 const MODEL_LIST_TIMEOUT_MS = 15000;
@@ -169,6 +173,11 @@ async function load(path) {
   return { exists: true, revision, config };
 }
 
+/** Stored retry count, falling back to the default so an invalid value stays editable. */
+function normalizeRetryCount(value) {
+  return Number.isInteger(value) && value >= 0 && value <= MAX_RETRY_COUNT ? value : DEFAULT_RETRY_COUNT;
+}
+
 /** Build the page view; secrets are masked. */
 export function view(path, { exists, revision, config }) {
   const providers = isObject(config.providers) ? config.providers : {};
@@ -203,6 +212,8 @@ export function view(path, { exists, revision, config }) {
     })),
     output_dir: typeof config.output_dir === 'string' ? config.output_dir : '',
     cache_dir: typeof config.cache_dir === 'string' ? config.cache_dir : '',
+    retry_on_failure: config.retry_on_failure === true,
+    retry_count: normalizeRetryCount(config.retry_count),
   };
 }
 function text(value, field, { required = false, max = 2000 } = {}) {
@@ -333,6 +344,17 @@ export function applyUpdate(config, update) {
   }
   for (const field of ['output_dir', 'cache_dir']) {
     if (update[field] !== undefined) next[field] = text(update[field], field, { max: 1000 });
+  }
+  if (update.retry_on_failure !== undefined) {
+    if (typeof update.retry_on_failure !== 'boolean') throw new ConfigError('retry_on_failure must be a boolean.');
+    next.retry_on_failure = update.retry_on_failure;
+  }
+  if (update.retry_count !== undefined) {
+    const count = update.retry_count;
+    if (!Number.isInteger(count) || count < 0 || count > MAX_RETRY_COUNT) {
+      throw new ConfigError(`retry_count must be an integer from 0 to ${MAX_RETRY_COUNT}.`);
+    }
+    next.retry_count = count;
   }
   return next;
 }
