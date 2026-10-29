@@ -1,7 +1,7 @@
 {
   "workflow_connections": {
     "runninghub": {
-      "base_url": "https://www.runninghub.cn",
+      "base_url": "https://www.runninghub.ai",
       "api_key": ""
     }
   },

@@ -1,6 +1,6 @@
 {
   "workflow_connections": {
-    "runninghub": { "base_url": "https://www.runninghub.cn", "api_key": "" }
+    "runninghub": { "base_url": "https://www.runninghub.ai", "api_key": "" }
   },
   "active_workflow": "SeedVR2 放大",
   "workflows": {

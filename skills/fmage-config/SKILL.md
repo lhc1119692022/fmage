@@ -28,10 +28,14 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
 
 ## Edit rules
 
-- Workflow configuration shares this file: `workflow_connections` holds RunningHub base_url and
-  api_key/api_key_env; `workflows` holds named workflow_id, connection, input mappings, output_node_ids
-  and optional instance_type; `active_workflow` selects the default. Preserve these sections during
-  provider edits. Never print connection keys. See config/workflows.example.json for a keyless example.
+- Workflow configuration shares this file: `workflow_connections.runninghub` only needs
+  api_key/api_key_env; the settings page keeps base_url fixed at `https://www.runninghub.ai` and
+  does not expose its name. `workflows` holds named `workflow_id`, connection, input mappings,
+  required output_node_ids and optional instance_type; `active_workflow` selects the default.
+  Preserve these sections during provider edits. Public and private workflows both use
+  `workflow_id` and the ComfyUI workflow API; the app ID from `/ai-detail/{id}` is a different
+  resource and is not a workflow ID. Never print connection keys.
+  See config/workflows.example.json for a keyless example.
 
 - Before editing, inspect the file and preserve existing providers.
 - If missing and creation is requested, copy from plugin `config/providers.example.json`.

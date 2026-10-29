@@ -360,11 +360,13 @@ def deepseek_runtime(settings: dict) -> DeepSeekRuntime:
         )
     resources = cli.resolve().parents[3]
     executable = resources.parent / "DeepSeek Harness.exe"
-    if not executable.is_file() or not (resources / "app.asar").is_file():
+    unpacked_anchor = resources / "app/dsh/node_modules/@deepseek-ai/dsh/package.json"
+    asar_anchor = resources / "app.asar/dsh/node_modules/@deepseek-ai/dsh/package.json"
+    if not executable.is_file() or not (unpacked_anchor.is_file() or (resources / "app.asar").is_file()):
         raise RuntimeError("Cannot locate the installed Desktop Electron runtime from its CLI")
     return DeepSeekRuntime(
         "electron", [str(cli)], [str(executable), "--expose-internals"], ROOT,
-        resources / "app.asar/dsh/node_modules/@deepseek-ai/dsh/package.json",
+        unpacked_anchor if unpacked_anchor.is_file() else asar_anchor,
     )
 
 

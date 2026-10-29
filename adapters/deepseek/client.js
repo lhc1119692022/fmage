@@ -78,7 +78,7 @@ window.__ModuleLoader__.load({
     const zh = {
       nav: 'Fmage 生图', title: 'Fmage 生图',
       tabProviders: '提供商', tabWorkflows: '工作流', tabPaths: '目录', tabRetry: '重试',
-      add: '添加提供商', addConnection: '添加连接', addWorkflow: '添加工作流',
+      add: '添加提供商', addWorkflow: '添加工作流',
       name: '名称', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API Key',
       enable: '启用 {name}', remove: '移除', show: '显示密钥', hide: '隐藏密钥',
       pin: '置顶', pinned: '已置顶',
@@ -87,8 +87,8 @@ window.__ModuleLoader__.load({
       modelsHint: '点击模型即可切换；输入框仍可手动编辑。',
       drag: '拖动排序', expand: '展开', collapse: '折叠',
       keyEmpty: '未设置', keyEnv: '使用环境变量 {env}', default: '默认', setDefault: '设为默认',
-      connections: 'RunningHub 连接', workflows: '工作流', connection: '连接', workflowId: '工作流 ID',
-      outputs: '输出节点', outputsHint: '多个节点 ID 用逗号分隔', instance: '实例类型', description: '说明', inputs: '输入映射 (JSON)',
+      connections: 'RunningHub 连接', workflows: '工作流', connection: '连接', workflowId: '工作流 ID', workflowIdHint: '公共或私有工作流 ID',
+      outputs: '输出节点', outputsHint: '多个节点 ID 用逗号分隔', instance: '实例类型', inputs: '输入映射 (JSON)',
       outputDir: '输出目录', cacheDir: '缓存目录', pathHint: '留空使用 Fmage 默认位置。',
       retryEnabled: '失败后自动重试', retryEnabledHint: '每次重试都发起一次全新的上游请求，不会复用已失败的结果。',
       retryHint: '对所有提供商生效：仅对限流、并发不足、网关 5xx、超时和网络中断等临时失败重试；鉴权或参数错误会立即返回，已提交到远端的任务不会重复提交。',
@@ -101,7 +101,7 @@ window.__ModuleLoader__.load({
     const en = {
       nav: 'Fmage images', title: 'Fmage images',
       tabProviders: 'Providers', tabWorkflows: 'Workflows', tabPaths: 'Folders', tabRetry: 'Retry',
-      add: 'Add provider', addConnection: 'Add connection', addWorkflow: 'Add workflow',
+      add: 'Add provider', addWorkflow: 'Add workflow',
       name: 'Name', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API key',
       enable: 'Enable {name}', remove: 'Remove', show: 'Show key', hide: 'Hide key',
       pin: 'Move to top', pinned: 'Already first',
@@ -110,8 +110,8 @@ window.__ModuleLoader__.load({
       modelsHint: 'Click a model to use it; the field stays editable.',
       drag: 'Drag to reorder', expand: 'Expand', collapse: 'Collapse',
       keyEmpty: 'Not set', keyEnv: 'Uses environment variable {env}', default: 'Default', setDefault: 'Make default',
-      connections: 'RunningHub connections', workflows: 'Workflows', connection: 'Connection', workflowId: 'Workflow ID',
-      outputs: 'Output nodes', outputsHint: 'Separate node IDs with commas', instance: 'Instance type', description: 'Description', inputs: 'Input mapping (JSON)',
+      connections: 'RunningHub connections', workflows: 'Workflows', connection: 'Connection', workflowId: 'Workflow ID', workflowIdHint: 'Public or private workflow ID',
+      outputs: 'Output nodes', outputsHint: 'Separate node IDs with commas', instance: 'Instance type', inputs: 'Input mapping (JSON)',
       outputDir: 'Output folder', cacheDir: 'Cache folder', pathHint: 'Leave empty to use the Fmage default.',
       retryEnabled: 'Retry failed generations', retryEnabledHint: 'Each retry sends a fresh upstream request and never reuses the failed result.',
       retryHint: 'Applies to every provider: only transient failures are retried — rate limits, concurrency limits, gateway 5xx, timeouts, and network errors. Auth and validation errors return immediately, and a task already submitted upstream is never resubmitted.',
@@ -324,25 +324,14 @@ window.__ModuleLoader__.load({
         open ? h('div', { className: 'fmg-actions' },
           h(Button, { size: 'sm', variant: 'ghost', onClick: remove }, t('remove'))) : null);
     }
-    function ConnectionCard({ t, row, origins, update, onRemove, setError, dragging, drop, onDragStart, onDragOver, onDrop, onDragEnd }) {
+    function ConnectionCard({ t, row, update, setError }) {
       const f = field => `fmg-${row.id}-${field}`;
-      const remove = () => { if (window.confirm(t('confirmRemove', { name: row.name || '?' }))) onRemove(); };
-      return h('li', {
-        className: 'fmg-card', 'data-dragging': String(dragging), 'data-drop': drop || undefined,
-        onDragOver: e => { e.preventDefault(); onDragOver(dropSide(e)); },
-        onDrop: e => { e.preventDefault(); e.stopPropagation(); onDrop(); },
-      },
-        h('div', { className: 'fmg-head' },
-          h(CardHandle, { t, id: row.id, onDragStart, onDragEnd }),
-          h('span', { className: 'fmg-name' }, row.name || '—')),
+      return h('li', { className: 'fmg-card' },
         h('div', { className: 'fmg-fields' },
-          Field({ id: f('name'), label: t('name'), children: h('input', { id: f('name'), value: row.name, onChange: e => update({ name: e.target.value }) }) }),
-          Field({ id: f('base'), label: t('baseUrl'), children: h(Select, { id: f('base'), value: row.base_url, options: origins, onChange: base_url => update({ base_url }) }) }),
-          Field({ id: f('key'), label: t('apiKey'), wide: true, children: h(SecretField, { t, row, kind: 'connection', id: f('key'), onChange: update, setError }) })),
-        h('div', { className: 'fmg-actions' }, h(Button, { size: 'sm', variant: 'ghost', onClick: remove }, t('remove'))));
+          Field({ id: f('key'), label: t('apiKey'), wide: true, children: h(SecretField, { t, row, kind: 'connection', id: f('key'), onChange: update, setError }) })));
     }
 
-    function WorkflowCard({ t, row, connections, instances, isDefault, onDefault, update, onRemove, dragging, drop, onDragStart, onDragOver, onDrop, onDragEnd }) {
+    function WorkflowCard({ t, row, connections, instances, isDefault, onDefault, update, onRemove, open, onToggle, dragging, drop, onDragStart, onDragOver, onDrop, onDragEnd }) {
       const f = field => `fmg-${row.id}-${field}`;
       const remove = () => { if (window.confirm(t('confirmRemove', { name: row.name || '?' }))) onRemove(); };
       return h('li', {
@@ -352,17 +341,22 @@ window.__ModuleLoader__.load({
       },
         h('div', { className: 'fmg-head' },
           h(CardHandle, { t, id: row.id, onDragStart, onDragEnd }),
-          h('span', { className: 'fmg-name' }, row.name || '—', isDefault ? ` · ${t('default')}` : ''),
+          h('button', {
+            type: 'button', className: 'fmg-toggle', onClick: onToggle, 'aria-expanded': open, title: t(open ? 'collapse' : 'expand'),
+          },
+            h('span', { className: 'fmg-name' }, row.name || '—', isDefault ? ` · ${t('default')}` : ''),
+            open ? null : h('span', { className: 'fmg-sub' }, row.workflow_id)),
           isDefault ? null : h(Button, { size: 'sm', variant: 'outline', onClick: onDefault }, t('setDefault'))),
-        h('div', { className: 'fmg-fields' },
+        open ? h('div', { className: 'fmg-fields' },
           Field({ id: f('name'), label: t('name'), children: h('input', { id: f('name'), value: row.name, onChange: e => update({ name: e.target.value }) }) }),
-          Field({ id: f('conn'), label: t('connection'), children: h(Select, { id: f('conn'), value: row.connection, options: connections, onChange: connection => update({ connection }) }) }),
-          Field({ id: f('wid'), label: t('workflowId'), children: h('input', { id: f('wid'), value: row.workflow_id, inputMode: 'numeric', onChange: e => update({ workflow_id: e.target.value }) }) }),
+          connections.length > 1
+            ? Field({ id: f('conn'), label: t('connection'), children: h(Select, { id: f('conn'), value: row.connection, options: connections, onChange: connection => update({ connection }) }) })
+            : null,
+          Field({ id: f('wid'), label: t('workflowId'), children: h('input', { id: f('wid'), value: row.workflow_id, inputMode: 'numeric', placeholder: t('workflowIdHint'), onChange: e => update({ workflow_id: e.target.value }) }) }),
           Field({ id: f('inst'), label: t('instance'), children: h(Select, { id: f('inst'), value: row.instance_type, options: instances, onChange: instance_type => update({ instance_type }) }) }),
           Field({ id: f('out'), label: t('outputs'), children: h('input', { id: f('out'), value: row.outputs, placeholder: t('outputsHint'), onChange: e => update({ outputs: e.target.value }) }) }),
-          Field({ id: f('desc'), label: t('description'), children: h('input', { id: f('desc'), value: row.description, onChange: e => update({ description: e.target.value }) }) }),
           Field({ id: f('in'), label: t('inputs'), wide: true, children: h('textarea', { id: f('in'), value: row.inputsText, spellCheck: false, onChange: e => update({ inputsText: e.target.value }) }) }),
-          h('div', { className: 'fmg-actions' }, h(Button, { size: 'sm', variant: 'ghost', onClick: remove }, t('remove')))));
+          h('div', { className: 'fmg-actions' }, h(Button, { size: 'sm', variant: 'ghost', onClick: remove }, t('remove')))) : null);
     }
 
     function useList(setDraft, setDirty, field) {
@@ -453,11 +447,9 @@ window.__ModuleLoader__.load({
         providers.add(row);
         setOpen(prev => new Set(prev).add(row.id));
       };
-      const addConnection = () => connections.add({
-        id: key(), from: null, name: '', base_url: view.runninghubOrigins[0], api_key: '', api_key_set: false, api_key_masked: '', revealed: null,
-      });
       const addWorkflow = () => workflows.add({
-        id: key(), from: null, name: '', connection: connectionNames[0] || '', workflow_id: '', description: '', instance_type: 'default', outputs: '', inputsText: '{}',
+        id: key(), from: null, name: '', connection: connectionNames[0] || '', workflow_id: '',
+        description: '', instance_type: 'default', outputs: '', inputsText: '{}',
       });
       const tabs = [['providers', t('tabProviders')], ['workflows', t('tabWorkflows')], ['paths', t('tabPaths')], ['retry', t('tabRetry')]];
       const empty = list => list.length ? null : h('p', { className: 'fmg-empty' }, t('none'));
@@ -475,15 +467,8 @@ window.__ModuleLoader__.load({
         ],
         workflows: [
           h('h4', { key: 'ch', style: { margin: 0 } }, t('connections')),
-          h('ul', { key: 'cl', className: 'fmg-list', ...listProps('connections', connections) }, draft.connections.map(row => h(ConnectionCard, {
-            key: row.id, t, row, origins: view.runninghubOrigins, setError,
-            ...dragProps('connections', row.id, connections, draft.connections),
-            update: (patch, d) => {
-              // Renaming a connection carries its workflows along.
-              if (typeof patch.name === 'string') setDraft(dd => ({ ...dd, workflows: dd.workflows.map(w => w.connection === row.name ? { ...w, connection: patch.name } : w) }));
-              connections.update(row.id, patch, d);
-            },
-            onRemove: () => connections.remove(row.id),
+          h('ul', { key: 'cl', className: 'fmg-list' }, draft.connections.map(row => h(ConnectionCard, {
+            key: row.id, t, row, setError, update: patch => connections.update(row.id, patch),
           }))),
           h(React.Fragment, { key: 'ce' }, empty(draft.connections)),
           h('h4', { key: 'wh', style: { margin: '8px 0 0' } }, t('workflows')),
@@ -491,6 +476,7 @@ window.__ModuleLoader__.load({
             key: row.id, t, row, connections: connectionNames, instances: view.instanceTypes,
             isDefault: draft.defaultWorkflow === row.id,
             onDefault: () => set({ defaultWorkflow: row.id }),
+            open: open.has(row.id), onToggle: () => toggleOpen(row.id),
             ...dragProps('workflows', row.id, workflows, draft.workflows),
             update: patch => workflows.update(row.id, patch), onRemove: () => workflows.remove(row.id),
           }))),
@@ -537,7 +523,6 @@ window.__ModuleLoader__.load({
         h('div', { className: 'fmg-bar' },
           // The add action belongs to the reserved button area, so nothing renders below it.
           tab === 'providers' ? h(Button, { size: 'sm', variant: 'outline', onClick: addProvider }, t('add')) : null,
-          tab === 'workflows' ? h(Button, { size: 'sm', variant: 'outline', onClick: addConnection }, t('addConnection')) : null,
           tab === 'workflows' ? h(Button, { size: 'sm', variant: 'outline', onClick: addWorkflow }, t('addWorkflow')) : null,
           h('span', { className: 'fmg-grow', role: 'status', 'aria-live': 'polite' },
             error ? h('span', { className: 'fmg-error' }, error) : dirty ? t('dirty') : notice ? h('span', { className: 'fmg-ok' }, notice) : null),
