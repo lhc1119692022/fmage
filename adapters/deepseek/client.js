@@ -83,6 +83,7 @@ window.__ModuleLoader__.load({
       enable: '启用 {name}', remove: '移除', show: '显示密钥', hide: '隐藏密钥',
       pin: '置顶', pinned: '已置顶',
       fetchModels: '拉取上游模型', fetchingModels: '拉取中…', noModels: '上游未返回模型。',
+      needCredentials: '先填写 Base URL 和 API Key，再拉取模型。',
       modelsHint: '点击模型即可切换；输入框仍可手动编辑。',
       drag: '拖动排序', expand: '展开', collapse: '折叠',
       keyEmpty: '未设置', keyEnv: '使用环境变量 {env}', default: '默认', setDefault: '设为默认',
@@ -105,6 +106,7 @@ window.__ModuleLoader__.load({
       enable: 'Enable {name}', remove: 'Remove', show: 'Show key', hide: 'Hide key',
       pin: 'Move to top', pinned: 'Already first',
       fetchModels: 'Fetch upstream models', fetchingModels: 'Fetching…', noModels: 'The provider returned no models.',
+      needCredentials: 'Fill in the Base URL and API key before fetching models.',
       modelsHint: 'Click a model to use it; the field stays editable.',
       drag: 'Drag to reorder', expand: 'Expand', collapse: 'Collapse',
       keyEmpty: 'Not set', keyEnv: 'Uses environment variable {env}', default: 'Default', setDefault: 'Make default',
@@ -253,9 +255,18 @@ window.__ModuleLoader__.load({
       const remove = () => { if (window.confirm(t('confirmRemove', { name: row.name || '?' }))) onRemove(); };
       const IDLE_MODELS = { base: '', transport: '', loading: false, error: '', items: null };
       const [modelList, setModelList] = useState(IDLE_MODELS);
+      // Fetching is an upstream call, so it needs the same two inputs the call
+      // uses: an address and a key (typed now, stored, or from the environment).
+      const keyReady = row.api_key === undefined
+        ? Boolean(row.api_key_set || row.api_key_env)
+        : Boolean(row.api_key.trim());
       const fetchModels = async () => {
         const base = row.base_url;
         const transport = row.transport;
+        if (!String(base).trim() || !keyReady) {
+          setModelList({ base, transport, loading: false, error: t('needCredentials'), items: null });
+          return;
+        }
         setModelList({ base, transport, loading: true, error: '', items: null });
         try {
           const data = await request(MODELS, { method: 'POST', body: JSON.stringify({
@@ -298,6 +309,9 @@ window.__ModuleLoader__.load({
           Field({ id: f('name'), label: t('name'), children: h('input', { id: f('name'), value: row.name, onChange: e => update({ name: e.target.value }) }) }),
           Field({ id: f('transport'), label: t('transport'), children: h(Select, { id: f('transport'), value: row.transport, options: transports, onChange: transport => update({ transport }) }) }),
           Field({ id: f('base'), label: t('baseUrl'), wide: true, children: h('input', { id: f('base'), value: row.base_url, spellCheck: false, onChange: e => update({ base_url: e.target.value }) }) }),
+          // Credentials come before the model so the form follows the order the
+          // upstream call needs: a URL and a key are what make fetching possible.
+          Field({ id: f('key'), label: t('apiKey'), wide: true, children: h(SecretField, { t, row, kind: 'provider', id: f('key'), onChange: update, setError }) }),
           Field({ id: f('model'), label: t('model'), wide: true, children: h(React.Fragment, null,
             h('div', { className: 'fmg-key' },
               h('input', { id: f('model'), value: row.model, spellCheck: false, onChange: e => update({ model: e.target.value }) }),
@@ -306,8 +320,7 @@ window.__ModuleLoader__.load({
             currentModels?.error ? h('p', { className: 'fmg-hint fmg-error', role: 'alert' }, currentModels.error) : null,
             currentModels?.items && !currentModels.items.length ? h('p', { className: 'fmg-hint' }, t('noModels')) : null,
             models,
-            models ? h('p', { className: 'fmg-hint' }, t('modelsHint')) : null) }),
-          Field({ id: f('key'), label: t('apiKey'), wide: true, children: h(SecretField, { t, row, kind: 'provider', id: f('key'), onChange: update, setError }) })) : null,
+            models ? h('p', { className: 'fmg-hint' }, t('modelsHint')) : null) })) : null,
         open ? h('div', { className: 'fmg-actions' },
           h(Button, { size: 'sm', variant: 'ghost', onClick: remove }, t('remove'))) : null);
     }

@@ -58,6 +58,7 @@ test('settings page pins providers and lists fetched models', { skip: !available
       assert.equal(body.provider, 'Second');
       assert.equal(body.transport, 'openai-images');
       assert.equal(body.base_url, 'https://second.example/v1');
+      assert.equal(body.api_key, 'sk-second');
       return response({ models: ['gpt-image-2.5', 'gpt-image-2.5-sunburst'] });
     }
     throw new Error(`unexpected request ${url}`);
@@ -90,6 +91,7 @@ test('settings page pins providers and lists fetched models', { skip: !available
   const container = window.document.getElementById('root');
   const root = createRoot(container);
   const t = key => dictionaries.dicts.zh[key] ?? key;
+  const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
   await act(async () => { root.render(React.createElement(component, { t, close() {} })); });
   await act(async () => {});
 
@@ -120,14 +122,31 @@ test('settings page pins providers and lists fetched models', { skip: !available
   const toggle = cards()[0].querySelector('button.fmg-toggle');
   await act(async () => { toggle.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
   const second = cards()[0];
-  const modelLabel = [...second.querySelectorAll('label')].find(label => label.textContent === 'Model');
+  const labelOf = text => [...second.querySelectorAll('label')].find(label => label.textContent === text);
+  // Credentials come before the model: the fetch needs an address and a key.
+  assert.deepEqual([...second.querySelectorAll('label')].map(label => label.textContent),
+    ['名称', 'Transport', 'Base URL', 'API Key', 'Model']);
+  const modelLabel = labelOf('Model');
   assert.ok(modelLabel, 'model field is visible after expanding');
   const modelInput = window.document.getElementById(modelLabel.htmlFor);
   assert.equal(modelInput.value, 'gpt-image-2.5');
 
   const fetchButton = second.querySelector('button[title="拉取上游模型"]');
   assert.ok(fetchButton, 'model field has a fetch button');
+  // Nothing typed and nothing stored: refuse locally instead of calling upstream.
   await act(async () => { fetchButton.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
+  await act(async () => {});
+  assert.equal(modelRequests, 0, 'a provider without a key never reaches the fetch endpoint');
+  assert.match(second.querySelector('.fmg-error').textContent, /Base URL 和 API Key/);
+
+  const keyInput = window.document.getElementById(labelOf('API Key').htmlFor);
+  await act(async () => {
+    setValue.call(keyInput, 'sk-second');
+    keyInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+  await act(async () => {
+    second.querySelector('button[title="拉取上游模型"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  });
   await act(async () => {});
   const choices = [...second.querySelectorAll('button.fmg-model')].map(button => button.textContent);
   assert.deepEqual(choices, ['gpt-image-2.5', 'gpt-image-2.5-sunburst']);
@@ -153,7 +172,6 @@ test('settings page pins providers and lists fetched models', { skip: !available
   const countInput = window.document.getElementById(countLabel.htmlFor);
   assert.equal(countInput.value, '2');
   assert.equal(countInput.max, '10');
-  const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
   await act(async () => {
     setValue.call(countInput, '4');
     countInput.dispatchEvent(new window.Event('input', { bubbles: true }));

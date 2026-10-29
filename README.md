@@ -23,11 +23,12 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 
 - 提供商：添加、删除、启用/关闭，拖动或置顶调整优先级（启用列表从上到下即 `active_providers` 顺序，
   第一个为默认）。也可以直接拖动卡片左侧手柄改顺序，或点卡片右侧的置顶按钮把该提供商移到最前。
-  卡片默认折叠，只显示优先级、名称与 transport/model 摘要；展开后名称与 transport 同行，其余是
-  Base URL、Model 和 API Key。只显示 `transport`（下拉选择）、`base_url`、`model` 和 `api_key`，
+  卡片默认折叠，只显示优先级、名称与 transport/model 摘要；展开后名称与 transport 同行，其余按填写顺序
+  依次是 Base URL、API Key 和 Model。只显示 `transport`（下拉选择）、`base_url`、`api_key` 和 `model`，
   其他字段保存时原样保留。
 - Model 输入框右侧的拉取按钮会按当前 Base URL 和 API Key 请求上游模型列表，结果显示在输入框下方；
   点击某个模型即可切换，输入框本身仍可手动编辑。上游不可用或返回 404 时会明确提示，不会阻塞手工填写。
+  Base URL 或密钥缺失时不会再发出上游请求，而是就地提示先补齐这两项。
 - API Key 默认以首尾字符加星号显示，点击眼睛图标才向本机 Host 读取并显示完整值；留空不改动即保留原密钥。
 - 工作流：管理 RunningHub 连接（仅允许 runninghub.cn / runninghub.ai）、工作流 ID、输出节点、实例类型、
   输入映射，以及默认工作流。
