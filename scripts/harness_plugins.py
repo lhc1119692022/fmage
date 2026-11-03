@@ -616,7 +616,8 @@ def refresh_registered(*, check_only: bool = False) -> None:
                 mode = install_deepseek_hot(files, profile, deepseek, package)
                 hot_verified = hot_verified or mode == "hot"
                 print("DeepSeek Desktop install path: " + (
-                    "hot reload through the running host (no restart)" if mode == "hot" else "offline CLI (host not loaded)"))
+                    "hot reload through the running host (host half; client.js changes need an app restart)"
+                    if mode == "hot" else "offline CLI (host not loaded)"))
             problems = deepseek_installation_errors(files, profile, package)
             failures.extend(problems)
             print(f"DeepSeek Desktop physical installation checked: {installed}")
@@ -626,9 +627,12 @@ def refresh_registered(*, check_only: bool = False) -> None:
     if failures:
         raise RuntimeError("; ".join(failures))
     if not check_only:
-        print("Installed artifacts updated through the running host's hot reload; no restart or reload was needed."
-              if hot_verified else
-              "Installed artifacts updated. Existing host processes may require plugin/window reload; no active requests were interrupted.")
+        print(
+            "Host half hot-reloaded. If this build changed client.js, fully quit and reopen the Desktop app "
+            "so the renderer loads the new client bundle; Electron does not use the Web SSE live path."
+            if hot_verified else
+            "Installed artifacts updated. Existing host processes may require plugin/window reload; no active requests were interrupted."
+        )
 
 
 def configure_installations(deepseek_cli: Path) -> None:

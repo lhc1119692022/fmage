@@ -38,6 +38,8 @@
     "openai-image-2",
     "ezai-nano"
   ],
+  "default_provider": "",
+  "show_provider_pill": true,
   "retry_on_failure": false,
   "retry_count": 2,
   "output_dir": "",

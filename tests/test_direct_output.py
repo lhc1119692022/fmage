@@ -97,6 +97,53 @@ class DirectOutputTests(unittest.TestCase):
                 str(root / "configured-output"),
             )
 
+    def test_mcp_status_prefers_the_explicit_default_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = root / "providers.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "active_providers": ["first", "second"],
+                        "default_provider": "second",
+                        "providers": {
+                            "first": {
+                                "transport": "openai-images",
+                                "base_url": "http://127.0.0.1:1/v1",
+                                "model": "gpt-image-1",
+                                "api_key": "test-only-key-1",
+                            },
+                            "second": {
+                                "transport": "openai-images",
+                                "base_url": "http://127.0.0.1:1/v1",
+                                "model": "gpt-image-1",
+                                "api_key": "test-only-key-2",
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            request = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "get_provider_status", "arguments": {}},
+            }
+            process = subprocess.run(
+                ["node", str(SERVER_PATH)],
+                input=json.dumps(request) + "\n",
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env={**os.environ, "FMAGE_CONFIG": str(config_path)},
+                timeout=10,
+                check=True,
+            )
+            status = json.loads(process.stdout.splitlines()[0])["result"]["structuredContent"]
+            self.assertEqual(status["default_provider"], "second")
+            self.assertEqual(status["selected_provider"], "second")
+
     def test_mcp_writes_image_to_explicit_output_and_removes_empty_cache_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

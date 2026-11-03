@@ -34,6 +34,10 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
   `https://www.runninghub.ai`；工作流配置只有工作流 ID、输出节点、实例类型、输入映射和默认工作流。
 - 目录：`output_dir` 与 `cache_dir`，留空使用默认位置。
 - 重试：`retry_on_failure` 开关与 `retry_count`（额外尝试次数，0–10），规则见下一节。
+- 默认提供商：提供商卡右侧的星标设为默认；拖动只改变回退顺序。开关控制是否在对话输入栏显示生图胶囊。
+- 输入栏胶囊：显示当前默认提供商，点开即可切换。它只写 `default_provider`，与设置页共用同一份配置；
+  `default_provider` 为空或不在 `active_providers` 中时，回退到第一个启用的提供商。
+  没有 DSH 界面的宿主（Codex、VS Code）不显示胶囊，仍按配置顺序和显式 `provider` 参数工作。
 
 ### 生成失败重试
 
@@ -55,7 +59,8 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 成功后的结果会带 `generation_attempts` 和重试警告；失败时报错会注明总尝试次数。
 `get_provider_status` 的 `generation_retry` 字段显示当前生效值。
 
-保存前校验字段；文件在页面打开后被其他程序修改时会拒绝保存并提示重新读取。每次保存先在配置目录
+保存前校验字段；文件在页面打开后被其他程序修改时会拒绝保存，并给出「重新读取并覆盖」，
+不会被一次冲突卡死。每次保存先在配置目录
 `backups/` 下备份原文件，再原子替换。页面接口 `/api/fmage.config`、`/api/fmage.config.reveal` 和
 `/api/fmage.models` 位于 Desktop 的连接认证之内，仅本机所有者会话可访问。
 

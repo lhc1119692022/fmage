@@ -116,6 +116,45 @@ test('retry bounds match the generation retry policy', () => {
   assert.equal(MAX_RETRY_COUNT, POLICY_MAX_RETRY_COUNT);
 });
 
+test('default provider resolves explicitly, then falls back to the first active', async t => {
+  const { api, path } = await fixture(t, base());
+  const view = await api.read();
+  assert.equal(view.default_provider, 'b', 'missing field falls back to the first active provider');
+
+  await api.update({ revision: view.revision, changes: { default_provider: 'a' } });
+  assert.equal(JSON.parse(await readFile(path, 'utf8')).default_provider, 'a');
+  assert.equal((await api.read()).default_provider, 'a');
+
+  // A stored name that is not active is ignored on read.
+  const stale = await fixture(t, { ...base(), default_provider: 'c' });
+  assert.equal((await stale.api.read()).default_provider, 'b');
+});
+
+test('default provider and pill visibility round-trip with validation', async t => {
+  const { api, path } = await fixture(t, base());
+  const { revision } = await api.read();
+  await api.update({ revision, changes: { default_provider: 'a', show_provider_pill: false } });
+  const saved = JSON.parse(await readFile(path, 'utf8'));
+  assert.equal(saved.default_provider, 'a');
+  assert.equal(saved.show_provider_pill, false);
+  assert.equal((await api.read()).show_provider_pill, false);
+
+  // Disabling the default clears it so resolution falls back instead of dangling.
+  const next = await api.read();
+  await api.update({ revision: next.revision, changes: {
+    providers: [
+      { name: 'b', from: 'b', enabled: true, transport: 'gemini-generate-content', base_url: 'https://b.example', model: 'gemini-3-pro-image' },
+      { name: 'a', from: 'a', enabled: false, transport: 'openai-images', base_url: 'https://a.example/v1', model: 'gpt-image-2' },
+    ],
+  } });
+  assert.equal((await api.read()).default_provider, 'b');
+  assert.equal(JSON.parse(await readFile(path, 'utf8')).default_provider, '');
+
+  const after = await api.read();
+  await assert.rejects(api.update({ revision: after.revision, changes: { default_provider: 3 } }), /string or null/);
+  await assert.rejects(api.update({ revision: after.revision, changes: { show_provider_pill: 'yes' } }), /must be a boolean/);
+});
+
 test('update rejects stale revisions, bad transports and duplicate names', async t => {
   const { api } = await fixture(t, base());
   const { revision } = await api.read();

@@ -15,7 +15,9 @@ Codex 使用原生 `.codex-plugin/plugin.json`；其他宿主由 `scripts/harnes
 
 `adapters/deepseek/` 包含三部分：`index.mjs`（Host 半：技能、MCP、运行心跳与配置路由）、
 `config-api.mjs`（`providers.json` 的读写、校验、掩码、备份与原子替换）和 `client.js`
-（浏览器半，经 `window.__ModuleLoader__.load` 注册，向 `settings.section` 插槽贡献「Fmage 生图」页）。
+（浏览器半，经 `window.__ModuleLoader__.load` 注册，向 `settings.section` 插槽贡献「Fmage 生图」页，
+并向 `conversation.input.right` 插槽贡献输入栏生图胶囊）。胶囊与设置页共用同一个读取、摘要校验和写入路径，
+只写 `default_provider`；没有该插槽的宿主不会挂载它，行为退回配置顺序和显式 `provider` 参数。
 包清单声明 `dsh.client.platform = web` 与 `exports["./client"]`，由宿主的 client 模块扫描器加载。
 浏览器半只 `require` 宿主共享的 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`，无需构建步骤。
 
@@ -67,6 +69,9 @@ Desktop 运行中时，直接在它背后替换 `node_modules/dsh-fmage` 会失�
 释放目录（插件的 disposer 会删除 `.fmage-runtime.json`，这就是卸载完成的握手信号）；再用登记的运行时执行
 `dsh plugin add`；最后把 `dsh-fmage` 放回列表，宿主重新组合并加载新版本。
 脚本等待新版本心跳出现才报告 `hot`，因此“安装成功”与“运行中已生效”一致。
+这里的“生效”只覆盖 Host 半（技能、MCP、设置路由）。`client.js` 属于浏览器半，Electron 不使用 Web 的
+`/plugins/events` SSE 热换路径；client 图在应用启动时快照，必须完全退出并重开桌面应用后渲染进程才会
+重新加载新的客户端模块，仅刷新页面不会更新。
 卸载后 45 秒内没等到卸载信号、或重装后 60 秒内没等到新版本，都会明确失败而不是假装成功；
 `finally` 会恢复 bundle 选择，安装失败时旧版本继续可用。宿主未加载该插件时退回原有的 CLI 安装路径。
 

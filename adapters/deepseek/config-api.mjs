@@ -187,9 +187,17 @@ export function view(path, { exists, revision, config }) {
   const ordered = [...active, ...names.filter(n => !active.includes(n))];
   const connections = isObject(config.workflow_connections) ? config.workflow_connections : {};
   const workflows = isObject(config.workflows) ? config.workflows : {};
+  // The default provider is the explicit field when it still names an enabled
+  // provider; otherwise the first active entry keeps the legacy behaviour.
+  const configuredDefault = typeof config.default_provider === 'string' ? config.default_provider.trim() : '';
+  const defaultProvider = configuredDefault !== '' && active.includes(configuredDefault)
+    ? configuredDefault
+    : (active[0] ?? null);
   return {
     path, exists, revision,
     transports: TRANSPORTS, runninghubOrigins: RUNNINGHUB_ORIGINS, instanceTypes: INSTANCE_TYPES,
+    default_provider: defaultProvider,
+    show_provider_pill: config.show_provider_pill !== false,
     providers: ordered.map(name => {
       const p = isObject(providers[name]) ? providers[name] : {};
       return {
@@ -335,6 +343,18 @@ export function applyUpdate(config, update) {
     }
     next.workflows = workflows;
   }
+  if (update.default_provider !== undefined) {
+    if (update.default_provider !== null && typeof update.default_provider !== 'string') {
+      throw new ConfigError('default_provider must be a string or null.');
+    }
+    next.default_provider = update.default_provider === null
+      ? ''
+      : text(update.default_provider, 'default_provider', { max: 100 });
+  }
+  if (update.show_provider_pill !== undefined) {
+    if (typeof update.show_provider_pill !== 'boolean') throw new ConfigError('show_provider_pill must be a boolean.');
+    next.show_provider_pill = update.show_provider_pill;
+  }
   if (update.active_workflow !== undefined) {
     const active = update.active_workflow === null ? null : text(update.active_workflow, 'active_workflow', { max: 100 }) || null;
     if (active !== null && !Object.hasOwn(next.workflows ?? {}, active)) throw new ConfigError(`Unknown active_workflow: ${active}.`);
@@ -355,6 +375,13 @@ export function applyUpdate(config, update) {
       throw new ConfigError(`retry_count must be an integer from 0 to ${MAX_RETRY_COUNT}.`);
     }
     next.retry_count = count;
+  }
+  // A rename or disable can strand the explicit default; clear it so resolution
+  // falls back to the first active provider instead of failing later.
+  const activeAfter = Array.isArray(next.active_providers) ? next.active_providers : [];
+  if (typeof next.default_provider === 'string' && next.default_provider !== ''
+    && !activeAfter.includes(next.default_provider)) {
+    next.default_provider = '';
   }
   return next;
 }

@@ -556,7 +556,12 @@ function resolveProviderName(config, requestedProvider) {
   const requested = nonEmptyString(requestedProvider);
   const activeProviders = configuredActiveProviders(config);
   if (!requested) {
-    const defaultProvider = activeProviders[0];
+    // An explicit default wins only while it stays active; otherwise the first
+    // active entry remains the implicit default.
+    const configuredDefault = nonEmptyString(config?.default_provider);
+    const defaultProvider = configuredDefault && activeProviders.includes(configuredDefault)
+      ? configuredDefault
+      : activeProviders[0];
     if (!defaultProvider) {
       throw new Error(`No active_providers are configured in ${CONFIG_PATH}.`);
     }
@@ -3228,11 +3233,14 @@ async function providerStatus(requestedProvider) {
   const provider = await resolveProvider(requestedProvider, false);
   const activeProviders = configuredActiveProviders(provider.config);
   const retry = generationRetryPolicy(provider.config);
+  const configuredDefault = nonEmptyString(provider.config.default_provider);
   const status = {
     config_path: CONFIG_PATH,
     active_provider: provider.config.active_provider,
     active_providers: activeProviders,
-    default_provider: activeProviders[0],
+    default_provider: configuredDefault && activeProviders.includes(configuredDefault)
+      ? configuredDefault
+      : activeProviders[0],
     selected_provider: provider.name,
     transport: provider.transport,
     ...(provider.asyncMode ? { async_mode: true } : {}),

@@ -5,7 +5,7 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const { Button, Switch } = require('@deepseek-ai/dsh-client-ui-primitives');
     const h = React.createElement;
-    const { useEffect, useState, useCallback } = React;
+    const { useEffect, useState, useCallback, useRef } = React;
     const NS = 'settings.fmage';
     const ROUTE = 'api/fmage.config';
     const REVEAL = 'api/fmage.config.reveal';
@@ -74,6 +74,42 @@ window.__ModuleLoader__.load({
 .fmg-error{color:var(--dsw-alias-state-danger-primary,#d33)}
 .fmg-ok{color:var(--dsw-alias-label-tertiary)}
 .fmg-empty{margin:0;color:var(--dsw-alias-label-tertiary)}
+.fmg-star-on{color:var(--dsw-alias-state-business-primary,#4f6ef7)}
+.fmg-star-on svg{fill:currentColor}
+.fmg-pill-setting{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l2);border-radius:12px}
+.fmg-pill-setting-text{min-width:0}
+.fmg-pill-setting-text strong{font-size:13px;font-weight:600}
+.fmg-pill-setting-text p{margin:4px 0 0}
+.fmg-advanced{border:.5px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px 12px}
+.fmg-advanced>summary{cursor:pointer;font-size:12.5px;color:var(--dsw-alias-label-secondary)}
+.fmg-advanced .fmg-hint{margin:6px 0 0}
+/* Composer pill: sits in the conversation.input.right seat. */
+.fmg-pill{position:relative;display:inline-flex;align-items:center}
+/* Same ghost trigger as the host's composer model selector. */
+.fmg-pill-button{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 4px 0 8px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#4b5563);font:inherit;font-size:13px;font-weight:400;line-height:20px;cursor:pointer;transition:background .15s}
+.fmg-pill-button:hover:not(:disabled),.fmg-pill-button.is-open{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
+.fmg-pill-button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#4c78ff);outline-offset:1px}
+.fmg-pill-button svg{flex:none}
+.fmg-pill-icon{flex:none;color:var(--dsw-alias-brand-primary,#4c78ff)}
+.fmg-pill-label{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fmg-pill-caret{display:inline-flex;flex:none;color:var(--dsw-alias-label-caption,#9ca3af);transition:transform .12s}
+.fmg-pill-button.is-open .fmg-pill-caret{transform:rotate(180deg)}
+@container (max-width:700px){.fmg-pill-caret{display:none}.fmg-pill-button{padding:0 4px 0 6px}}
+/* One left-aligned line, "<model> · <provider>", with the selected check on the right. */
+.fmg-pill-menu{position:fixed;z-index:1200;display:flex;flex-direction:column;width:min(340px,calc(100vw - 24px));max-height:min(360px,calc(100vh - 48px));padding:4px;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:12px;background:var(--dsw-alias-bg-layer-3,#fff);box-shadow:0 10px 28px rgba(0,0,0,.16);overflow:hidden;color:var(--dsw-alias-label-primary)}
+.fmg-pill-list{min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding-right:2px}
+.fmg-pill-list::-webkit-scrollbar{width:8px}
+.fmg-pill-list::-webkit-scrollbar-track{background:transparent}
+.fmg-pill-list::-webkit-scrollbar-thumb{background:var(--dsw-alias-scrollbar-bg-l2,rgba(0,0,0,.2));border:2px solid transparent;border-radius:999px;background-clip:padding-box}
+.fmg-pill-option{display:flex;align-items:center;gap:10px;width:100%;min-height:34px;padding:7px 10px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:13px;line-height:18px;color:var(--dsw-alias-label-primary);text-align:left;cursor:pointer}
+.fmg-pill-option:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
+.fmg-pill-option:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#4c78ff);outline-offset:-2px}
+.fmg-pill-option:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}
+.fmg-pill-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:400}
+.fmg-pill-sep{margin:0 6px;color:var(--dsw-alias-label-tertiary,#6b7280)}
+.fmg-pill-check{display:grid;place-items:center;flex:0 0 16px;color:var(--dsw-alias-label-primary)}
+.fmg-pill-check svg{width:16px;height:16px}
+.fmg-pill-error{margin:4px;padding:6px 7px;border-radius:8px;background:rgba(239,68,68,.08);color:#ef4444;font-size:11px;line-height:16px;word-break:break-all}
 `;
     const zh = {
       nav: 'Fmage 生图', title: 'Fmage 生图',
@@ -81,7 +117,12 @@ window.__ModuleLoader__.load({
       add: '添加提供商', addWorkflow: '添加工作流',
       name: '名称', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API Key',
       enable: '启用 {name}', remove: '移除', show: '显示密钥', hide: '隐藏密钥',
-      pin: '置顶', pinned: '已置顶',
+      pill: '生图', pillTitle: '生图提供商', pillKeySet: 'Key 已配置', pillKeyMissing: '未配置 Key',
+      pillSwitchFailed: '切换失败',
+      showPill: '在输入栏显示生图胶囊', showPillHint: '关闭后仍可在下方列表切换默认提供商；改动在下一次请求生效。',
+      orderHint: '拖动只改变回退顺序；默认提供商由星标决定。',
+      advanced: '高级：排序与回退',
+      conflict: '配置文件已在别处修改。', overwrite: '重新读取并覆盖',
       fetchModels: '拉取上游模型', fetchingModels: '拉取中…', noModels: '上游未返回模型。',
       needCredentials: '先填写 Base URL 和 API Key，再拉取模型。',
       modelsHint: '点击模型即可切换；输入框仍可手动编辑。',
@@ -104,7 +145,12 @@ window.__ModuleLoader__.load({
       add: 'Add provider', addWorkflow: 'Add workflow',
       name: 'Name', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API key',
       enable: 'Enable {name}', remove: 'Remove', show: 'Show key', hide: 'Hide key',
-      pin: 'Move to top', pinned: 'Already first',
+      pill: 'Image', pillTitle: 'Image provider', pillKeySet: 'Key configured', pillKeyMissing: 'No key',
+      pillSwitchFailed: 'Switch failed',
+      showPill: 'Show the image provider pill in the composer', showPillHint: 'Turning it off keeps the list below and the saved default; changes apply to the next request.',
+      orderHint: 'Dragging only changes the fallback order; the star sets the default provider.',
+      advanced: 'Advanced: order and fallback',
+      conflict: 'The config file changed elsewhere.', overwrite: 'Reload and overwrite',
       fetchModels: 'Fetch upstream models', fetchingModels: 'Fetching…', noModels: 'The provider returned no models.',
       needCredentials: 'Fill in the Base URL and API key before fetching models.',
       modelsHint: 'Click a model to use it; the field stays editable.',
@@ -126,18 +172,30 @@ window.__ModuleLoader__.load({
       eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
       eyeOff: 'M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
       grip: 'M9 6h6M9 12h6M9 18h6',
-      pin: 'M9 3h6l-1 7 4 4v2H6v-2l4-4-1-7zM12 16v5',
       download: 'M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
+      star: 'M12 3.5l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 10l6.1-.9z',
     };
-    const IconButton = ({ label, path, onClick, disabled }) => h('button', {
-      type: 'button', className: 'fmg-icon', 'aria-label': label, title: label, onClick, disabled,
+    // Same glyph as the reference composer pill: rounded frame, dot, ridge.
+    const pillIcon = () => h('svg', {
+      className: 'fmg-pill-icon', width: 13, height: 13, viewBox: '0 0 16 16', fill: 'none',
+      stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
+    },
+      h('rect', { x: 1.5, y: 2.5, width: 13, height: 11, rx: 2 }),
+      h('circle', { cx: 5.5, cy: 6.5, r: 1.3 }),
+      h('path', { d: 'M14.5 10.5l-3.2-3.2-6.3 6.2' }));
+    const IconButton = ({ label, path, onClick, disabled, className }) => h('button', {
+      type: 'button', className: `fmg-icon${className ? ` ${className}` : ''}`, 'aria-label': label, title: label, onClick, disabled,
     }, icon(path));
 
     async function request(url, init) {
       const response = await fetch(url, { cache: 'no-store', ...init, headers: { 'content-type': 'application/json', ...(init && init.headers) } });
       let data = null;
       try { data = await response.json(); } catch { /* non-JSON failure */ }
-      if (!response.ok) throw new Error((data && data.error) || `HTTP ${response.status}`);
+      if (!response.ok) {
+        const error = new Error((data && data.error) || `HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
       return data;
     }
 
@@ -146,12 +204,15 @@ window.__ModuleLoader__.load({
     // Editable draft rows; `from` remembers the stored name so renames keep unshown fields.
     const toDraft = view => {
       const workflows = view.workflows.map(w => ({ ...w, id: key(), from: w.name, outputs: w.output_node_ids.join(', '), inputsText: JSON.stringify(w.inputs, null, 2) }));
+      const providers = view.providers.map(p => ({ ...p, id: key(), from: p.name, api_key: undefined, revealed: null }));
       return {
-        providers: view.providers.map(p => ({ ...p, id: key(), from: p.name, api_key: undefined, revealed: null })),
+        providers,
         connections: view.workflow_connections.map(c => ({ ...c, id: key(), from: c.name, api_key: undefined, revealed: null })),
         workflows,
-        // Default workflow tracked by row id, so renaming it keeps the marker.
+        // Both defaults are tracked by row id, so renaming the row keeps the marker.
         defaultWorkflow: (workflows.find(w => w.name === view.active_workflow) || {}).id || null,
+        defaultProvider: (providers.find(p => p.name === view.default_provider) || {}).id || null,
+        showProviderPill: view.show_provider_pill !== false,
         output_dir: view.output_dir, cache_dir: view.cache_dir,
         retry_on_failure: view.retry_on_failure === true,
         retry_count: String(view.retry_count ?? DEFAULT_RETRY_COUNT),
@@ -177,7 +238,10 @@ window.__ModuleLoader__.load({
           return { name: w.name, from: w.from, connection: w.connection, workflow_id: w.workflow_id, description: w.description,
             instance_type: w.instance_type, output_node_ids: w.outputs.split(/[,\s]+/).filter(Boolean), inputs };
         }),
-        active_workflow: active ? active.name : null, output_dir: draft.output_dir, cache_dir: draft.cache_dir,
+        active_workflow: active ? active.name : null,
+        default_provider: (draft.providers.find(p => p.id === draft.defaultProvider) || {}).name || null,
+        show_provider_pill: draft.showProviderPill !== false,
+        output_dir: draft.output_dir, cache_dir: draft.cache_dir,
         retry_on_failure: draft.retry_on_failure === true, retry_count: retryCountOf(draft.retry_count, t),
       };
     }
@@ -250,7 +314,7 @@ window.__ModuleLoader__.load({
       }, icon(ICON.grip));
     }
 
-    function ProviderCard({ t, row, transports, update, onRemove, onPin, isFirst, setError, open, onToggle, dragging, drop, onDragStart, onDragOver, onDrop, onDragEnd }) {
+    function ProviderCard({ t, row, transports, update, onRemove, onDefault, isDefault, showHandle, setError, open, onToggle, dragging, drop, onDragStart, onDragOver, onDrop, onDragEnd }) {
       const f = field => `fmg-${row.id}-${field}`;
       const remove = () => { if (window.confirm(t('confirmRemove', { name: row.name || '?' }))) onRemove(); };
       const IDLE_MODELS = { base: '', transport: '', loading: false, error: '', items: null };
@@ -293,16 +357,16 @@ window.__ModuleLoader__.load({
         onDrop: e => { e.preventDefault(); e.stopPropagation(); onDrop(); },
       },
         h('div', { className: 'fmg-head' },
-          h(CardHandle, { t, id: row.id, onDragStart, onDragEnd }),
+          showHandle ? h(CardHandle, { t, id: row.id, onDragStart, onDragEnd }) : null,
           // The title row is the disclosure control; no separate chevron.
           h('button', {
             type: 'button', className: 'fmg-toggle', onClick: onToggle, 'aria-expanded': open, title: t(open ? 'collapse' : 'expand'),
           },
-            h('span', { className: 'fmg-name' }, row.name || '—'),
+            h('span', { className: 'fmg-name' }, row.name || '—', isDefault ? ` · ${t('default')}` : ''),
             open ? null : h('span', { className: 'fmg-sub' }, row.model)),
           h(IconButton, {
-            label: t(isFirst ? 'pinned' : 'pin'), path: ICON.pin, onClick: onPin,
-            disabled: !row.enabled || isFirst,
+            label: t(isDefault ? 'default' : 'setDefault'), path: ICON.star, onClick: onDefault,
+            disabled: !row.enabled || isDefault, className: isDefault ? 'fmg-star-on' : undefined,
           }),
           h(Switch, { checked: row.enabled, label: t('enable', { name: row.name }), onChange: enabled => update({ enabled }) })),
         open ? h('div', { className: 'fmg-fields' },
@@ -366,17 +430,6 @@ window.__ModuleLoader__.load({
           if (dirty) setDirty(true);
         },
         moveTo: (fromId, toId, pos) => { setDraft(d => ({ ...d, [field]: reorder(d[field], fromId, toId, pos) })); setDirty(true); },
-        toTop: id => {
-          setDraft(d => {
-            const from = d[field].findIndex(r => r.id === id);
-            if (from <= 0) return d;
-            const next = d[field].slice();
-            const [row] = next.splice(from, 1);
-            next.unshift(row);
-            return { ...d, [field]: next };
-          });
-          setDirty(true);
-        },
         remove: id => { setDraft(d => ({ ...d, [field]: d[field].filter(r => r.id !== id) })); setDirty(true); },
         add: row => { setDraft(d => ({ ...d, [field]: [...d[field], row] })); setDirty(true); },
       };
@@ -388,7 +441,13 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = useState(false);
       const [error, setError] = useState('');
       const [notice, setNotice] = useState('');
+      // Set only for a 409 from the revision guard, so the bar can offer an
+      // explicit overwrite instead of a dead end.
+      const [conflict, setConflict] = useState(false);
       const [tab, setTab] = useState('providers');
+      // Ordering is the fallback path now that the pill and the star set the
+      // default, so its handles stay behind a disclosure.
+      const [advanced, setAdvanced] = useState(false);
       // Collapsed by default; the summary row keeps the list scannable.
       const [open, setOpen] = useState(() => new Set());
       const IDLE = { list: null, from: null, over: null, pos: null };
@@ -418,7 +477,7 @@ window.__ModuleLoader__.load({
         return next;
       });
       const load = useCallback(async () => {
-        setBusy(true); setError(''); setNotice('');
+        setBusy(true); setError(''); setNotice(''); setConflict(false);
         try { const next = await request(ROUTE); setView(next); setDraft(toDraft(next)); setDirty(false); }
         catch (e) { setError(e.message); }
         finally { setBusy(false); }
@@ -430,13 +489,19 @@ window.__ModuleLoader__.load({
       if (draft === null) return h('section', { className: 'fmg' }, h('h3', null, t('title')),
         error ? h('p', { className: 'fmg-error', role: 'alert' }, error, ' ', h(Button, { size: 'sm', variant: 'outline', onClick: load }, t('reload')))
           : h('p', { className: 'fmg-intro' }, t('loading')));
-      const save = async () => {
-        setBusy(true); setError(''); setNotice('');
+      // `force` is an explicit user choice after a 409: re-read the file for the
+      // current revision, then apply the draft on top of it.
+      const save = async (force = false) => {
+        setBusy(true); setError(''); setNotice(''); setConflict(false);
         try {
-          const next = await request(ROUTE, { method: 'PUT', body: JSON.stringify({ revision: view.revision, changes: toChanges(draft, t) }) });
+          const base = force ? await request(ROUTE) : view;
+          if (force) setView(base);
+          const next = await request(ROUTE, { method: 'PUT', body: JSON.stringify({ revision: base.revision, changes: toChanges(draft, t) }) });
           setView(next); setDraft(toDraft(next)); setDirty(false); setNotice(t('saved'));
-        } catch (e) { setError(e.message); }
-        finally { setBusy(false); }
+        } catch (e) {
+          setError(e.message);
+          setConflict(e.status === 409);
+        } finally { setBusy(false); }
       };
       const set = patch => { setDraft(d => ({ ...d, ...patch })); setDirty(true); };
       const addProvider = () => {
@@ -456,10 +521,22 @@ window.__ModuleLoader__.load({
       const connectionNames = draft.connections.map(c => c.name).filter(Boolean);
       const panels = {
         providers: [
-          h('ul', { key: 'l', className: 'fmg-list', ...listProps('providers', providers) }, draft.providers.map((row, index) => h(ProviderCard, {
+          h('div', { key: 'pill-toggle', className: 'fmg-pill-setting' },
+            h('div', { className: 'fmg-pill-setting-text' },
+              h('strong', null, t('showPill')),
+              h('p', { className: 'fmg-hint' }, t('showPillHint'))),
+            h(Switch, { checked: draft.showProviderPill, label: t('showPill'), onChange: showProviderPill => set({ showProviderPill }) })),
+          h('details', {
+            key: 'advanced', className: 'fmg-advanced', open: advanced,
+            onToggle: event => setAdvanced(event.currentTarget.open),
+          },
+            h('summary', null, t('advanced')),
+            h('p', { className: 'fmg-hint' }, t('orderHint'))),
+          h('ul', { key: 'l', className: 'fmg-list', ...listProps('providers', providers) }, draft.providers.map(row => h(ProviderCard, {
             key: row.id, t, row, transports: view.transports, setError,
             open: open.has(row.id), onToggle: () => toggleOpen(row.id),
-            isFirst: index === 0, onPin: () => providers.toTop(row.id),
+            isDefault: row.id === draft.defaultProvider, showHandle: advanced,
+            onDefault: () => set({ defaultProvider: row.id }),
             ...dragProps('providers', row.id, providers, draft.providers),
             update: (patch, d) => providers.update(row.id, patch, d), onRemove: () => providers.remove(row.id),
           }))),
@@ -525,9 +602,111 @@ window.__ModuleLoader__.load({
           tab === 'providers' ? h(Button, { size: 'sm', variant: 'outline', onClick: addProvider }, t('add')) : null,
           tab === 'workflows' ? h(Button, { size: 'sm', variant: 'outline', onClick: addWorkflow }, t('addWorkflow')) : null,
           h('span', { className: 'fmg-grow', role: 'status', 'aria-live': 'polite' },
-            error ? h('span', { className: 'fmg-error' }, error) : dirty ? t('dirty') : notice ? h('span', { className: 'fmg-ok' }, notice) : null),
+            error ? h('span', { className: 'fmg-error' }, conflict ? t('conflict') : error, ' ') : dirty ? t('dirty') : notice ? h('span', { className: 'fmg-ok' }, notice) : null,
+            conflict ? h(Button, { size: 'sm', variant: 'outline', disabled: busy, onClick: () => save(true) }, t('overwrite')) : null),
           h(Button, { size: 'sm', variant: 'ghost', disabled: busy, onClick: load }, dirty ? t('reset') : t('reload')),
-          h(Button, { size: 'sm', variant: 'primary', disabled: busy || !dirty, onClick: save }, busy ? t('saving') : t('save'))));
+          h(Button, { size: 'sm', variant: 'primary', disabled: busy || !dirty, onClick: () => save() }, busy ? t('saving') : t('save'))));
+    }
+
+    // Composer pill: reads the same config route as the settings page and writes
+    // only `default_provider`, so the two surfaces cannot disagree.
+    let pillText = key => key;
+    function ProviderPill() {
+      const [view, setView] = useState(null);
+      const [open, setOpen] = useState(false);
+      const [pending, setPending] = useState(false);
+      const [error, setError] = useState('');
+      const [menu, setMenu] = useState(null);
+      const buttonRef = useRef(null);
+      const load = useCallback(async () => {
+        try { setView(await request(ROUTE)); }
+        catch (e) { setError(e.message); }
+      }, []);
+      useEffect(() => { void load(); }, [load]);
+      useEffect(() => {
+        if (!open) return undefined;
+        const place = () => {
+          const rect = buttonRef.current && buttonRef.current.getBoundingClientRect();
+          if (!rect) return;
+          // Keep the 340px menu inside the viewport, and open downward when the
+          // composer leaves no room above it.
+          const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - 348));
+          setMenu(rect.top >= 372
+            ? { left, bottom: window.innerHeight - rect.top + 6 }
+            : { left, top: rect.bottom + 6 });
+        };
+        place();
+        const onDown = event => {
+          if (buttonRef.current && buttonRef.current.contains(event.target)) return;
+          if (event.target instanceof Element && event.target.closest('.fmg-pill-menu')) return;
+          setOpen(false);
+        };
+        const onKey = event => { if (event.key === 'Escape') setOpen(false); };
+        document.addEventListener('mousedown', onDown, true);
+        document.addEventListener('keydown', onKey, true);
+        window.addEventListener('resize', place);
+        window.addEventListener('scroll', place, true);
+        return () => {
+          document.removeEventListener('mousedown', onDown, true);
+          document.removeEventListener('keydown', onKey, true);
+          window.removeEventListener('resize', place);
+          window.removeEventListener('scroll', place, true);
+        };
+      }, [open]);
+
+      const t = pillText;
+      // Re-read on open so a settings edit made in another surface is visible.
+      const toggle = () => { if (!open) void load(); setOpen(!open); };
+      const select = async name => {
+        if (pending) return;
+        if (view && name === view.default_provider) { setOpen(false); return; }
+        setPending(true); setError('');
+        try {
+          const next = await request(ROUTE, { method: 'PUT', body: JSON.stringify({ revision: view.revision, changes: { default_provider: name } }) });
+          setView(next); setOpen(false);
+        } catch (e) {
+          setError(e.message);
+          if (e.status === 409) void load();
+        } finally { setPending(false); }
+      };
+
+      if (!view || view.show_provider_pill === false) return null;
+      const enabled = view.providers.filter(provider => provider.enabled);
+      if (!enabled.length) return null;
+      const current = enabled.find(provider => provider.name === view.default_provider) || enabled[0];
+      return h('div', { className: 'fmg-pill' },
+        h('button', {
+          type: 'button', ref: buttonRef, className: `fmg-pill-button${open ? ' is-open' : ''}`,
+          'aria-haspopup': 'menu', 'aria-expanded': open, title: t('pillTitle'), onClick: toggle,
+        },
+          pillIcon(),
+          h('span', { className: 'fmg-pill-label' }, current.name),
+          h('span', { className: 'fmg-pill-caret', 'aria-hidden': true },
+            h('svg', { width: 10, height: 10, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
+              h('path', { d: 'M4 10l4-4 4 4' })))),
+        open && menu ? h('div', { className: 'fmg-pill-menu', role: 'menu', 'aria-label': t('pillTitle'), style: menu },
+          h('div', { className: 'fmg-pill-list' },
+            enabled.map(provider => {
+              const active = provider.name === current.name;
+              const ready = Boolean(provider.api_key_set || provider.api_key_env);
+              return h('button', {
+                key: provider.name, type: 'button', role: 'menuitemradio', 'aria-checked': active,
+                className: 'fmg-pill-option', disabled: pending,
+                title: `${provider.model || '—'} · ${provider.name}${ready ? '' : ` · ${t('pillKeyMissing')}`}`,
+                onClick: () => { void select(provider.name); },
+              },
+                h('span', { className: 'fmg-pill-text' },
+                  provider.model || '—',
+                  h('span', { className: 'fmg-pill-sep', 'aria-hidden': true }, '·'),
+                  h('span', { className: 'fmg-pill-provider' }, provider.name)),
+                h('span', { className: 'fmg-pill-check', 'aria-hidden': true }, active
+                  ? h('svg', {
+                    width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor',
+                    strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round',
+                  }, h('path', { d: 'M2.5 8.5l3.5 3.5 7-8' }))
+                  : null));
+            })),
+          error ? h('div', { className: 'fmg-pill-error', role: 'alert' }, `${t('pillSwitchFailed')}: ${error}`) : null) : null);
     }
 
     return {
@@ -544,9 +723,15 @@ window.__ModuleLoader__.load({
         }, 'fmage: settings styles');
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'fmage: settings dictionaries');
         const t = ctx.locale.bind(NS);
+        pillText = t;
         ctx.slots.inject('settings.section', () => ctx.slots.register({
           name: 'settings.section', id: 'fmage', order: 18, label: () => t('nav'), locale: NS,
         }, FmageSection));
+        // Official composer seat beside the model picker; a host without the
+        // conversation UI never declares this slot, so the pill simply never mounts.
+        ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+          name: 'conversation.input.right', id: 'fmage-provider', order: 20, label: () => t('pill'),
+        }, ProviderPill));
       },
     };
   },

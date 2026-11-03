@@ -29,17 +29,28 @@ test('client registers the Fmage settings section and renders its loading state'
   const requireReact = createRequire(join(reactDom, 'package.json'));
   const { plugin, style } = loadClient(id => requireReact(id));
   assert.deepEqual([...plugin.inject], ['slots', 'locale']);
-  let dictionaries; let registration; let component;
+  let dictionaries; let registration; let component; let pillRegistration; let pillComponent;
+  const injected = [];
   const effects = [];
   const ctx = {
     effect: fn => effects.push(fn()),
     locale: { register: (ns, dicts) => { dictionaries = { ns, dicts }; return () => {}; }, bind: () => key => dictionaries.dicts.zh[key] ?? key },
-    slots: { inject: (name, cb) => { assert.equal(name, 'settings.section'); cb(); }, register: (options, c) => { registration = options; component = c; } },
+    slots: {
+      inject: (name, cb) => { injected.push(name); cb(); },
+      register: (options, c) => {
+        if (options.name === 'settings.section') { registration = options; component = c; }
+        else { pillRegistration = options; pillComponent = c; }
+      },
+    },
   };
   plugin.apply(ctx);
+  assert.deepEqual(injected, ['settings.section', 'conversation.input.right']);
   assert.equal(registration.id, 'fmage');
   assert.equal(registration.locale, 'settings.fmage');
   assert.equal(registration.label(), 'Fmage 生图');
+  assert.equal(pillRegistration.id, 'fmage-provider');
+  assert.equal(pillRegistration.label(), '生图');
+  assert.equal(typeof pillComponent, 'function');
   assert.deepEqual([...Object.keys(dictionaries.dicts.zh)].sort(), [...Object.keys(dictionaries.dicts.en)].sort());
   // Fixed frame: the section fills the host's options column, the title/tabs
   // and action bar stay out of the scroll region, and only the panel scrolls.
