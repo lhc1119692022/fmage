@@ -69,10 +69,13 @@ def user_home() -> Path:
 
 
 def config_path() -> Path:
-    """与 Fmage 相同的解析顺序：FMAGE_CONFIG → CODEX_HOME/fmage → ~/.codex/fmage。"""
+    """开发期工具：FMAGE_CONFIG → FMAGE_DATA_HOME → CODEX_HOME/fmage → ~/.codex/fmage。"""
     explicit = os.environ.get("FMAGE_CONFIG")
     if explicit:
         return Path(explicit)
+    data_home = os.environ.get("FMAGE_DATA_HOME")
+    if data_home:
+        return Path(data_home) / "providers.json"
     codex_home = os.environ.get("CODEX_HOME")
     base = Path(codex_home) if codex_home else user_home() / ".codex"
     return base / "fmage" / "providers.json"

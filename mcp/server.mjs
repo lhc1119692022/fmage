@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { access, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -38,9 +38,17 @@ const PENDING_POLL_FAST_WINDOW_SECONDS = 120;
 const PENDING_POLL_FAST_INTERVAL_SECONDS = 5;
 const PENDING_POLL_SLOW_INTERVAL_SECONDS = 10;
 const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// The host that launches this server names its data directory; there is no
+// default. FMAGE_CONFIG still points at one exact file for a manual override.
+const DATA_HOME = nonEmptyString(process.env.FMAGE_DATA_HOME);
 const CONFIG_PATH =
-  process.env.FMAGE_CONFIG ||
-  join(process.env.CODEX_HOME || join(homedir(), ".codex"), "fmage", "providers.json");
+  nonEmptyString(process.env.FMAGE_CONFIG) || (DATA_HOME ? join(DATA_HOME, "providers.json") : null);
+if (!CONFIG_PATH) {
+  process.stderr.write(
+    "Fmage: FMAGE_DATA_HOME is not set; the launching host must name its data directory.\n",
+  );
+  process.exit(1);
+}
 const TRANSPORT_OPENAI_IMAGES = "openai-images";
 const workflowService = createWorkflowService(CONFIG_PATH);
 const TRANSPORT_GEMINI_GENERATE_CONTENT = "gemini-generate-content";
@@ -781,12 +789,26 @@ function runProcess(command, argv, extraEnv = {}, options = {}) {
   });
 }
 
+// Regression writes into the same output folder as image generation. This
+// server resolves that folder once so the helper never reads the configuration.
+function regressionOutputRoot() {
+  const config = readConfigForPaths();
+  const active = Array.isArray(config?.active_providers)
+    ? config.active_providers.map(nonEmptyString).filter(Boolean)
+    : [];
+  const name = active[0];
+  const raw = name && config?.providers ? config.providers[name] : null;
+  return raw && typeof raw === "object"
+    ? finalOutputRoot({}, { name, raw })
+    : join(configBaseDir(), "outputs", "regression");
+}
+
 async function runImageRegression(args) {
   const image = nonEmptyString(args.image);
   if (!image) throw new Error("regress_image requires a local image path.");
   const result = await runProcess(
     pythonCommand(),
-    [REGRESSION_SCRIPT, "--input", image],
+    [REGRESSION_SCRIPT, "--input", image, "--output-dir", regressionOutputRoot()],
     { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
     {},
   );

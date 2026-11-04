@@ -98,7 +98,7 @@ def iso_now() -> str:
 
 
 def credential_help() -> str:
-    return "Configure the selected provider in ~/.codex/fmage/providers.json."
+    return "Configure the selected provider in providers.json (see the fmage-config skill)."
 
 
 def configured_value(file_value: str, env_name: str, default: str = "") -> str:

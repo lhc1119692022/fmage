@@ -2,6 +2,7 @@
 import { readFileSync, writeFileSync, watchFile, unwatchFile, renameSync, unlinkSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { BUNDLED_SKILL_RANK } from '@deepseek-ai/dsh-skill';
 import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
@@ -11,6 +12,10 @@ import { createConfigApi, registerConfigRoutes } from './config-api.mjs';
 export const name = 'fmage';
 export const inject = ['skills', 'tools'];
 const root = fileURLToPath(new URL('./', import.meta.url));
+// This host owns its data directory and tells the MCP server where it is; the
+// server keeps its own default only for hosts that cannot say it.
+const dataHome = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'fmage');
+const configPath = join(dataHome, 'providers.json');
 // Ten server tools minus the two diagnostics the server no longer lists.
 const EXPECTED_TOOL_COUNT = 8;
 
@@ -42,11 +47,12 @@ export async function apply(ctx) {
   await ctx.plugin(mcpClient, {
     transport: 'stdio', serverName: 'Fmage', command: 'node',
     args: [join(root, 'mcp', 'launch.mjs')], cwd: root,
+    env: { FMAGE_DATA_HOME: dataHome },
     toolCallTimeoutMs: 1800000, failOnStartupError: true,
     reconnect: { enabled: false },
   });
   // Settings page routes; optional so a Host without the Web/Desktop carrier still loads skills and tools.
-  ctx.inject(['connection'], scope => registerConfigRoutes(scope, createConfigApi()));
+  ctx.inject(['connection'], scope => registerConfigRoutes(scope, createConfigApi(configPath)));
   const { version, sha256 } = JSON.parse(readFileSync(join(root, '.fmage-build.json'), 'utf8'));
   const receipt = join(root, '.fmage-runtime.json');
   const loadedAt = new Date().toISOString();

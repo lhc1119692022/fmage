@@ -60,21 +60,7 @@ class FmageImageRegressionTests(unittest.TestCase):
             temp_path = Path(temp_dir)
             source_path = temp_path / "source.png"
             configured_output_dir = temp_path / "configured-output"
-            config_path = temp_path / "providers.json"
             Image.new("RGB", (1600, 1200), (80, 120, 160)).save(source_path)
-            config_path.write_text(
-                json.dumps(
-                    {
-                        "active_providers": ["test-provider"],
-                        "output_dir": str(configured_output_dir),
-                        "providers": {"test-provider": {}},
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            environment = os.environ.copy()
-            environment["FMAGE_CONFIG"] = str(config_path)
 
             completed = subprocess.run(
                 [
@@ -82,11 +68,12 @@ class FmageImageRegressionTests(unittest.TestCase):
                     str(SCRIPT_PATH),
                     "--input",
                     str(source_path),
+                    "--output-dir",
+                    str(configured_output_dir),
                 ],
                 check=True,
                 capture_output=True,
                 text=True,
-                env=environment,
             )
             result = json.loads(completed.stdout)
             output_path = Path(result["output"])

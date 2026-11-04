@@ -8,7 +8,6 @@ import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
-import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import harness_plugins as hp
@@ -141,7 +140,7 @@ class HarnessPluginsTests(unittest.TestCase):
     def test_runtime_status_requires_current_payload_and_fresh_heartbeat(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            files = hp.payload('deepseek')
+            files = hp.payload()
             self.assertIn('NOT verified', hp.deepseek_runtime_status(root, files))
             receipt = {**json.loads(files['.fmage-build.json']), 'pid': 123,
                        'skillCount': 5, 'toolCount': hp.MCP_TOOL_COUNT, 'mcpReady': True,
@@ -158,7 +157,7 @@ class HarnessPluginsTests(unittest.TestCase):
     def test_deepseek_rejects_link_registration_and_checks_installed_bytes(self):
         with tempfile.TemporaryDirectory() as temp:
             profile = Path(temp) / 'desktop'
-            files = hp.payload('deepseek')
+            files = hp.payload()
             installed = profile / 'node_modules/dsh-fmage'
             hp.sync_payload(files, installed)
             package = Path(temp) / 'fmage.tgz'
@@ -232,48 +231,40 @@ class HarnessPluginsTests(unittest.TestCase):
                 self.assertFalse(hp.activate_deepseek_version(profile, installed, "new"))
 
     def test_private_skill_invocation_and_descriptions(self):
-        for host in ("vscode", "deepseek"):
-            files = hp.payload(host)
-            for name in hp.SKILLS:
-                text = files[f"skills/{name}/SKILL.md"].decode()
-                self.assertTrue(text.startswith(f"---\nname: {name}\n"))
-                self.assertIn(hp.DESCRIPTIONS[name], text)
-                self.assertIn(f"disable-model-invocation: {'true' if name == 'fmage-direct' else 'false'}", text)
-                self.assertNotIn("$fmage", text)
-                self.assertNotIn("mcp__Fmage.", text)
-            regression = files["skills/fmage-image-regression/SKILL.md"].decode()
-            self.assertIn("regress_image", regression)
-            self.assertNotIn("degrade_image.py", regression)
-            self.assertNotIn("agents/openai.yaml", "\n".join(files))
+        files = hp.payload()
+        for name in hp.SKILLS:
+            text = files[f"skills/{name}/SKILL.md"].decode()
+            self.assertTrue(text.startswith(f"---\nname: {name}\n"))
+            self.assertIn(hp.DESCRIPTIONS[name], text)
+            self.assertIn(f"disable-model-invocation: {'true' if name == 'fmage-direct' else 'false'}", text)
+            self.assertNotIn("$fmage", text)
+            self.assertNotIn("mcp__Fmage.", text)
+        regression = files["skills/fmage-image-regression/SKILL.md"].decode()
+        self.assertIn("regress_image", regression)
+        self.assertNotIn("degrade_image.py", regression)
+        self.assertNotIn("agents/openai.yaml", "\n".join(files))
 
-    def test_archive_allowlist_and_host_formats(self):
+    def test_archive_allowlist(self):
         with tempfile.TemporaryDirectory() as temp:
             out = Path(temp)
-            for host in ("vscode", "deepseek"):
-                files = hp.payload(host)
-                self.assertNotIn("config/providers.json", files)
-                self.assertNotIn("scripts/harness_plugins.py", files)
-                self.assertNotIn("scripts/install_vscode_adapter.py", files)
-                self.assertIn("config/gpt-image-model-families.json", files)
-                archive = hp.build_archive(host, files, out)
-                hp.verify_archive(host, files, out)
-                if host == "vscode":
-                    with zipfile.ZipFile(archive) as z:
-                        self.assertEqual(set(z.namelist()), {"fmage/" + n for n in files})
-                        self.assertIn("fmage/.plugin/plugin.json", z.namelist())
-                else:
-                    with tarfile.open(archive) as z:
-                        self.assertEqual(set(z.getnames()), {"package/" + n for n in files})
-                    self.assertFalse(json.loads(files["catalog.json"])[1]["modelInvocable"])
-                changed = dict(files)
-                changed["skills/fmage/SKILL.md"] = b"stale"
-                with self.assertRaises(RuntimeError):
-                    hp.verify_archive(host, changed, out)
+            files = hp.payload()
+            self.assertNotIn("config/providers.json", files)
+            self.assertNotIn("scripts/harness_plugins.py", files)
+            self.assertIn("config/gpt-image-model-families.json", files)
+            archive = hp.build_archive(files, out)
+            hp.verify_archive(files, out)
+            with tarfile.open(archive) as z:
+                self.assertEqual(set(z.getnames()), {"package/" + n for n in files})
+            self.assertFalse(json.loads(files["catalog.json"])[1]["modelInvocable"])
+            changed = dict(files)
+            changed["skills/fmage/SKILL.md"] = b"stale"
+            with self.assertRaises(RuntimeError):
+                hp.verify_archive(changed, out)
 
     def test_sync_is_read_only_when_checking_and_detects_drift(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "private"
-            files = hp.payload("vscode")
+            files = hp.payload()
             self.assertTrue(hp.sync_payload(files, root, True))
             self.assertFalse(root.exists())
             hp.sync_payload(files, root)
@@ -285,7 +276,7 @@ class HarnessPluginsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "private"
             retired = "scripts/retired_transport.py"
-            first = hp.payload("vscode")
+            first = hp.payload()
             first[retired] = b"print('retired')\n"
             marker = json.loads(first[".fmage-build.json"])
             marker["files"] = sorted(first)
@@ -293,7 +284,7 @@ class HarnessPluginsTests(unittest.TestCase):
             hp.sync_payload(first, root)
             self.assertTrue((root / retired).is_file())
             # The next build no longer ships it: check reports it, sync deletes it.
-            second = hp.payload("vscode")
+            second = hp.payload()
             self.assertIn(retired, hp.sync_payload(second, root, True))
             hp.sync_payload(second, root)
             self.assertFalse((root / retired).is_file())
@@ -302,7 +293,7 @@ class HarnessPluginsTests(unittest.TestCase):
     def test_sync_drops_stray_scripts_from_a_legacy_marker(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "private"
-            legacy = hp.payload("vscode")
+            legacy = hp.payload()
             marker = json.loads(legacy[".fmage-build.json"])
             del marker["files"]
             legacy[".fmage-build.json"] = hp.json_bytes(marker)
@@ -335,7 +326,7 @@ class HarnessPluginsTests(unittest.TestCase):
                 hp.set_jsonc_fields(path, {"chat.pluginLocations": {"private": True}})
                 self.assertEqual(path.read_text(encoding="utf-8"), result)
 
-    def test_cleanup_preserves_other_skills_servers_and_backups(self):
+    def test_cleanup_preserves_other_skills_and_backups(self):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
             shared = home / ".agents/skills"
@@ -343,22 +334,37 @@ class HarnessPluginsTests(unittest.TestCase):
             for name in hp.SKILLS:
                 (shared / name).mkdir()
                 (shared / name / "SKILL.md").write_text("# Fmage VS Code adapter\nold", encoding="utf-8")
-            mcp = home / "Code/User/mcp.json"
-            mcp.parent.mkdir(parents=True)
-            mcp.write_text(json.dumps({"servers": {"Fmage": {"args": [str(hp.ROOT / "mcp/server.mjs")]}, "Other": {"command": "other"}}}), encoding="utf-8")
-            with patch.object(hp.Path, "home", return_value=home), patch.dict(hp.os.environ, {"APPDATA": str(home)}):
+            with patch.object(hp.Path, "home", return_value=home):
                 changes = hp.clean_legacy(home / "backups")
-            self.assertEqual(len(changes), 6)
+            self.assertEqual(len(changes), len(hp.SKILLS))
             self.assertTrue((shared / "other").exists())
             self.assertTrue((home / "backups/shared-skills/fmage/SKILL.md").exists())
-            self.assertEqual(json.loads(mcp.read_text())["servers"], {"Other": {"command": "other"}})
 
-    def test_both_packaged_mcp_launchers_initialize_without_keys(self):
+    def test_vscode_retirement_archives_the_plugin_and_drops_its_settings_entry(self):
         with tempfile.TemporaryDirectory() as temp:
-            for host in ("vscode", "deepseek"):
-                root = Path(temp) / host
-                hp.sync_payload(hp.payload(host), root)
-                verify_mcp_handshake(root / "mcp/launch.mjs")
+            home = Path(temp)
+            target = home / "Code/User/agent-plugins/fmage"
+            hp.atomic_write(target / "SKILL.md", b"old")
+            settings = home / "Code/User/settings.json"
+            hp.atomic_write(settings, json.dumps({
+                "chat.pluginLocations": {target.as_posix(): True, "other/plugin": True},
+                "chat.plugins.enabled": True,
+            }).encode())
+            state = {"hosts": {"vscode": {"path": str(target)}, "deepseek": {"path": str(home / "staging")}}}
+            removed = hp.retire_vscode(state, home / "rollback")
+            self.assertNotIn("vscode", state["hosts"])
+            self.assertIn("deepseek", state["hosts"])
+            self.assertFalse(target.exists())
+            self.assertTrue((home / "rollback/vscode-agent-plugin/SKILL.md").is_file())
+            self.assertEqual(json.loads(settings.read_text())["chat.pluginLocations"], {"other/plugin": True})
+            self.assertEqual(len(removed), 2)
+            self.assertEqual(hp.retire_vscode(state, home / "rollback"), [])
+
+    def test_packaged_mcp_launcher_initializes_without_keys(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "deepseek"
+            hp.sync_payload(hp.payload(), root)
+            verify_mcp_handshake(root / "mcp/launch.mjs", {"FMAGE_DATA_HOME": str(Path(temp) / "data")})
 
 
 if __name__ == "__main__":

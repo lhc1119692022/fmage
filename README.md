@@ -2,13 +2,13 @@
 
 Fmage 是面向 DeepSeek Harness Desktop 的图片生成与编辑插件，提供五个原生技能
 （生图、直传生图、配置、RunningHub 工作流、图片退步）和十个 `mcp__Fmage__*` 工具。
-DeepSeek Desktop 是主要宿主，功能与验证都以它为基准；Codex 和 VS Code 智能体继续作为兼容宿主，
+DeepSeek Desktop 是主要宿主，功能与验证都以它为基准；Codex 继续作为兼容宿主，
 构建与安装见 [宿主适配](adapters/README.md)。
 
 ## DeepSeek Desktop 安装与刷新
 
 ```text
-python scripts/refresh_local_runtime.py          # 刷新配置、重建并安装 Desktop 包（同时同步兼容宿主）
+python scripts/refresh_local_runtime.py          # 刷新配置、重建并安装 Desktop 包（同时重装 Codex 版本）
 python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内容和隔离加载
 ```
 
@@ -16,6 +16,17 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 再用登记的运行时安装，最后重新选入组合包，宿主加载新文件后由心跳确认新版本生效，无需重启，
 也不会中断正在进行的图片请求（但刷新期间 Fmage 工具会短暂下线，别在生图请求执行中刷新）。
 宿主的 HMR 只响应组合包列表变化，所以外部 pnpm 直接替换目录既不生效、还会因目录被占用而失败。
+
+## 数据位置
+
+配置与生成记录按宿主分开，每个宿主只读自己目录下的那一份。MCP 服务端没有默认路径：数据目录由
+启动它的宿主通过 `FMAGE_DATA_HOME` 指定。
+
+- DeepSeek Desktop：适配器注入 `<DSH_HOME|~/.dsh>/fmage`；`outputs/`、`cache/`、`workflow-tasks/` 也在该目录下。
+- Codex：刷新时把 `env.FMAGE_DATA_HOME = <CODEX_HOME|~/.codex>/fmage` 写进本地已装插件的 MCP 注册项。
+- `FMAGE_CONFIG` 可指向任意一份文件，覆盖数据目录（本机需要多处复用时用它）。
+
+数据目录里没有 `providers.json` 时，首次调用就在那里生成 starter 配置；插件没有任何“去别处找配置”的代码路径。
 
 ## 设置页面：Fmage 生图
 
@@ -38,7 +49,7 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 - 输入栏胶囊：显示当前默认提供商，点开即可切换。它只写 `default_provider`，与设置页共用同一份配置；
   `default_provider` 为空或不在 `active_providers` 中时，回退到第一个启用的提供商。
   切换后下一次生图请求即按新的默认提供商路由；失败结果同样带 `provider`、`provider_model`，
-  不会沿用上一次调用的提供商。没有 DSH 界面的宿主（Codex、VS Code）不显示胶囊，仍按配置顺序和显式 `provider` 参数工作。
+  不会沿用上一次调用的提供商。没有 DSH 界面的宿主（Codex）不显示胶囊，仍按配置顺序和显式 `provider` 参数工作。
 
 ### 生成失败重试
 
@@ -103,10 +114,10 @@ New image records and tool results put `provider`, `provider_transport`, `provid
 ## Local Runtime Refresh
 
 `python scripts/refresh_local_runtime.py` refreshes the DeepSeek Desktop package first-class
-alongside the Codex plugin cache and the VS Code Agent Plugin. All of them use host-private
-locations, never `~/.agents/skills`. `--check` is read-only. Codex keeps skill and MCP catalogs
-per task, so start a new Codex task after a refresh; this does not resubmit any image request.
-See [host adapters](adapters/README.md) and [VS Code installation](vscode/README.md).
+alongside the Codex plugin cache. Both use host-private locations, never `~/.agents/skills`.
+`--check` is read-only. Codex keeps skill and MCP catalogs per task, so start a new Codex task
+after a refresh; this does not resubmit any image request.
+See [host adapters](adapters/README.md).
 
 Providers select a protocol: openai-images, gemini-generate-content, or midjourney.
 There are no channel-specific execution profiles or model allowlists for OpenAI Images.
@@ -232,13 +243,3 @@ PNG 结果同时返回宽高和格式，避免再执行命令读取尺寸。
 不能保证恢复，所以成功后应及时下载。当前只接收图片输出；
 视频、音频、加密工作流密码、webhook 和输出重定向暂不支持。
 测试使用模拟 API，不代表已对账号权限、模型环境和真实 CDN 完成验证。
-
-## VS Code adapter (compatibility)
-
-VS Code's MCP integration discovers Fmage tools but does not automatically load the Codex plugin manifest or its skills. Install the VS Code adapter to synchronize adapted skills and configure the local MCP server without replacing other servers:
-
-```text
-python scripts/install_vscode_adapter.py
-```
-
-Use `python scripts/install_vscode_adapter.py --check` for a read-only check. See `vscode/README.md` for the supported paths, natural-language entry points, and reload step.

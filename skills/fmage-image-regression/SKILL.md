@@ -5,7 +5,7 @@ description: "Use for ‘Fmage 图片退步’: run the bundled skill script onc
 
 # Fmage 图片退步
 
-Say `处理中。`, then run the bundled `scripts/degrade_image.py` exactly once with the attachment path as `--input`. Resolve the script path relative to this `SKILL.md`, enable UTF-8 Python I/O, capture stdout, and parse it as JSON.
+Say `处理中。`, then run the bundled `scripts/degrade_image.py` exactly once with the attachment path as `--input`. Without `--output-dir` the result is written next to the input. Resolve the script path relative to this `SKILL.md`, enable UTF-8 Python I/O, capture stdout, and parse it as JSON.
 
 On success, treat `output` as authoritative. Never expose the raw JSON unless the user asks. Return one short completion sentence and the output path. Normalize the display path to forward slashes and add an inline image preview. On failure, report stderr and stop.
 

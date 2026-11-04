@@ -32,6 +32,35 @@ class MarketplaceResolutionTests(unittest.TestCase):
             self.assertEqual(rlr.resolve_marketplace(Path("codex.exe")), rlr.DEFAULT_MARKETPLACE)
 
 
+class CodexRegistrationTests(unittest.TestCase):
+    def test_registration_names_the_codex_data_home(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cache = Path(temp)
+            (cache / ".mcp.json").write_text(
+                json.dumps(
+                    {
+                        "mcpServers": {
+                            "Fmage": {"command": "node", "args": ["./mcp/server.mjs"], "cwd": "."}
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            home = Path("C:/Users/test")
+            with patch.object(rlr.Path, "home", return_value=home), \
+                 patch.dict(rlr.os.environ, {"CODEX_HOME": ""}):
+                rlr.configure_codex_data_home(cache)
+                rlr.configure_codex_data_home(cache)
+            expected = {"FMAGE_DATA_HOME": str(home / ".codex" / "fmage")}
+            payload = json.loads((cache / ".mcp.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["mcpServers"]["Fmage"]["env"], expected)
+            self.assertEqual(payload["mcpServers"]["Fmage"]["args"], ["./mcp/server.mjs"])
+
+    def test_codex_home_relocates_the_data_directory(self):
+        with patch.dict(rlr.os.environ, {"CODEX_HOME": str(Path("D:/codex-home"))}):
+            self.assertEqual(rlr.codex_data_home(), Path("D:/codex-home") / "fmage")
+
+
 class CachebusterTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

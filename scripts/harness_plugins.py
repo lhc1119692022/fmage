@@ -1,4 +1,4 @@
-"""Build private VS Code and DeepSeek Desktop plugins from the Fmage repository."""
+"""Build the private DeepSeek Desktop plugin from the Fmage repository."""
 from __future__ import annotations
 
 import argparse
@@ -15,7 +15,6 @@ import subprocess
 import tarfile
 import tempfile
 import time
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ("fmage", "fmage-direct", "fmage-config", "fmage-workflow", "fmage-image-regression")
@@ -65,8 +64,8 @@ def json_bytes(value: object) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
-def adapt(text: str, host: str) -> str:
-    text = text.replace("mcp__Fmage.", "mcp__Fmage__" if host == "deepseek" else "Fmage / ")
+def adapt(text: str) -> str:
+    text = text.replace("mcp__Fmage.", "mcp__Fmage__")
     text = re.sub(r"\$fmage([a-z-]*)", r"/fmage\1", text)
     text = text.replace("`/Fmage 直传生图`", "`/fmage-direct`")
     text = text.replace("`view_image`", "the host's image inspection tool")
@@ -75,27 +74,21 @@ def adapt(text: str, host: str) -> str:
     return text.replace("fmage:fmage", "fmage")
 
 
-def skill_text(name: str, host: str) -> str:
+def skill_text(name: str) -> str:
     source = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
     match = re.match(r"---\r?\n.*?\r?\n---\r?\n", source, re.S)
     if not match:
         raise ValueError(f"Missing skill frontmatter: {name}")
-    body = adapt(source[match.end():], host)
-    host_name = "VS Code 智能体" if host == "vscode" else "DeepSeek Harness 桌面版"
-    tool_note = (
-        "在本机工具目录中选择 Fmage 服务器下对应的工具名，例如 generate_image、edit_image。"
-        "完整前缀由 VS Code 提供，不要编造 Fmage.generate_image 这样的调用标识。"
-        if host == "vscode" else
-        "工具名使用 mcp__Fmage__ 前缀，例如 mcp__Fmage__generate_image、mcp__Fmage__edit_image。"
-    )
+    body = adapt(source[match.end():])
     prelude = (
-        f"# {host_name}适配\n\n{tool_note}\n"
+        "# DeepSeek Harness 桌面版适配\n\n"
+        "工具名使用 mcp__Fmage__ 前缀，例如 mcp__Fmage__generate_image、mcp__Fmage__edit_image。\n"
         "只使用当前请求选择的入口；/fmage-direct 或用户明确说“Fmage 直传生图”才选择直传。"
         "普通生图使用 fmage。命令的展示名称以当前宿主的技能菜单为准。\n"
         "附件使用宿主给出的可读取本地路径；若只有附件标识，先用宿主的附件能力解析路径，"
         "不得把标识当作文件路径。输出使用工具返回的图片和文件链接；不能预览时交付实际保存路径。\n"
-        "提供商配置由外部 FMAGE_CONFIG 指定，默认兼容现有 ~/.codex/fmage/providers.json；"
-        "该路径只是共享配置，不要求在 Codex 中执行。\n\n"
+        "提供商配置位于 DeepSeek 自己的数据目录（默认 `~/.dsh/fmage/providers.json`）；"
+        "`FMAGE_CONFIG` 可指定其他文件。\n\n"
     )
     if name == "fmage-image-regression":
         body = (
@@ -110,9 +103,7 @@ def skill_text(name: str, host: str) -> str:
     )
 
 
-def payload(host: str) -> dict[str, bytes]:
-    if host not in ("vscode", "deepseek"):
-        raise ValueError(f"Unknown harness: {host}")
+def payload() -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     for directory, names in (("mcp", ("server.mjs", "workflows.mjs", "timeout-policy.mjs", "retry-policy.mjs")),
                              ("scripts", RUNTIME_SCRIPTS), ("config", CONFIG_FILES)):
@@ -121,40 +112,31 @@ def payload(host: str) -> dict[str, bytes]:
     files["skills/fmage-image-regression/scripts/degrade_image.py"] = (ROOT / "skills/fmage-image-regression/scripts/degrade_image.py").read_bytes()
     catalog = []
     for name in SKILLS:
-        files[f"skills/{name}/SKILL.md"] = skill_text(name, host).encode("utf-8")
+        files[f"skills/{name}/SKILL.md"] = skill_text(name).encode("utf-8")
         catalog.append({"name": name, "description": DESCRIPTIONS[name], "modelInvocable": name != "fmage-direct"})
         for path in sorted((ROOT / "skills" / name / "references").glob("*.md")):
-            files[f"skills/{name}/references/{path.name}"] = adapt(path.read_text(encoding="utf-8"), host).encode("utf-8")
+            files[f"skills/{name}/references/{path.name}"] = adapt(path.read_text(encoding="utf-8")).encode("utf-8")
     version = read_json(ROOT / ".codex-plugin/plugin.json")["version"]
-    if host == "vscode":
-        files[".plugin/plugin.json"] = json_bytes({
-            "name": "fmage", "version": version, "description": "Fmage 图片生成、直传生图、图片退步、工作流与配置。VS Code 智能体专用插件。",
-            "skills": "./skills/", "mcpServers": "./.mcp.json",
-        })
-        files[".mcp.json"] = json_bytes({"mcpServers": {"Fmage": {
-            "command": "node", "args": ["${PLUGIN_ROOT}/mcp/launch.mjs"], "cwd": "${PLUGIN_ROOT}",
-        }}})
-    else:
-        files["package.json"] = json_bytes({
-            "name": "dsh-fmage", "version": version,
-            "description": "Fmage：图片生成、直传生图、图片退步、RunningHub 工作流与配置；DeepSeek Harness 桌面版专用。",
-            "type": "module", "main": "index.mjs",
-            "exports": {".": "./index.mjs", "./client": "./client.js", "./package.json": "./package.json"},
-            # dsh.client publishes the settings page into the Desktop/Web client module graph.
-            "dsh": {"bundle": {"patch": "./cordis.patch.yml"}, "client": {"platform": "web"}},
-            "peerDependencies": {"@deepseek-ai/dsh-skill": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/dsh-mcp-client": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/cordis": "~4.0.4"},
-        })
-        files["cordis.patch.yml"] = b'- insert:\n    - id: fmage\n      name: dsh-fmage\n'
-        for name in ("index.mjs", "config-api.mjs", "client.js"):
-            files[name] = (ROOT / "adapters/deepseek" / name).read_bytes()
-        files["catalog.json"] = json_bytes(catalog)
+    files["package.json"] = json_bytes({
+        "name": "dsh-fmage", "version": version,
+        "description": "Fmage：图片生成、直传生图、图片退步、RunningHub 工作流与配置；DeepSeek Harness 桌面版专用。",
+        "type": "module", "main": "index.mjs",
+        "exports": {".": "./index.mjs", "./client": "./client.js", "./package.json": "./package.json"},
+        # dsh.client publishes the settings page into the Desktop/Web client module graph.
+        "dsh": {"bundle": {"patch": "./cordis.patch.yml"}, "client": {"platform": "web"}},
+        "peerDependencies": {"@deepseek-ai/dsh-skill": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/dsh-mcp-client": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/cordis": "~4.0.4"},
+    })
+    files["cordis.patch.yml"] = b'- insert:\n    - id: fmage\n      name: dsh-fmage\n'
+    for name in ("index.mjs", "config-api.mjs", "client.js"):
+        files[name] = (ROOT / "adapters/deepseek" / name).read_bytes()
+    files["catalog.json"] = json_bytes(catalog)
     files["mcp/launch.mjs"] = (ROOT / "adapters/launch.mjs").read_bytes()
     digest = hashlib.sha256()
     for name, data in sorted(files.items()):
         digest.update(name.encode() + b"\0" + data)
     # Record the owned paths so a later build can delete files it stops shipping.
     files[".fmage-build.json"] = json_bytes({
-        "host": host, "version": version, "sha256": digest.hexdigest(), "files": sorted(files),
+        "host": "deepseek", "version": version, "sha256": digest.hexdigest(), "files": sorted(files),
     })
     return files
 
@@ -187,35 +169,26 @@ def sync_payload(files: dict[str, bytes], target: Path, check: bool = False) -> 
     return changed + stale
 
 
-def build_archive(host: str, files: dict[str, bytes], out: Path) -> Path:
+def build_archive(files: dict[str, bytes], out: Path) -> Path:
     version = json.loads(files[".fmage-build.json"])["version"]
     out.mkdir(parents=True, exist_ok=True)
-    path = out / (f"fmage-vscode-{version}.zip" if host == "vscode" else f"dsh-fmage-{version}.tgz")
+    path = out / f"dsh-fmage-{version}.tgz"
     temporary = path.with_name(path.name + ".fmage-tmp")
-    if host == "vscode":
-        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
-            for name, data in sorted(files.items()):
-                archive.writestr(f"fmage/{name}", data)
-    else:
-        with tarfile.open(temporary, "w:gz") as archive:
-            for name, data in sorted(files.items()):
-                info = tarfile.TarInfo(f"package/{name}")
-                info.size = len(data)
-                info.mode = 0o644
-                archive.addfile(info, io.BytesIO(data))
+    with tarfile.open(temporary, "w:gz") as archive:
+        for name, data in sorted(files.items()):
+            info = tarfile.TarInfo(f"package/{name}")
+            info.size = len(data)
+            info.mode = 0o644
+            archive.addfile(info, io.BytesIO(data))
     os.replace(temporary, path)
     return path
 
 
-def verify_archive(host: str, files: dict[str, bytes], directory: Path) -> None:
+def verify_archive(files: dict[str, bytes], directory: Path) -> None:
     version = json.loads(files[".fmage-build.json"])["version"]
-    path = directory / (f"fmage-vscode-{version}.zip" if host == "vscode" else f"dsh-fmage-{version}.tgz")
-    if host == "vscode":
-        with zipfile.ZipFile(path) as archive:
-            actual = {name.removeprefix("fmage/"): archive.read(name) for name in archive.namelist()}
-    else:
-        with tarfile.open(path) as archive:
-            actual = {entry.name.removeprefix("package/"): archive.extractfile(entry).read() for entry in archive.getmembers() if entry.isfile()}
+    path = directory / f"dsh-fmage-{version}.tgz"
+    with tarfile.open(path) as archive:
+        actual = {entry.name.removeprefix("package/"): archive.extractfile(entry).read() for entry in archive.getmembers() if entry.isfile()}
     if actual != files:
         raise RuntimeError(f"Package content differs from the current source: {path}")
 
@@ -282,19 +255,30 @@ def clean_legacy(backup_root: Path) -> list[str]:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(directory), str(target))
         removed.append(str(directory))
-    user = Path(os.environ["APPDATA"]) / "Code/User"
-    mcp = user / "mcp.json"
-    if mcp.exists():
-        data = json.loads(jsonc_clean(mcp.read_text(encoding="utf-8-sig")))
-        servers = data.get("servers", {})
-        if "Fmage" in servers:
-            args = servers["Fmage"].get("args", [])
-            if not any(str(ROOT).replace("\\", "/").lower() in str(arg).replace("\\", "/").lower() for arg in args):
-                raise RuntimeError("Standalone Fmage MCP registration has an unknown source; preserved.")
-            backup(mcp, backup_root)
-            del servers["Fmage"]
-            set_jsonc_fields(mcp, {"servers": servers})
-            removed.append(str(mcp) + "#servers.Fmage")
+    return removed
+
+
+def retire_vscode(state: dict, backup_root: Path) -> list[str]:
+    """Archive the retired VS Code agent plugin and drop its settings entry."""
+    settings = state.get("hosts", {}).pop("vscode", None)
+    removed: list[str] = []
+    if not isinstance(settings, dict) or not settings.get("path"):
+        return removed
+    target = Path(settings["path"])
+    if target.is_dir():
+        archived = backup_root / "vscode-agent-plugin"
+        archived.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(target), str(archived))
+        removed.append(f"{target} -> {archived}")
+    user_settings = target.parents[1] / "settings.json"
+    if user_settings.is_file():
+        config = json.loads(jsonc_clean(user_settings.read_text(encoding="utf-8-sig")))
+        locations = config.get("chat.pluginLocations")
+        if isinstance(locations, dict) and target.as_posix() in locations:
+            del locations[target.as_posix()]
+            backup(user_settings, backup_root)
+            set_jsonc_fields(user_settings, {"chat.pluginLocations": locations})
+            removed.append(f"{user_settings}#chat.pluginLocations")
     return removed
 
 
@@ -587,43 +571,50 @@ def refresh_registered(*, check_only: bool = False) -> None:
     state = read_json(path)
     if Path(state["source"]).resolve() != ROOT.resolve():
         raise RuntimeError("Registered harness source differs from this repository.")
+    if "vscode" in state["hosts"]:
+        if check_only:
+            print("Retired VS Code installation is still registered; rerun without --check to archive it.")
+        else:
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            for item in retire_vscode(state, local_root() / "backups" / stamp):
+                print(f"Retired VS Code installation: {item}")
+            atomic_write(path, json_bytes(state))
     # Resolve the selected runtime before writing payloads or invoking an installer.
     deepseek = deepseek_runtime(state["hosts"]["deepseek"]) if "deepseek" in state["hosts"] else None
     failures = []
     hot_verified = False
     for host, settings in state["hosts"].items():
+        if host == "vscode":
+            # Retired above; a check-only run reports it without failing the rest.
+            continue
+        if host != "deepseek":
+            raise RuntimeError(f"Unsupported registered host: {host}")
         target = Path(settings["path"])
-        files = payload(host)
+        files = payload()
         changes = sync_payload(files, target, check_only)
         if check_only and changes:
             failures.append(f"{host}: {len(changes)} outdated files")
         if not check_only:
-            package = build_archive(host, files, Path(state["packages"]))
+            package = build_archive(files, Path(state["packages"]))
             print(f"{host} plugin synchronized: {target}; package: {package}")
         elif not changes:
             print(f"{host} plugin matches repository: {target}")
-        verify_archive(host, files, Path(state["packages"]))
-        if host == "vscode":
-            user_settings = target.parents[1] / "settings.json"
-            config = json.loads(jsonc_clean(user_settings.read_text(encoding="utf-8-sig")))
-            if config.get("chat.pluginLocations", {}).get(target.as_posix()) is not True or config.get("chat.plugins.enabled") is not True:
-                failures.append("VS Code private plugin is not enabled in settings")
-        else:
-            profile = Path(settings["profile"])
-            installed = profile / "node_modules/dsh-fmage"
-            package = Path(state["packages"]) / f"dsh-fmage-{json.loads(files['.fmage-build.json'])['version']}.tgz"
-            if not check_only:
-                mode = install_deepseek_hot(files, profile, deepseek, package)
-                hot_verified = hot_verified or mode == "hot"
-                print("DeepSeek Desktop install path: " + (
-                    "hot reload through the running host (host half; client.js changes need an app restart)"
-                    if mode == "hot" else "offline CLI (host not loaded)"))
-            problems = deepseek_installation_errors(files, profile, package)
-            failures.extend(problems)
-            print(f"DeepSeek Desktop physical installation checked: {installed}")
-            if not problems:
-                verify_deepseek_loader(deepseek, profile)
-            print("DeepSeek Desktop runtime " + deepseek_runtime_status(installed, files))
+        verify_archive(files, Path(state["packages"]))
+        profile = Path(settings["profile"])
+        installed = profile / "node_modules/dsh-fmage"
+        package = Path(state["packages"]) / f"dsh-fmage-{json.loads(files['.fmage-build.json'])['version']}.tgz"
+        if not check_only:
+            mode = install_deepseek_hot(files, profile, deepseek, package)
+            hot_verified = hot_verified or mode == "hot"
+            print("DeepSeek Desktop install path: " + (
+                "hot reload through the running host (host half; client.js changes need an app restart)"
+                if mode == "hot" else "offline CLI (host not loaded)"))
+        problems = deepseek_installation_errors(files, profile, package)
+        failures.extend(problems)
+        print(f"DeepSeek Desktop physical installation checked: {installed}")
+        if not problems:
+            verify_deepseek_loader(deepseek, profile)
+        print("DeepSeek Desktop runtime " + deepseek_runtime_status(installed, files))
     if failures:
         raise RuntimeError("; ".join(failures))
     if not check_only:
@@ -637,31 +628,23 @@ def refresh_registered(*, check_only: bool = False) -> None:
 
 def configure_installations(deepseek_cli: Path) -> None:
     runtime = deepseek_runtime({"cli": str(deepseek_cli)})
-    user = Path(os.environ["APPDATA"]) / "Code/User"
-    targets = {"vscode": user / "agent-plugins/fmage", "deepseek": local_root() / "deepseek/dsh-fmage"}
+    target = local_root() / "deepseek/dsh-fmage"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     rollback = local_root() / "backups" / stamp
-    settings_path = user / "settings.json"
-    backup(settings_path, rollback)
-    config = json.loads(jsonc_clean(settings_path.read_text(encoding="utf-8-sig"))) if settings_path.exists() else {}
-    locations = config.get("chat.pluginLocations", {})
-    locations[targets["vscode"].as_posix()] = True
-    for host, target in targets.items():
-        sync_payload(payload(host), target)
+    sync_payload(payload(), target)
     profile = Path(os.environ.get("DSH_HOME", str(Path.home() / ".dsh"))) / "profiles/desktop"
     if not (profile / "package.json").is_file():
         raise RuntimeError("DeepSeek Desktop profile is not initialized; launch the desktop application first.")
     for name in ("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "cordis.patch.yml"):
         backup(profile / name, rollback)
-    files = payload("deepseek")
-    package = build_archive("deepseek", files, local_root() / "packages")
+    files = payload()
+    package = build_archive(files, local_root() / "packages")
     install_deepseek(files, profile, runtime, package)
     profile_config = read_json(profile / "package.json")
     if "dsh-fmage" not in profile_config.get("dsh", {}).get("profile", {}).get("bundles", []):
         raise RuntimeError("DeepSeek package installed but its bundle is not enabled; legacy installs preserved.")
-    set_jsonc_fields(settings_path, {"chat.pluginLocations": locations, "chat.plugins.enabled": True})
     atomic_write(state_path(), json_bytes({"source": str(ROOT), "packages": str(local_root() / "packages"), "hosts": {
-        host: {"path": str(target), **({"cli": str(deepseek_cli), "profile": str(profile)} if host == "deepseek" else {})} for host, target in targets.items()
+        "deepseek": {"path": str(target), "cli": str(deepseek_cli), "profile": str(profile)},
     }}))
     for removed in clean_legacy(rollback):
         print(f"Legacy Fmage installation archived: {removed}")
@@ -672,11 +655,11 @@ def configure_installations(deepseek_cli: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
-    parser.add_argument("--configure", action="store_true", help="Install private payloads and migrate the old shared adapter")
+    parser.add_argument("--configure", action="store_true", help="Install the private payload and migrate the old shared adapter")
     parser.add_argument("--deepseek-cli", type=Path)
     parser.add_argument("--register-deepseek-source", type=Path,
                         help="Bind an existing Desktop registration to its source repository; preserves the profile and does not install")
-    parser.add_argument("--build", choices=("vscode", "deepseek", "all"))
+    parser.add_argument("--build", action="store_true", help="Export the Desktop package")
     parser.add_argument("--output", type=Path, default=local_root() / "packages")
     args = parser.parse_args()
     if args.register_deepseek_source:
@@ -688,8 +671,7 @@ def main() -> None:
             parser.error("--configure requires the existing Desktop --deepseek-cli and cannot use --check")
         configure_installations(args.deepseek_cli)
     elif args.build:
-        for host in ("vscode", "deepseek") if args.build == "all" else (args.build,):
-            print(build_archive(host, payload(host), args.output))
+        print(build_archive(payload(), args.output))
     else:
         refresh_registered(check_only=args.check)
 

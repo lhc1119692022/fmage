@@ -133,7 +133,29 @@ def cache_path_for_version(marketplace: str, version: str) -> Path:
     )
 
 
-def verify_mcp_handshake(server_path: Path) -> None:
+def codex_data_home() -> Path:
+    """The Codex host's own Fmage data directory; CODEX_HOME relocates it."""
+    configured = os.environ.get("CODEX_HOME", "").strip()
+    base = Path(configured).expanduser() if configured else Path.home() / ".codex"
+    return base / "fmage"
+
+
+def configure_codex_data_home(cache_path: Path) -> None:
+    """Name the data directory in the installed plugin's MCP registration."""
+    path = cache_path / ".mcp.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    server = payload.setdefault("mcpServers", {}).setdefault("Fmage", {})
+    server.setdefault("command", "node")
+    server.setdefault("args", ["./mcp/server.mjs"])
+    server.setdefault("cwd", ".")
+    env = server.setdefault("env", {})
+    env["FMAGE_DATA_HOME"] = str(codex_data_home())
+    normalized = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    if path.read_text(encoding="utf-8") != normalized:
+        path.write_text(normalized, encoding="utf-8", newline="\n")
+
+
+def verify_mcp_handshake(server_path: Path, env: dict[str, str] | None = None) -> None:
     node = shutil.which("node")
     if node is None:
         raise RuntimeError("Node.js is required to verify the Fmage MCP server.")
@@ -179,6 +201,7 @@ def verify_mcp_handshake(server_path: Path) -> None:
             encoding="utf-8",
             errors="replace",
             timeout=30,
+            env={**os.environ, **(env or {})},
         )
     except subprocess.TimeoutExpired as error:
         raise RuntimeError(f"Fmage MCP handshake timed out: {server_path}") from error
@@ -249,8 +272,17 @@ def verify_cached_plugin(cache_path: Path) -> None:
             f"Installed plugin has more than {MAX_DEFAULT_PROMPTS} supported default prompts: {cache_path}"
         )
     server = mcp_config.get("mcpServers", {}).get("Fmage")
-    if server != {"command": "node", "args": ["./mcp/server.mjs"], "cwd": "."}:
-        raise RuntimeError(f"Installed Fmage MCP registration is invalid: {cache_path / '.mcp.json'}")
+    expected_server = {
+        "command": "node",
+        "args": ["./mcp/server.mjs"],
+        "cwd": ".",
+        "env": {"FMAGE_DATA_HOME": str(codex_data_home())},
+    }
+    if server != expected_server:
+        raise RuntimeError(
+            f"Installed Fmage MCP registration is invalid: {cache_path / '.mcp.json'}. "
+            "Run the refresh without --check so the plugin names its Codex data directory."
+        )
 
     for skill_name, allow_implicit in REQUIRED_SKILLS.items():
         metadata_path = cache_path / "skills" / skill_name / "agents" / "openai.yaml"
@@ -259,7 +291,9 @@ def verify_cached_plugin(cache_path: Path) -> None:
         if f"allow_implicit_invocation: {expected_value}" not in metadata:
             raise RuntimeError(f"Skill {skill_name} has an unexpected invocation policy: {metadata_path}")
 
-    verify_mcp_handshake(cache_path / "mcp" / "server.mjs")
+    verify_mcp_handshake(
+        cache_path / "mcp" / "server.mjs", {"FMAGE_DATA_HOME": str(codex_data_home())}
+    )
 
 
 def verify_plugin(cli: Path, marketplace: str) -> Path:
@@ -316,12 +350,13 @@ def refresh_plugin(*, check_only: bool) -> None:
 
     install = run_command([str(cli), "plugin", "add", f"{PLUGIN_NAME}@{marketplace}"])
     require_success(install, "reinstalling plugin")
+    configure_codex_data_home(cache_path_for_version(marketplace, source_version()))
     cache_path = verify_plugin(cli, marketplace)
     print(
         f"Plugin refreshed, enabled, and MCP-verified: {PLUGIN_NAME}@{marketplace} "
         f"{source_version()} ({cache_path})"
     )
-    print("Start a new Codex task so Desktop reloads the updated skill and MCP catalogs.")
+    print("Start a new Codex task so Codex reloads the updated skill and MCP catalogs.")
 
 
 def refresh_config(*, config: str | None, check_only: bool) -> None:

@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -41,77 +40,6 @@ def target_size(width: int, height: int) -> tuple[int, int]:
             target_height = max(1, MAX_PIXELS // target_width)
 
     return target_width, target_height
-
-
-def non_empty_string(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    return stripped or None
-
-
-def effective_config_path(explicit_path: Path | None = None) -> Path:
-    if explicit_path is not None:
-        return explicit_path.expanduser().resolve(strict=False)
-
-    fmage_config = non_empty_string(os.environ.get("FMAGE_CONFIG"))
-    if fmage_config:
-        return Path(fmage_config).expanduser().resolve(strict=False)
-
-    codex_home = non_empty_string(os.environ.get("CODEX_HOME"))
-    base_dir = Path(codex_home).expanduser() if codex_home else Path.home() / ".codex"
-    return (base_dir / "fmage" / "providers.json").resolve(strict=False)
-
-
-def load_output_config(config_path: Path) -> dict[str, object]:
-    with config_path.open("r", encoding="utf-8-sig") as config_file:
-        config = json.load(config_file)
-    if not isinstance(config, dict) or not isinstance(config.get("providers"), dict):
-        raise ValueError(f"Invalid Fmage configuration at {config_path}: missing providers object")
-    return config
-
-
-def first_active_provider(config: dict[str, object], config_path: Path) -> str:
-    configured = config.get("active_providers")
-    if isinstance(configured, list):
-        providers = [non_empty_string(value) for value in configured]
-    else:
-        legacy = config.get("active_provider")
-        providers = (
-            [non_empty_string(value) for value in legacy]
-            if isinstance(legacy, list)
-            else [non_empty_string(legacy)]
-        )
-
-    provider_name = next((value for value in providers if value), None)
-    if not provider_name:
-        raise ValueError(f"No active_providers are configured in {config_path}")
-
-    provider_map = config["providers"]
-    if provider_name not in provider_map or not isinstance(provider_map[provider_name], dict):
-        raise ValueError(f'Provider "{provider_name}" does not exist in the Fmage configuration')
-    return provider_name
-
-
-def resolve_config_directory(config_path: Path, value: object, fallback: Path) -> Path:
-    configured = non_empty_string(value)
-    if not configured:
-        return fallback.resolve(strict=False)
-    directory = Path(configured).expanduser()
-    if not directory.is_absolute():
-        directory = config_path.parent / directory
-    return directory.resolve(strict=False)
-
-
-def configured_output_root(
-    config_path: Path, config: dict[str, object], provider_name: str
-) -> Path:
-    provider = config["providers"][provider_name]
-    configured = non_empty_string(provider.get("output_dir")) or non_empty_string(
-        config.get("output_dir")
-    )
-    fallback = config_path.parent / "outputs" / provider_name
-    return resolve_config_directory(config_path, configured, fallback)
 
 
 def unique_output_path(output_dir: Path) -> Path:
@@ -194,9 +122,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--input", required=True, type=Path, help="Source raster image.")
     parser.add_argument(
-        "--config",
+        "--output-dir",
         type=Path,
-        help="Explicit providers.json path; otherwise use FMAGE_CONFIG/CODEX_HOME defaults.",
+        help="Destination directory; defaults to the input file's directory.",
     )
     return parser.parse_args()
 
@@ -204,19 +132,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        config_path = effective_config_path(args.config)
-        config = load_output_config(config_path)
-        provider_name = first_active_provider(config, config_path)
-        output_dir = configured_output_root(config_path, config, provider_name)
+        output_dir = (args.output_dir or args.input.parent).expanduser().resolve(strict=False)
         output_path = unique_output_path(output_dir)
         result = process_image(args.input, output_path)
-        result.update(
-            {
-                "config_path": str(config_path),
-                "output_dir": str(output_dir),
-                "active_provider": provider_name,
-            }
-        )
+        result["output_dir"] = str(output_dir)
     except Exception as error:
         print(f"Fmage image regression failed: {error}", file=sys.stderr)
         return 1

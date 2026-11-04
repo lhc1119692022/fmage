@@ -33,6 +33,9 @@ def resolve_config_path(explicit: str | None = None) -> Path:
     configured = os.environ.get("FMAGE_CONFIG", "").strip()
     if configured:
         return Path(configured).expanduser().resolve()
+    data_home = os.environ.get("FMAGE_DATA_HOME", "").strip()
+    if data_home:
+        return (Path(data_home).expanduser() / "providers.json").resolve()
     codex_home = os.environ.get("CODEX_HOME", "").strip()
     if codex_home:
         return (Path(codex_home).expanduser() / "fmage" / "providers.json").resolve()

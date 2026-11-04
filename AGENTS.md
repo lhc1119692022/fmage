@@ -17,11 +17,15 @@ the current provider schema.
 
 ## Host-private plugin adapters
 
-`skills/` and shared MCP/transports are the source of truth. Build VS Code and DeepSeek
-Desktop artifacts with `scripts/harness_plugins.py`; never restore Fmage under `~/.agents/skills`
-or a standalone VS Code user MCP registration. VS Code uses a native agent plugin registered
-through `chat.pluginLocations`; DeepSeek uses a native Cordis bundle in the Desktop profile only.
-`refresh_local_runtime.py` also synchronizes registered host-private payloads and packages.
-Check both adapters with `--check`, and distinguish installed files from a running host's loaded
+`skills/` and shared MCP/transports are the source of truth. Build the DeepSeek Desktop artifact
+with `scripts/harness_plugins.py`; never restore Fmage under `~/.agents/skills` or a standalone
+MCP registration. DeepSeek uses a native Cordis bundle in the Desktop profile only; VS Code
+support is retired and must not be reintroduced.
+`refresh_local_runtime.py` also synchronizes the registered host-private payload and package.
+Check the adapter with `--check`, and distinguish installed files from a running host's loaded
 runtime. Never kill an active image request to reload an adapter. Keep package output, backups,
 local installation paths, and credentials outside this repository.
+
+Each host owns its data directory: DeepSeek keeps `providers.json` under `~/.dsh/fmage`, Codex
+under `~/.codex/fmage`. Do not add code that searches for, copies, or falls back to another
+host's file; `FMAGE_CONFIG` is the only explicit override.

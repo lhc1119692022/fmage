@@ -3,7 +3,6 @@
 // secrets leave the Host masked unless one value is revealed explicitly.
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 export const TRANSPORTS = ['openai-images', 'gemini-generate-content', 'midjourney'];
@@ -22,11 +21,6 @@ const MODEL_LIST_USER_AGENT = 'fmage-model-list/1.0';
 
 export class ConfigError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
-}
-
-/** Same resolution order as mcp/server.mjs. */
-export function resolveConfigPath(env = process.env) {
-  return env.FMAGE_CONFIG || join(env.CODEX_HOME || join(homedir(), '.codex'), 'fmage', 'providers.json');
 }
 
 /** Mask a secret: keep a few edge characters, never the middle. */
@@ -434,7 +428,7 @@ export function registerConfigRoutes(ctx, api) {
 }
 
 /** Config operations used by the Fetch routes; `path` is fixed at construction. */
-export function createConfigApi(path = resolveConfigPath(), options = {}) {
+export function createConfigApi(path, options = {}) {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   let queue = Promise.resolve();
   const serial = task => { const run = queue.then(task, task); queue = run.catch(() => {}); return run; };

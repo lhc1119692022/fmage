@@ -14,9 +14,10 @@ Resolve the effective `providers.json` path and immediately reply with a clickab
 
 Path resolution:
 1. Use non-empty `FMAGE_CONFIG` exactly.
-2. Else use non-empty `CODEX_HOME`.
-3. Else use the current user's home directory plus `.codex`.
-4. Unless step 1 was used, append `fmage/providers.json`.
+2. Otherwise the current host owns the file: `~/.dsh/fmage/providers.json` under DeepSeek Harness,
+   `~/.codex/fmage/providers.json` under Codex.
+3. Never read, copy, or report another host's file. A missing file is created at step 2's path on
+   first use.
 
 Output:
 ```text

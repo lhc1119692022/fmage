@@ -62,8 +62,9 @@ Examples:
 - Public workflow link: use its workflow ID and API node mappings directly; if only an app ID is
   available, ask for the workflow ID or API export instead of calling the app.
 
-Configuration lives in FMAGE_CONFIG, otherwise CODEX_HOME/fmage/providers.json, otherwise
-~/.codex/fmage/providers.json. workflows stores a named `workflow_id` (public or private),
+Configuration lives in `FMAGE_CONFIG` when set, otherwise in the current host's data directory:
+`~/.dsh/fmage/providers.json` under DeepSeek Harness, `~/.codex/fmage/providers.json` under Codex.
+workflows stores a named `workflow_id` (public or private),
 connection, input mappings, required output_node_ids and optional instance_type (default/plus/ultra).
 active_workflow selects the default. Adding a workflow requires its platform ID and API-format node
 mappings, not just replacing an ID. Preserve other configuration entries. Never expose secret values

@@ -1,15 +1,14 @@
 # 宿主适配与本机刷新
 
-DeepSeek Harness Desktop 是主宿主，功能与验证以它为基准；Codex 和 VS Code 为兼容宿主。
+DeepSeek Harness Desktop 是主宿主，功能与验证以它为基准；Codex 为兼容宿主。VS Code 兼容已移除。
 维护源只有仓库的 `skills/`、`mcp/`、`scripts/`、`config/` 和 `adapters/`。
-Codex 使用原生 `.codex-plugin/plugin.json`；其他宿主由 `scripts/harness_plugins.py` 构建，
+Codex 使用原生 `.codex-plugin/plugin.json`；DeepSeek Desktop 由 `scripts/harness_plugins.py` 构建，
 不会直接修改 Codex Skill，也不会使用公共技能目录。
 
 | 宿主 | 角色 | 产物 | 本机注册 |
 | --- | --- | --- | --- |
 | DeepSeek Harness Desktop | 主宿主 | `dsh-fmage-<version>.tgz` Cordis bundle（含设置页） | 仅 `profiles/desktop` 的依赖与 bundles |
 | Codex | 兼容 | 原生版本缓存 | `fmage@personal` |
-| VS Code 智能体窗口 | 兼容 | Agent Plugin ZIP | 用户设置 `chat.pluginLocations` 的私有目录 |
 
 ## DeepSeek 设置页
 
@@ -31,7 +30,7 @@ Host 使用已存条目或 `api_key_env` 指向的环境变量，且不会把密
 `--check` 另外在隔离 profile 中启动真实 Cordis 服务，要求 client 模块图里有 `dsh-fmage` → `client.js` 这一行，
 因此“页面被宿主发现”是每次刷新都会复验的，而不是只看文件是否在包里。
 
-`python scripts/harness_plugins.py --build all` 导出 ZIP/TGZ，默认放在 `%LOCALAPPDATA%/Fmage/packages`。
+`python scripts/harness_plugins.py --build` 导出 TGZ，默认放在 `%LOCALAPPDATA%/Fmage/packages`。
 只打包明确列举的运行文件、示例配置、Skill 和适配器，不包含真实 providers.json、密钥、测试或本机安装记录。
 同步目录时，构建清单 `.fmage-build.json` 记录本次拥有的路径；下一次同步会删除上一版拥有、本次已不再打包的文件，
 所以移除某个模块（例如退役的传输）后，安装副本里不会留下旧文件。没有该清单的旧安装按 `scripts/*.py` 兜底清理一次。
@@ -86,10 +85,10 @@ python scripts/refresh_local_runtime.py
 python scripts/refresh_local_runtime.py --check
 ```
 
-只同步或检查 VS Code 与 DeepSeek 时，可分别运行 `python scripts/harness_plugins.py`
+只同步或检查 DeepSeek 时，可运行 `python scripts/harness_plugins.py`
 和 `python scripts/harness_plugins.py --check`；这条独立入口不依赖 Codex 重装辅助脚本。
 
-登记会备份并更新本机 `harness-installations.json`，保留 profile、VS Code 和产物路径；
+登记会备份并更新本机 `harness-installations.json`，保留 profile 与产物路径；
 源码路径只保存在本机记录，不进入插件包。源码安装在该仓库目录中通过 `node --import tsx/esm`
 运行安装入口 `scripts/deepseek_source_cli.mjs`，调用源码 `apps/cli/src/bin.ts` 的 `runCli`，
 传入 `plugin --profile desktop add <TGZ> --prefer-offline --ignore-scripts`。
@@ -104,8 +103,8 @@ CLI 自身的参数解析、profile 文件锁和兼容性检查保持生效。
 旧 Electron 登记继续受支持；路径缺失时明确报错，不按相似目录名称自动切换运行时。
 
 `%LOCALAPPDATA%/Fmage/harness-installations.json` 记录本机源仓库、两个目标目录和导出目录。
-完成首次配置后，现有 `refresh_local_runtime.py` 先刷新 Codex 版本与配置，再同步两套产物。
-`--check` 验证源文件和压缩包一致性、VS Code 注册、DeepSeek 实体目录及 TGZ 依赖，
+完成首次配置后，现有 `refresh_local_runtime.py` 先刷新 Codex 版本与配置，再同步 Desktop 产物。
+`--check` 验证源文件和压缩包一致性、DeepSeek 实体目录及 TGZ 依赖，
 并使用登记运行时的原生加载器在临时 profile 中启动真实 Cordis 服务，核对五个 Skill 和十个 MCP 工具。
 宿主提供版本检查器时，同一测试还验证最低版本边界、后续预发布版本和跨主版本的放行规则，不添加兼容性豁免。
 源码模式使用 CLI 的 `apps/cli/package.json` 作为依赖解析入口；Electron 模式使用随附 CLI 的入口。
