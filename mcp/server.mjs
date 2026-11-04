@@ -222,10 +222,33 @@ function compactFailureMessage(error) {
 
 function transportFailureFields(error) {
   return Object.fromEntries(
-    ["stage", "remote_task_id", "remote_status", "checkpoint", "generation_resubmitted", "download_error"]
+    [
+      "provider", "provider_transport", "provider_model",
+      "stage", "remote_task_id", "remote_status", "checkpoint",
+      "generation_resubmitted", "download_error",
+    ]
       .filter((key) => error?.[key] !== undefined)
       .map((key) => [key, error[key]]),
   );
+}
+
+// A failed request must name the provider that actually received it. The agent
+// otherwise repeats the provider from the previous success, which makes a
+// composer-pill switch look like it was ignored.
+function attachProviderFailureContext(error, provider) {
+  if (!provider || !error || typeof error !== "object") return error;
+  for (const [key, value] of Object.entries({
+    provider: provider.name,
+    provider_transport: provider.transport,
+    provider_model: provider.model,
+  })) {
+    if (value !== undefined && error[key] === undefined) error[key] = value;
+  }
+  const prefix = `Provider "${provider.name}"${provider.model ? ` (${provider.model})` : ""}`;
+  if (!errorMessage(error).startsWith(prefix)) {
+    error.message = `${prefix}: ${errorMessage(error)}`;
+  }
+  return error;
 }
 
 function jsonTrace(value) {
@@ -2494,6 +2517,8 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
       mcp_single_finished_at: isoNow(),
     };
     return publishResultImages(enriched, args, provider);
+  } catch (error) {
+    throw attachProviderFailureContext(error, provider);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

@@ -37,7 +37,8 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 - 默认提供商：提供商卡右侧的星标设为默认；拖动只改变回退顺序。开关控制是否在对话输入栏显示生图胶囊。
 - 输入栏胶囊：显示当前默认提供商，点开即可切换。它只写 `default_provider`，与设置页共用同一份配置；
   `default_provider` 为空或不在 `active_providers` 中时，回退到第一个启用的提供商。
-  没有 DSH 界面的宿主（Codex、VS Code）不显示胶囊，仍按配置顺序和显式 `provider` 参数工作。
+  切换后下一次生图请求即按新的默认提供商路由；失败结果同样带 `provider`、`provider_model`，
+  不会沿用上一次调用的提供商。没有 DSH 界面的宿主（Codex、VS Code）不显示胶囊，仍按配置顺序和显式 `provider` 参数工作。
 
 ### 生成失败重试
 

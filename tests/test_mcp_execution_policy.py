@@ -339,6 +339,118 @@ class McpExecutionPolicyTests(unittest.TestCase):
             self.assertTrue(any("retried 1 time" in warning for warning in result["warnings"]))
             self.assertTrue(Path(result["images"][0]).is_file())
 
+    def call_raw(self, config, tool, arguments):
+        request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                   "params": {"name": tool, "arguments": arguments}}
+        process = subprocess.run(
+            ["node", str(ROOT / "mcp/server.mjs")], input=json.dumps(request) + "\n",
+            capture_output=True, text=True, encoding="utf-8", timeout=20,
+            env={**os.environ, "FMAGE_CONFIG": str(config), "FMAGE_PYTHON": sys.executable,
+                 "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        return json.loads(process.stdout.splitlines()[0])
+
+    def test_failed_async_request_reports_the_selected_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            class Handler(BaseHTTPRequestHandler):
+                def do_POST(self):
+                    self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                    payload = json.dumps({"task_id": "task-switch", "status": "queued"}).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+
+                def do_GET(self):
+                    payload = json.dumps({
+                        "task_id": "task-switch", "status": "failed",
+                        "error": {"message": "upstream saturated"},
+                    }).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+
+                def log_message(self, *args):
+                    pass
+
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                config = root / "providers.json"
+                config.write_text(json.dumps({
+                    "active_providers": ["old", "new"], "default_provider": "new",
+                    "cache_dir": str(root / "cache"), "output_dir": str(root / "output"),
+                    "providers": {
+                        "old": {"transport": "openai-images", "model": "old-model",
+                                "base_url": "https://old.invalid/v1", "api_key": "test-key"},
+                        "new": {"transport": "openai-images", "async_mode": True, "model": "new-model",
+                                "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+                                "api_key": "test-key"},
+                    },
+                }), encoding="utf-8")
+                response = self.call_raw(config, "generate_image", {"prompt": "fail on the selected provider"})
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join()
+
+            result = response["result"]
+            failure = result["structuredContent"]
+            self.assertTrue(result["isError"])
+            self.assertEqual(failure["provider"], "new")
+            self.assertEqual(failure["provider_model"], "new-model")
+            self.assertEqual(failure["remote_status"], "failed")
+            self.assertIn('Provider "new" (new-model)', failure["error"])
+            self.assertNotIn("old-model", failure["error"])
+
+    def test_failed_sync_request_names_the_selected_provider_in_the_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            class Handler(BaseHTTPRequestHandler):
+                def do_POST(self):
+                    self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                    payload = json.dumps({"error": {"message": "upstream down"}}).encode()
+                    self.send_response(500)
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+
+                def log_message(self, *args):
+                    pass
+
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                config = root / "providers.json"
+                config.write_text(json.dumps({
+                    "active_providers": ["old", "new"], "default_provider": "new",
+                    "cache_dir": str(root / "cache"), "output_dir": str(root / "output"),
+                    "providers": {
+                        "old": {"transport": "openai-images", "model": "old-model",
+                                "base_url": "https://old.invalid/v1", "api_key": "test-key"},
+                        "new": {"transport": "openai-images", "model": "new-model",
+                                "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+                                "api_key": "test-key"},
+                    },
+                }), encoding="utf-8")
+                response = self.call_raw(config, "generate_image", {"prompt": "fail on the selected provider"})
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join()
+
+            self.assertIn("error", response)
+            message = response["error"]["message"]
+            self.assertIn('Provider "new" (new-model)', message)
+            self.assertIn("HTTP 500", message)
+            self.assertNotIn("old-model", message)
+
 
 if __name__ == "__main__":
     unittest.main()
