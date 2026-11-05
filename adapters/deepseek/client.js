@@ -116,29 +116,30 @@ window.__ModuleLoader__.load({
 /* Sidebar annotation workbench: Codex-style floating controls over the image. */
 .fmg-ann{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-layer-1)}
 .fmg-ann-stage{flex:1 1 0;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;padding:56px 14px 64px}
+.fmg-ann-drop{position:absolute;inset:8px;display:flex;align-items:center;justify-content:center;border:1.5px dashed var(--dsw-alias-state-business-primary,#4c78ff);border-radius:12px;background:rgba(76,120,255,.06);color:var(--dsw-alias-state-business-primary,#4c78ff);font-size:13px;z-index:5;pointer-events:none}
 .fmg-ann-frame{position:relative;display:inline-block;max-width:100%;line-height:0}
 .fmg-ann-frame img{display:block;max-width:100%;max-height:100%;user-select:none;-webkit-user-drag:none;border-radius:6px}
 .fmg-ann-svg{position:absolute;left:0;top:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
-.fmg-ann-tools{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:1px;padding:4px;border-radius:999px;background:rgba(24,24,27,.94);box-shadow:0 8px 24px rgba(0,0,0,.3);z-index:3}
-.fmg-ann-ib{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:999px;background:transparent;color:#e4e4e7;cursor:pointer;padding:0}
-.fmg-ann-ib:hover{background:rgba(255,255,255,.16)}
-.fmg-ann-ib[aria-pressed=true]{background:rgba(255,255,255,.24);color:#fff}
+.fmg-ann-tools{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:1px;padding:4px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);box-shadow:0 8px 22px rgba(0,0,0,.12);z-index:3}
+.fmg-ann-ib{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#52525b);cursor:pointer;padding:0}
+.fmg-ann-ib:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06))}
+.fmg-ann-ib[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.09));color:var(--dsw-alias-label-primary,#18181b)}
 .fmg-ann-ib:disabled{opacity:.32;cursor:default}
 .fmg-ann-dot{width:30px;height:30px;display:grid;place-items:center;border:0;background:transparent;cursor:pointer;padding:0}
-.fmg-ann-dot i{width:14px;height:14px;border-radius:50%;display:block;box-shadow:0 0 0 2px rgba(255,255,255,.4)}
-.fmg-ann-hint{position:absolute;top:54px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:5px 6px 5px 12px;border-radius:999px;background:rgba(24,24,27,.94);color:#e4e4e7;font-size:12px;white-space:nowrap;z-index:3}
+.fmg-ann-dot i{width:14px;height:14px;border-radius:50%;display:block;box-shadow:0 0 0 2px rgba(0,0,0,.14)}
+.fmg-ann-hint{position:absolute;top:54px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:5px 6px 5px 12px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);color:var(--dsw-alias-label-primary,#18181b);font-size:12px;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.12);z-index:3}
 .fmg-ann-go{height:24px;padding:0 11px;border:0;border-radius:999px;background:#4c78ff;color:#fff;font:inherit;font-size:12px;cursor:pointer}
 .fmg-ann-go:disabled{opacity:.45;cursor:default}
-.fmg-ann-bar{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:999px;background:rgba(24,24,27,.94);color:#e4e4e7;max-width:calc(100% - 20px);z-index:3}
-.fmg-ann-seg{display:inline-flex;flex:none;background:rgba(255,255,255,.12);border-radius:999px;padding:2px}
-.fmg-ann-seg button{height:24px;padding:0 9px;border:0;border-radius:999px;background:transparent;color:#d4d4d8;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
-.fmg-ann-seg button[aria-pressed=true]{background:#fafafa;color:#18181b}
+.fmg-ann-bar{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);color:var(--dsw-alias-label-primary,#18181b);box-shadow:0 8px 22px rgba(0,0,0,.12);max-width:calc(100% - 20px);z-index:3}
+.fmg-ann-seg{display:inline-flex;flex:none;background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));border-radius:999px;padding:2px}
+.fmg-ann-seg button{height:24px;padding:0 9px;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#52525b);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.fmg-ann-seg button[aria-pressed=true]{background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-primary,#18181b);box-shadow:0 1px 3px rgba(0,0,0,.12)}
 .fmg-ann-seg button:disabled{opacity:.4;cursor:default}
 .fmg-ann-save{flex:none;height:28px;padding:0 13px;border:0;border-radius:999px;background:#4c78ff;color:#fff;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
 .fmg-ann-save:disabled{opacity:.45;cursor:default}
-.fmg-ann-note{flex:0 1 auto;color:#a1a1aa;font-size:11.5px;line-height:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-.fmg-ann-err{flex:1 1 auto;color:#fca5a5;font-size:11.5px;line-height:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fmg-ann-path{flex:1 1 auto;font-family:var(--dsw-font-mono,monospace);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#a1a1aa}
+.fmg-ann-note{flex:0 1 auto;color:var(--dsw-alias-label-tertiary,#6b7280);font-size:11.5px;line-height:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.fmg-ann-err{flex:1 1 auto;color:var(--dsw-alias-state-danger-primary,#d33);font-size:11.5px;line-height:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fmg-ann-path{flex:1 1 auto;font-family:var(--dsw-font-mono,monospace);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#6b7280)}
 .fmg-ann-pin{position:absolute;display:flex;align-items:center;gap:4px;transform:translate(10px,-50%);z-index:4}
 .fmg-ann-pin input{width:170px;height:28px;padding:0 9px;border:0;border-radius:8px;background:#fff;color:#18181b;font:inherit;font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.28);outline:none}
 .fmg-ann-empty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px 14px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px}
@@ -159,24 +160,22 @@ window.__ModuleLoader__.load({
       enable: '启用 {name}', remove: '移除', show: '显示密钥', hide: '隐藏密钥',
       pill: '生图', pillTitle: '生图提供商', pillKeySet: 'Key 已配置', pillKeyMissing: '未配置 Key',
       pillSwitchFailed: '切换失败',
-      annOpen: '标注', annTitle: '图像标注', annGuideHint: '在参考图上画标记、写评论，再交给生图',
-      annEmpty: '还没有图片。从输入框选一张，或选择本地图片。',
+      annTitle: 'Fmage 工作台', annEmpty: '还没有图片。从输入框选一张，或选择本地图片。',
       annFromComposer: '从输入框选图', annPickFile: '选择图片', annNoDraft: '输入框里没有图片。',
       annToolArrow: '箭头', annToolRect: '方框', annToolEllipse: '椭圆', annToolPen: '画笔',
       annToolText: '文字', annToolMarker: '编号', annToolComment: '评论',
       annColor: '换颜色', annUndo: '撤销', annRedo: '重做', annClear: '清空',
       annCommentHint: '点击图像以添加评论', annDone: '完成', annPickFromList: '选择图片',
+      annDropHere: '松开即在此打开', annDropUnsupported: '拖入的内容不是图片。',
       annMode: '模式', annModeMarkup: '标记层', annModeFlatten: '合成到原图',
       annModeMarkupHint: '把透明标注层作为 markup 单独发送；原图不变，标记由模型抹除。',
       annModeFlattenHint: '把标注烧进图片再发；标记可能残留在结果里。',
       annModeUnsupported: '当前模型不是 GPT Image 2.5/2.6，只能用合成。',
-      annMustBeFirst: '标记层只能作用于第一张输入图；这张是第 {n} 张。换成第一张，或改用合成。',
       annComment: '评论', annAddComment: '加一条评论', annCommentPlaceholder: '这条标注要改什么？',
       annCommentEmpty: '评论不能为空。',
       annExport: '保存并插入', annExporting: '写入中…', annCopy: '复制路径', annCopied: '已复制',
       annExported: '已保存，路径已插入输入框。', annExportedCopy: '已保存，路径已复制。',
-      annTextPrompt: '标注文字', annNeedSelection: '先在图上画一处标注。',
-      annTextHint: '填好文字后，在图上点一下落笔。', annTextRequired: '先填标注文字。',
+      annTextPrompt: '标注文字', annTextRequired: '先填标注文字。',
       annRemoveComment: '删除这条评论',
       annZoomIn: '放大', annZoomOut: '缩小', annZoomReset: '恢复适应窗口',
       annLoadFailed: '图片读取失败。', annFailed: '操作失败', annRestored: '已恢复上次的标注。',
@@ -211,24 +210,22 @@ window.__ModuleLoader__.load({
       enable: 'Enable {name}', remove: 'Remove', show: 'Show key', hide: 'Hide key',
       pill: 'Image', pillTitle: 'Image provider', pillKeySet: 'Key configured', pillKeyMissing: 'No key',
       pillSwitchFailed: 'Switch failed',
-      annOpen: 'Annotate', annTitle: 'Image annotation', annGuideHint: 'Mark up a reference, add comments, then hand it to the image model',
-      annEmpty: 'No image yet. Take one from the composer, or pick a local image.',
+      annTitle: 'Fmage workspace', annEmpty: 'No image yet. Take one from the composer, or pick a local image.',
       annFromComposer: 'Take from composer', annPickFile: 'Pick image', annNoDraft: 'The composer has no image.',
       annToolArrow: 'Arrow', annToolRect: 'Box', annToolEllipse: 'Ellipse', annToolPen: 'Pen',
       annToolText: 'Text', annToolMarker: 'Pin', annToolComment: 'Comment',
       annColor: 'Change colour', annUndo: 'Undo', annRedo: 'Redo', annClear: 'Clear',
       annCommentHint: 'Click the image to add a comment', annDone: 'Done', annPickFromList: 'Choose an image',
+      annDropHere: 'Drop to open it here', annDropUnsupported: 'That drop was not an image.',
       annMode: 'Mode', annModeMarkup: 'Markup layer', annModeFlatten: 'Flatten',
       annModeMarkupHint: 'Send the transparent layer as markup; the target image stays untouched and the model removes the marks.',
       annModeFlattenHint: 'Burn the marks into the image first; they may survive into the result.',
       annModeUnsupported: 'This model is not GPT Image 2.5/2.6, so only flatten is available.',
-      annMustBeFirst: 'The markup layer applies only to the first input image; this is image {n}. Use the first one, or flatten instead.',
       annComment: 'Comments', annAddComment: 'Add a comment', annCommentPlaceholder: 'What should change here?',
       annCommentEmpty: 'A comment cannot be empty.',
       annExport: 'Save and insert', annExporting: 'Writing…', annCopy: 'Copy path', annCopied: 'Copied',
       annExported: 'Saved; the path was inserted into the composer.', annExportedCopy: 'Saved; the path was copied.',
-      annTextPrompt: 'Annotation text', annNeedSelection: 'Draw one annotation first.',
-      annTextHint: 'Type the text, then click the image to place it.', annTextRequired: 'Type the annotation text first.',
+      annTextPrompt: 'Annotation text', annTextRequired: 'Type the annotation text first.',
       annRemoveComment: 'Remove this comment',
       annZoomIn: 'Zoom in', annZoomOut: 'Zoom out', annZoomReset: 'Fit to window',
       annLoadFailed: 'The image could not be read.', annFailed: 'The operation failed', annRestored: 'Restored the previous annotation.',
@@ -927,6 +924,7 @@ window.__ModuleLoader__.load({
       const [pendingId, setPendingId] = useState(null);
       const [picker, setPicker] = useState(false);
       const [drafts, setDrafts] = useState([]);
+      const [dragging, setDragging] = useState(false);
       const svgRef = useRef(null);
       const fileRef = useRef(null);
 
@@ -1089,28 +1087,37 @@ window.__ModuleLoader__.load({
       const exportAnnotation = async () => {
         if (!source || busy) return;
         const markup = mode === 'markup';
-        if (markup && source.draftIndex !== 0) {
-          setError(t('annMustBeFirst', { n: String((source.draftIndex ?? 0) + 1) }));
-          return;
-        }
         setBusy(true);
         setError('');
         setNotice('');
         try {
-          const canvas = document.createElement('canvas');
-          canvas.width = source.width;
-          canvas.height = source.height;
-          const ctx = canvas.getContext('2d');
-          if (!markup) {
-            const image = await loadImageElement(source.url);
-            ctx.drawImage(image, 0, 0, source.width, source.height);
+          // The panel owns the image from here on: both modes write the target
+          // canvas, so the request never depends on which draft slot the source
+          // happened to occupy. A markup save adds the transparent layer on top
+          // of the very same pixels, which is what the edits endpoint matches on.
+          const base = document.createElement('canvas');
+          base.width = source.width;
+          base.height = source.height;
+          const baseCtx = base.getContext('2d');
+          const image = await loadImageElement(source.url);
+          baseCtx.drawImage(image, 0, 0, source.width, source.height);
+          if (!markup) shapes.forEach(shape => drawShape(baseCtx, shape));
+          const imageData = await blobToDataUrl(await pngBlobOf(base));
+
+          let layerData;
+          if (markup) {
+            const layer = document.createElement('canvas');
+            layer.width = source.width;
+            layer.height = source.height;
+            const layerCtx = layer.getContext('2d');
+            shapes.forEach(shape => drawShape(layerCtx, shape));
+            layerData = await blobToDataUrl(await pngBlobOf(layer));
           }
-          shapes.forEach(shape => drawShape(ctx, shape));
-          const data = await blobToDataUrl(await pngBlobOf(canvas));
+
           const kept = comments.filter(entry => entry.text.trim());
           const payload = markup
-            ? { mode: 'markup', markup: data, comments: kept, sourceName: source.name }
-            : { mode: 'flatten', image: data, comments: kept, sourceName: source.name };
+            ? { mode: 'markup', image: imageData, markup: layerData, comments: kept, sourceName: source.name }
+            : { mode: 'flatten', image: imageData, comments: kept, sourceName: source.name };
           const saved = await request(ANN_ROUTE, { method: 'POST', body: JSON.stringify(payload) });
           setManifest(saved.manifest || '');
           let inserted = false;
@@ -1138,14 +1145,14 @@ window.__ModuleLoader__.load({
 
       const tools = h('div', { className: 'fmg-ann-tools' },
         pick('image', 'annPickFile', showDrafts),
-        h('span', { style: { width: 1, height: 16, margin: '0 2px', background: 'rgba(255,255,255,.22)' } }),
+        h('span', { style: { width: 1, height: 16, margin: '0 2px', background: 'rgba(0,0,0,.12)' } }),
         ANN_TOOLS.map(([id]) => pick(id, `annTool${id.charAt(0).toUpperCase()}${id.slice(1)}`,
           () => { setTool(id); setError(''); }, { pressed: tool === id })),
         h('button', {
           type: 'button', className: 'fmg-ann-dot', title: t('annColor'), 'aria-label': t('annColor'),
           onClick: () => setColor(ANN_COLORS[(ANN_COLORS.indexOf(color) + 1) % ANN_COLORS.length]),
         }, h('i', { style: { background: color } })),
-        h('span', { style: { width: 1, height: 16, margin: '0 2px', background: 'rgba(255,255,255,.22)' } }),
+        h('span', { style: { width: 1, height: 16, margin: '0 2px', background: 'rgba(0,0,0,.12)' } }),
         pick('undo', 'annUndo', undo, { disabled: !shapes.length }),
         pick('redo', 'annRedo', redoLast, { disabled: !redo.length }),
         pick('trash', 'annClear', () => { setShapes([]); setComments([]); setRedo([]); setPendingId(null); },
@@ -1235,10 +1242,13 @@ window.__ModuleLoader__.load({
         h('div', { className: 'fmg-ann-seg' },
           h('button', {
             type: 'button', 'aria-pressed': mode === 'markup', disabled: !capable,
+            // The compact bar has no room for the explanation, so a disabled
+            // markup button says why on hover.
+            title: capable ? t('annModeMarkupHint') : t('annModeUnsupported'),
             onClick: () => { setManualMode(true); setMode('markup'); },
           }, t('annModeMarkup')),
           h('button', {
-            type: 'button', 'aria-pressed': mode === 'flatten',
+            type: 'button', 'aria-pressed': mode === 'flatten', title: t('annModeFlattenHint'),
             onClick: () => { setManualMode(true); setMode('flatten'); },
           }, t('annModeFlatten'))),
         h('button', {
@@ -1260,7 +1270,41 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', className: 'fmg-ann-go', onClick: () => setPicker(false) }, t('annDone')))
         : null;
 
-      return h('section', { className: 'fmg-ann', 'aria-label': t('annTitle') },
+      // Dropping a file from Explorer or dragging a composer thumbnail both land
+      // here. The composer installs a document-level drop handler that would
+      // otherwise add the same file to the draft as well, so both events stop
+      // propagating: the panel is a separate surface, and it says so.
+      const acceptsDrop = event => {
+        const types = event.dataTransfer ? Array.from(event.dataTransfer.types || []) : [];
+        return types.includes('Files') || types.includes('text/uri-list') || types.includes('text/plain');
+      };
+      const onDragOver = event => {
+        if (!acceptsDrop(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = 'copy';
+        setDragging(true);
+      };
+      const onDrop = async event => {
+        if (!acceptsDrop(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDragging(false);
+        const files = event.dataTransfer && event.dataTransfer.files;
+        if (files && files.length) { await openFile(files[0]); return; }
+        const uri = (event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain') || '')
+          .split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith('#'));
+        if (!uri) { setError(t('annDropUnsupported')); return; }
+        await openSource({ url: uri, name: 'dropped', draftIndex: null });
+      };
+
+      return h('section', {
+        className: 'fmg-ann',
+        'aria-label': t('annTitle'),
+        onDragOver,
+        onDragLeave: () => setDragging(false),
+        onDrop: event => { void onDrop(event); },
+      },
         h('input', {
           ref: fileRef, type: 'file', accept: 'image/png,image/jpeg,image/webp', style: { display: 'none' },
           onChange: event => { void openFile(event.target.files && event.target.files[0]); },
@@ -1269,7 +1313,8 @@ window.__ModuleLoader__.load({
         source ? commentHint : null,
         stage,
         pickerBar,
-        bottom);
+        bottom,
+        dragging ? h('div', { className: 'fmg-ann-drop' }, t('annDropHere')) : null);
     }
 
 
@@ -1410,12 +1455,8 @@ window.__ModuleLoader__.load({
             kind: ANN_KIND,
             priority: 'extension',
             title: () => t('annTitle'),
-            guide: [{
-              id: 'annotation',
-              order: 90,
-              title: () => t('annTitle'),
-              description: () => t('annGuideHint'),
-            }],
+            // Title only: the card reads as a tool name, not a feature blurb.
+            guide: [{ id: 'annotation', order: 90, title: () => t('annTitle') }],
           }), 'fmage: annotation tab type');
           owner.slots.inject('sidebar.right.pane.tab', () => owner.slots.register({
             name: 'sidebar.right.pane.tab',

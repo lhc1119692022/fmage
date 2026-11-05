@@ -164,16 +164,17 @@ export function createAnnotationApi(root) {
         throw new AnnotationError('Annotation request must be an object.');
       }
       const meta = manifestOf(body);
-      // A markup layer is the whole artifact: the target image is already in the
-      // message, and copying it here would only invite a second, stale version.
-      // A flattened annotation replaces the image, so it must carry its pixels.
+      // Both modes carry the target image, because the panel is the source of
+      // truth for the pixels it annotated: a draft attachment and the manifest
+      // copy would otherwise be two versions of the same picture. Markup adds
+      // the transparent layer beside it.
+      if (body.image === undefined) {
+        throw new AnnotationError('An annotation needs the target image.');
+      }
       if (meta.mode === 'markup' && body.markup === undefined) {
         throw new AnnotationError('A markup annotation needs the transparent layer.');
       }
-      if (meta.mode === 'flatten' && body.image === undefined) {
-        throw new AnnotationError('A flattened annotation needs the composited image.');
-      }
-      const image = body.image === undefined ? undefined : decodePng(body.image, 'image');
+      const image = decodePng(body.image, 'image');
       const markup = body.markup === undefined ? undefined : decodePng(body.markup, 'markup');
       if (meta.mode === 'flatten' && markup !== undefined) {
         throw new AnnotationError('A flattened annotation must not carry a separate layer.');
@@ -182,14 +183,14 @@ export function createAnnotationApi(root) {
       const id = randomBytes(8).toString('hex');
       const target = join(directory, id);
       await mkdir(target, { recursive: true });
-      if (image !== undefined) await writeFile(join(target, 'image.png'), image);
+      await writeFile(join(target, 'image.png'), image);
       if (markup !== undefined) await writeFile(join(target, 'markup.png'), markup);
 
       const manifest = {
         ...meta,
         id,
         createdAt: new Date().toISOString(),
-        image: image === undefined ? null : join(target, 'image.png'),
+        image: join(target, 'image.png'),
         markup: markup === undefined ? null : join(target, 'markup.png'),
       };
       await writeFile(join(target, MANIFEST_NAME), JSON.stringify(manifest, null, 2) + '\n', 'utf8');

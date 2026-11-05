@@ -234,14 +234,18 @@ as `markup` (a local path); `generate_image` and both batch tools do not accept 
   carry a stray empty layer.
 
 The Desktop sidebar adds an annotation workbench. It registers as a card on the right sidebar's
-start page (next to other tools' cards), not as a composer button, so the input rows stay as they
-were. It reads a composer thumbnail read-only and draws over it with a floating toolbar: arrows,
-boxes, ellipses, pen strokes, text, and numbered comment pins with an inline comment field.
-Results are written through `POST /api/fmage.annotation`:
+start page, not as a composer button, so the input rows stay as they were. The panel is its own
+surface: it opens a composer thumbnail or a dropped file, draws over it with a floating toolbar
+(arrows, boxes, ellipses, pen strokes, text, numbered comment pins with an inline field), and
+writes the result through `POST /api/fmage.annotation`. Dragging a file into the panel does not
+add it to the composer, and the panel never edits an attachment in place.
 
-- **markup**: only the transparent layer is written, because the target image is already in the
-  message. The tab requires that image to be the first one attached, matching what the API does.
-- **flatten**: the composited image is written instead, and no layer is sent at all.
+Every save carries the annotated pixels, so the request no longer depends on which draft slot the
+source came from:
+
+- **markup**: writes `image.png` and `markup.png`. `edit_image` takes `image` plus `markup`, and
+  the target must stay the first input.
+- **flatten**: writes `image.png` with the marks already composited, and no layer at all.
 
 Both modes leave the draft alone. The path of the written `annotation.json` is inserted into the
 composer, so the assistant reads the mode and comments from it rather than guessing. Files live

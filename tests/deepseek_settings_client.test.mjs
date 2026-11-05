@@ -112,7 +112,8 @@ test('the sidebar tab body only appears when the right sidebar services resolve'
   assert.equal(registration.guide.length, 1);
   assert.equal(registration.guide[0].id, 'annotation');
   assert.equal(registration.guide[0].order, 90);
-  assert.equal(registration.guide[0].title(), '图像标注');
+  assert.equal(registration.guide[0].title(), 'Fmage 工作台');
+  assert.equal(registration.guide[0].description, undefined, 'the card carries no description line');
   assert.ok(tabBody);
   assert.equal(tabBody.options.key, 'dsh-fmage/annotation');
   assert.equal(typeof tabBody.component, 'function');

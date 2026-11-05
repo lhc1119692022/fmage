@@ -58,10 +58,11 @@ function routesFor(api) {
   return routes;
 }
 
-test('saving a markup annotation writes only the layer and a manifest', async t => {
+test('saving a markup annotation writes the image, the layer and a manifest', async t => {
   const { api, root } = await fixture(t);
   const saved = await api.save({
     mode: 'markup',
+    image: dataUrl(),
     markup: dataUrl(),
     comments: [{ id: 1, text: 'make this vase cobalt', marker: { x: 0.4, y: 0.5 } }],
     sourceName: 'kitchen.png',
@@ -69,8 +70,8 @@ test('saving a markup annotation writes only the layer and a manifest', async t 
   assert.match(saved.id, /^[a-z0-9]{16}$/);
   assert.equal(saved.mode, 'markup');
   assert.ok(saved.markup.endsWith('markup.png'));
-  assert.equal(saved.image, null);
-  assert.deepEqual(await readdir(join(root, 'annotations', saved.id)), ['annotation.json', 'markup.png']);
+  assert.ok(saved.image.endsWith('image.png'));
+  assert.deepEqual(await readdir(join(root, 'annotations', saved.id)), ['annotation.json', 'image.png', 'markup.png']);
   const manifest = JSON.parse(await readFile(join(root, 'annotations', saved.id, 'annotation.json'), 'utf8'));
   assert.equal(manifest.comments[0].text, 'make this vase cobalt');
   assert.equal(manifest.comments[0].marker.x, 0.4);
@@ -102,13 +103,19 @@ test('unknown or malformed ids are refused', async t => {
 test('markup mode without a layer, or with a non-PNG layer, is refused', async t => {
   const { api } = await fixture(t);
   await assert.rejects(
-    api.save({ mode: 'markup' }),
+    api.save({ mode: 'markup', image: dataUrl() }),
     /needs the transparent layer/,
   );
   await assert.rejects(
-    api.save({ mode: 'markup', markup: 'data:image/jpeg;base64,/9j/4AAQ' }),
+    api.save({ mode: 'markup', image: dataUrl(), markup: 'data:image/jpeg;base64,/9j/4AAQ' }),
     /must be a PNG/,
   );
+});
+
+test('a save without the target image is refused', async t => {
+  const { api } = await fixture(t);
+  await assert.rejects(api.save({ mode: 'markup', markup: dataUrl() }), /needs the target image/);
+  await assert.rejects(api.save({ mode: 'flatten' }), /needs the target image/);
 });
 
 test('a non-PNG image and an unknown mode are refused', async t => {
@@ -168,8 +175,8 @@ test('two saves never share a directory', async t => {
 
 test('a second revision keeps the earlier files intact', async t => {
   const { api } = await fixture(t);
-  const first = await api.save({ mode: 'markup', markup: dataUrl() });
-  const second = await api.save({ mode: 'markup', markup: dataUrl() });
+  const first = await api.save({ mode: 'markup', image: dataUrl(), markup: dataUrl() });
+  const second = await api.save({ mode: 'markup', image: dataUrl(), markup: dataUrl() });
   assert.notEqual(first.id, second.id);
   const original = await readFile(join(first.directory, 'markup.png'));
   assert.deepEqual(original, pngBytes());
