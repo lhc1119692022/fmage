@@ -234,24 +234,25 @@ as `markup` (a local path); `generate_image` and both batch tools do not accept 
   carry a stray empty layer.
 
 The Desktop sidebar adds an annotation workbench. It registers as a card on the right sidebar's
-start page, not as a composer button, so the input rows stay as they were. The panel is its own
-surface: it opens a composer thumbnail or a dropped file, draws over it with a floating toolbar
-(arrows, boxes, ellipses, pen strokes, text, numbered comment pins with an inline field), and
-writes the result through `POST /api/fmage.annotation`. Dragging a file into the panel does not
-add it to the composer, and the panel never edits an attachment in place.
+start page, not as a composer button, so the input rows stay as they were. It works on an image
+that is already in the composer: drag its thumbnail in (or pick it from the list), draw with the
+floating toolbar, and save.
 
-Every save carries the annotated pixels, so the request no longer depends on which draft slot the
-source came from:
+Saving writes one transparent layer and nothing else — no copy of the image, no path in the
+conversation:
 
-- **markup**: writes `image.png` and `markup.png`. `edit_image` takes `image` plus `markup`, and
-  the target must stay the first input.
-- **flatten**: writes `image.png` with the marks already composited, and no layer at all.
+- The layer lands in `<DSH_HOME>/fmage/cache/annotations/<id>/`, with a `meta.json` that records
+  the mode, the canvas, and the comments. Entries expire after an hour.
+- `edit_image` looks for the newest unused layer and attaches it by itself: `--markup` on a
+  2.5/2.6 `openai-images` provider, or a local composite (`--flatten-markup`) on any other model.
+  A used layer is retired; a failed request leaves it in place.
+- Comments are inserted into the composer as ordinary prose in the shape the user would type,
+  `图像 1： 1. (x: 22.1%, y: 26%) …`, so they reach the prompt without a machine path.
+- The annotated image has to be the first attachment, because that is the image the API treats as
+  the edit target; the panel refuses to save a markup layer otherwise and points at "flatten".
 
-Both modes leave the draft alone. The path of the written `annotation.json` is inserted into the
-composer, so the assistant reads the mode and comments from it rather than guessing. Files live
-under `<DSH_HOME>/fmage/annotations/<id>/` and each save gets a new id, so an edit that already
-read a layer never sees it replaced. Workspaces older than seven days are swept on the next save;
-directories without an `annotation.json` are never touched.
+Nothing is added to the draft except that comment block, and the panel never edits an attachment
+in place.
 
 ### SVG and GIF output
 

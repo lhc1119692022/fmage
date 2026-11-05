@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { access, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
@@ -53,6 +53,10 @@ if (!CONFIG_PATH) {
   process.exit(1);
 }
 const TRANSPORT_OPENAI_IMAGES = "openai-images";
+// Layers saved by the sidebar live here; the MCP server picks the newest unused
+// one up by itself so no path ever has to enter the conversation.
+const ANNOTATION_CACHE = DATA_HOME ? join(DATA_HOME, "cache", "annotations") : null;
+const ANNOTATION_TTL_MS = 60 * 60 * 1000;
 const workflowService = createWorkflowService(CONFIG_PATH);
 const TRANSPORT_GEMINI_GENERATE_CONTENT = "gemini-generate-content";
 const TRANSPORT_MIDJOURNEY = "midjourney";
@@ -916,6 +920,9 @@ function appendEditArguments(argv, args, provider) {
   // Absent markup appends nothing: the transport sees no flag and writes no
   // multipart part, so a flattened edit can never carry a stray empty layer.
   appendOption(argv, "--markup", args.markup);
+  // The layer saved in flatten mode is painted onto the first image here, so
+  // the user still sends only the picture they attached.
+  appendOption(argv, "--flatten-markup", args._flatten_markup);
 }
 
 function asyncImageArguments(args, promptFile, provider) {
@@ -1260,6 +1267,55 @@ function bananaModelCapability(provider) {
     );
   }
   return { canonicalModel, ...capability };
+}
+
+/**
+ * The newest annotation layer the sidebar saved and no request has used yet.
+ *
+ * Matching is deliberately "newest unused within the TTL" rather than a hash:
+ * a conversation attachment reaches this server as a normalized copy, so a
+ * byte or pixel hash of the original cannot be compared with it. The panel
+ * already refuses to save a markup layer unless the annotated image is the
+ * first attachment, and the transport checks the layer's canvas against that
+ * image, so a wrong pairing fails loudly instead of editing the wrong picture.
+ */
+function pendingAnnotation() {
+  if (!ANNOTATION_CACHE) return null;
+  let entries;
+  try {
+    entries = readdirSync(ANNOTATION_CACHE, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  let newest = null;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const directory = join(ANNOTATION_CACHE, entry.name);
+    let meta;
+    try {
+      meta = JSON.parse(readFileSync(join(directory, "meta.json"), "utf8"));
+    } catch {
+      continue;
+    }
+    if (meta.consumedAt) continue;
+    const createdAt = Date.parse(meta.createdAt);
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt > ANNOTATION_TTL_MS) continue;
+    if (newest === null || createdAt > newest.createdAt) {
+      newest = { directory, createdAt, layer: join(directory, "layer.png"), mode: meta.mode };
+    }
+  }
+  return newest;
+}
+
+/** Retire a layer once a request actually used it; a failed call leaves it. */
+async function consumeAnnotation(annotation) {
+  if (!annotation) return;
+  try {
+    const path = join(annotation.directory, "meta.json");
+    const meta = JSON.parse(await readFile(path, "utf8"));
+    meta.consumedAt = new Date().toISOString();
+    await writeFile(path, JSON.stringify(meta, null, 2) + "\n", "utf8");
+  } catch { /* best effort: the TTL still retires it */ }
 }
 
 function enforceMarkupPolicy(args = {}, provider) {
@@ -2664,6 +2720,25 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
   const singleStartedAt = isoNow();
   const provider = resolvedProvider ?? (await resolveProvider(args.provider, !args.dry_run));
   const prompt = provider.transport === TRANSPORT_MIDJOURNEY ? args.prompt : nonEmptyString(args.prompt);
+  // A layer the sidebar saved attaches itself here, so the user never has to
+  // name it. An explicit `markup` argument still wins.
+  let annotation = null;
+  if (command === "edit" && !nonEmptyString(args.markup)) {
+    annotation = pendingAnnotation();
+    if (annotation !== null) {
+      if (annotation.mode === "flatten") {
+        args = { ...args, _flatten_markup: annotation.layer };
+      } else if (provider.transport === TRANSPORT_OPENAI_IMAGES && isMarkupCapableModel(provider.model)) {
+        args = { ...args, markup: annotation.layer };
+      } else {
+        throw new Error(
+          `An annotation layer is waiting, but provider "${provider.name}" uses "${provider.model}" on ` +
+            `"${provider.transport}", which cannot take one. Switch to an openai-images provider on a ` +
+            "gpt-image-2.5/2.6 model, or re-save the annotation as \"flatten\".",
+        );
+      }
+    }
+  }
   args = enforceModelCapabilityPolicy(args, provider);
   args = {
     ...args,
@@ -2771,6 +2846,11 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
       mcp_single_started_at: singleStartedAt,
       mcp_single_finished_at: isoNow(),
     };
+    if (annotation !== null) {
+      enriched.annotation_applied = annotation.mode;
+      // A dry run only reports the wiring; the layer stays available.
+      if (!args.dry_run) await consumeAnnotation(annotation);
+    }
     return publishResultImages(enriched, args, provider);
   } catch (error) {
     throw attachProviderFailureContext(error, provider);

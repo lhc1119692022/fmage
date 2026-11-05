@@ -1,24 +1,29 @@
-// Annotation workspace for the Deskop sidebar: the browser draws the layer,
-// this module owns the files on disk.
+// Annotation workspace for the Desktop sidebar: the browser draws a layer,
+// this module owns the file on disk.
 //
-// The provider needs the annotated image and, for markup edits, a separate
-// transparent PNG that shares its canvas exactly. The browser has the pixels
-// but no writable path, and the Conversation layer materializes an attachment
-// only after the message is sent. Writing both files here means the edit can
-// name real paths before anything is submitted.
+// The model never sees this file's path. `edit_image` looks for the newest
+// unused layer in `cache/annotations` and attaches it itself, so nothing has
+// to be pasted into the conversation. That is why the directory is a cache:
+// every entry is disposable, and an unused one expires.
+//
+// Layout, also read by mcp/server.mjs:
+//   <root>/cache/annotations/<id>/layer.png
+//   <root>/cache/annotations/<id>/meta.json  { id, mode, width, height, createdAt, consumedAt, comments }
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 export const ANNOTATION_ROUTE = '/api/fmage.annotation';
+export const ANNOTATION_CACHE_DIR = ['cache', 'annotations'];
 const NO_STORE = { 'cache-control': 'no-store' };
-const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
-const MAX_REQUEST_BYTES = 96 * 1024 * 1024;
-const MANIFEST_NAME = 'annotation.json';
-// Each save writes a new directory and nothing ever overwrites one, because a
-// request may still be reading the layer it was given. Old workspaces are
-// removed by age instead: a week is far longer than any single edit.
-const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_LAYER_BYTES = 32 * 1024 * 1024;
+const MAX_REQUEST_BYTES = 40 * 1024 * 1024;
+const META_NAME = 'meta.json';
+const LAYER_NAME = 'layer.png';
+// A layer is only meaningful for the edit the user is about to ask for. An
+// hour is long enough to write a prompt and short enough that a forgotten
+// layer cannot attach itself to an unrelated request later.
+const RETENTION_MS = 60 * 60 * 1000;
 
 class AnnotationError extends Error {
   constructor(message, status = 400) {
@@ -65,18 +70,13 @@ function decodePng(value, label) {
   if (value.startsWith('data:') && !/^data:image\/png;base64,/i.test(value)) {
     throw new AnnotationError(`${label} must be a PNG data URL.`);
   }
-  let bytes;
-  try {
-    bytes = Buffer.from(payload, 'base64');
-  } catch {
-    throw new AnnotationError(`${label} is not valid base64.`);
-  }
+  const bytes = Buffer.from(payload, 'base64');
   if (bytes.byteLength === 0) throw new AnnotationError(`${label} is empty.`);
-  if (bytes.byteLength > MAX_IMAGE_BYTES) {
-    throw new AnnotationError(`${label} exceeds ${MAX_IMAGE_BYTES} bytes.`, 413);
+  if (bytes.byteLength > MAX_LAYER_BYTES) {
+    throw new AnnotationError(`${label} exceeds ${MAX_LAYER_BYTES} bytes.`, 413);
   }
-  // A PNG signature keeps a mislabeled JPEG/WebP out of the markup field: the
-  // provider requires PNG for the layer and checks the alpha channel.
+  // The layer must stay a transparent PNG: the provider checks its alpha, and a
+  // mislabeled JPEG would fail there instead of here.
   if (bytes.subarray(0, 8).toString('binary') !== '\x89PNG\r\n\x1a\n') {
     throw new AnnotationError(`${label} must be a PNG.`);
   }
@@ -86,35 +86,45 @@ function decodePng(value, label) {
 function normalizeComments(value) {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new AnnotationError('comments must be an array.');
-  return value.slice(0, 200).map((entry, index) => {
+  return value.slice(0, 100).map((entry, index) => {
     if (entry === null || typeof entry !== 'object') {
       throw new AnnotationError(`comments[${index}] must be an object.`);
     }
     const text = typeof entry.text === 'string' ? entry.text.trim().slice(0, 2000) : '';
     if (!text) throw new AnnotationError(`comments[${index}].text is empty.`);
-    const id = Number.isInteger(entry.id) ? entry.id : index + 1;
-    const marker = entry.marker === null || entry.marker === undefined ? null : entry.marker;
-    return { id, text, marker };
+    const x = Number(entry.x);
+    const y = Number(entry.y);
+    return {
+      id: Number.isInteger(entry.id) ? entry.id : index + 1,
+      text,
+      ...(Number.isFinite(x) && Number.isFinite(y) ? { x: Number(x.toFixed(4)), y: Number(y.toFixed(4)) } : {}),
+    };
   });
 }
 
-function manifestOf(body) {
+function metaOf(body) {
   const mode = body.mode === 'flatten' ? 'flatten' : body.mode === 'markup' ? 'markup' : '';
   if (!mode) throw new AnnotationError('mode must be "markup" or "flatten".');
+  const width = Number(body.width);
+  const height = Number(body.height);
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+    throw new AnnotationError('width and height must be positive integers.');
+  }
   return {
     version: 1,
     mode,
+    width,
+    height,
     comments: normalizeComments(body.comments),
     sourceName: typeof body.sourceName === 'string' ? body.sourceName.slice(0, 200) : '',
-    canvas: body.canvas ?? null,
   };
 }
 
 /**
- * Drop workspaces older than the retention window.
+ * Drop entries past the retention window.
  *
- * Best effort and age-based only: the caller's own directory is always kept,
- * and a directory without our manifest is never touched.
+ * Best effort and age-based: the entry just written is always kept, and a
+ * directory without our meta file is never touched.
  */
 async function pruneExpired(directory, keep) {
   let entries;
@@ -128,21 +138,20 @@ async function pruneExpired(directory, keep) {
     const target = join(directory, entry.name);
     if (target === keep) return;
     try {
-      const manifest = await stat(join(target, MANIFEST_NAME));
-      if (manifest.mtimeMs < cutoff) await rm(target, { recursive: true, force: true });
-    } catch { /* not an annotation workspace, or already gone */ }
+      const meta = await stat(join(target, META_NAME));
+      if (meta.mtimeMs < cutoff) await rm(target, { recursive: true, force: true });
+    } catch { /* not an annotation entry, or already gone */ }
   }));
 }
 
 /**
- * Persist one annotation workspace.
+ * Persist one annotation layer.
  *
- * Writes `image.png` (the untouched target), `markup.png` (the layer, markup
- * mode only) and `annotation.json`. Revisioned, never overwritten: a layer the
- * caller replaced is still referenced by whatever request already read it.
+ * Only the marks are written. The image being annotated stays the one the user
+ * attached, so there is no second copy to drift from it.
  */
 export function createAnnotationApi(root) {
-  const directory = join(root, 'annotations');
+  const directory = join(root, ...ANNOTATION_CACHE_DIR);
 
   return {
     directory,
@@ -150,54 +159,30 @@ export function createAnnotationApi(root) {
     async read(body) {
       const id = annotationId(body?.id);
       const target = join(directory, id);
-      let manifest;
+      let meta;
       try {
-        manifest = JSON.parse(await readFile(join(target, MANIFEST_NAME), 'utf8'));
+        meta = JSON.parse(await readFile(join(target, META_NAME), 'utf8'));
       } catch {
         throw new AnnotationError('Annotation not found.', 404);
       }
-      return { id, directory: target, manifest: join(target, MANIFEST_NAME), ...manifest };
+      return { ...meta, id, directory: target, layer: join(target, LAYER_NAME) };
     },
 
     async save(body) {
       if (body === null || typeof body !== 'object') {
         throw new AnnotationError('Annotation request must be an object.');
       }
-      const meta = manifestOf(body);
-      // Both modes carry the target image, because the panel is the source of
-      // truth for the pixels it annotated: a draft attachment and the manifest
-      // copy would otherwise be two versions of the same picture. Markup adds
-      // the transparent layer beside it.
-      if (body.image === undefined) {
-        throw new AnnotationError('An annotation needs the target image.');
-      }
-      if (meta.mode === 'markup' && body.markup === undefined) {
-        throw new AnnotationError('A markup annotation needs the transparent layer.');
-      }
-      const image = decodePng(body.image, 'image');
-      const markup = body.markup === undefined ? undefined : decodePng(body.markup, 'markup');
-      if (meta.mode === 'flatten' && markup !== undefined) {
-        throw new AnnotationError('A flattened annotation must not carry a separate layer.');
-      }
+      const meta = metaOf(body);
+      const layer = decodePng(body.layer, 'layer');
 
       const id = randomBytes(8).toString('hex');
       const target = join(directory, id);
       await mkdir(target, { recursive: true });
-      await writeFile(join(target, 'image.png'), image);
-      if (markup !== undefined) await writeFile(join(target, 'markup.png'), markup);
-
-      const manifest = {
-        ...meta,
-        id,
-        createdAt: new Date().toISOString(),
-        image: join(target, 'image.png'),
-        markup: markup === undefined ? null : join(target, 'markup.png'),
-      };
-      await writeFile(join(target, MANIFEST_NAME), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
-      // Best effort; a failed sweep never fails the save the user asked for.
-      // Awaited so the response reflects the state on disk.
+      await writeFile(join(target, LAYER_NAME), layer);
+      const record = { ...meta, id, createdAt: new Date().toISOString(), consumedAt: null };
+      await writeFile(join(target, META_NAME), JSON.stringify(record, null, 2) + '\n', 'utf8');
       await pruneExpired(directory, target);
-      return { id, directory: target, manifest: join(target, MANIFEST_NAME), ...manifest };
+      return { ...record, directory: target, layer: join(target, LAYER_NAME) };
     },
   };
 }

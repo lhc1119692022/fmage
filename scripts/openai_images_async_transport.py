@@ -623,6 +623,9 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("primary_image_index is outside the supplied image list.")
     markup_path = openai.markup_argument(args)
     openai.validate_markup(args, image_paths, primary_index)
+    flatten_layer = openai.flatten_markup_argument(args)
+    if markup_path is not None and flatten_layer is not None:
+        raise ValueError("--markup and --flatten-markup are mutually exclusive.")
     size, size_notes = openai.resolve_size(args, image_paths, primary_index)
     payload = common_payload(args, prompt, size)
     image_field = openai.resolve_image_field(getattr(args, "image_field", "auto"), len(image_paths))
@@ -637,6 +640,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
             "images": [str(path.resolve()) for path in image_paths],
             "image_field": image_field,
             "markup": str(markup_path.resolve()) if markup_path else None,
+            "flatten_markup": str(flatten_layer.resolve()) if flatten_layer else None,
             "remote_async": dry_run_remote_async(args),
             "notes": size_notes,
         }
@@ -644,6 +648,11 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = root / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
     timing["output_dir_created_at"] = openai.iso_now()
+    if flatten_layer is not None:
+        image_paths[primary_index] = openai.flatten_markup_onto_image(
+            image_paths[primary_index], flatten_layer, run_dir
+        )
+        size_notes.append("markup_flattened_into_target")
     if not args.size and not args.aspect:
         if markup_path:
             output, markup_output, notes = openai.prepare_edit_pair(
@@ -801,6 +810,10 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument(
         "--markup",
         help="Transparent PNG annotation layer aligned with the first input image (GPT Image 2.5/2.6 edits).",
+    )
+    edit.add_argument(
+        "--flatten-markup",
+        help="Transparent PNG annotation layer to paint onto the edited image before submission.",
     )
 
     recover = subparsers.add_parser("recover", help="Retrieve an existing remote task without generating again.")

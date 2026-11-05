@@ -30,10 +30,15 @@ Host 使用已存条目或 `api_key_env` 指向的环境变量，且不会把密
 文件摘要，避免覆盖其他进程（如 `workflow_image set_default`）的并发修改。`tests/deepseek_config_api.test.mjs`
 与 `tests/deepseek_settings_client.test.mjs` 覆盖接口与页面注册；后者需要本机 DSH 源码的 React。
 
-同一组路由里还有 `GET` / `POST /api/fmage.annotation`，服务侧栏标注工作台：保存时校验 PNG 签名、
-模式与层文件是否配套，按 `<id>` 建目录并写 `annotation.json`、`image.png` / `markup.png`，回读按 id
-取清单。每次保存生成新 id，已发出的请求引用过的层不会被覆盖。写入目录固定在
-`<DSH_HOME>/fmage/annotations/`，路径全部服务端生成，不接受调用方给出的目录。
+同一组路由里还有 `GET` / `POST /api/fmage.annotation`，服务侧栏标注工作台：保存时只接收一张透明
+标注层和它的元数据（模式、画布尺寸、评论），校验 PNG 签名后按 `<id>` 写 `layer.png` 与 `meta.json`。
+它落在 `<DSH_HOME>/fmage/cache/annotations/`——这是缓存而不是长期数据：未被使用的条目一小时后由下一次
+保存顺带清理，路径全部服务端生成。基准图不复制，仍是输入框里的那张附件。
+
+MCP 侧在 `edit_image` 发请求前取“最新且未被使用”的那一层自行附加：`openai-images` + 2.5/2.6 走
+`--markup`，其它模型走 `--flatten-markup`（本地把层合成进第一张图再发）。因此对话里不再出现任何
+路径；评论按 `图像 1： 1. (x: 22.1%, y: 26%) …` 的普通文字插入输入框，由模型自然读入提示词。
+用过的层会写 `consumedAt` 退休，失败的请求不动它。
 `--check` 另外在隔离 profile 中启动真实 Cordis 服务，要求 client 模块图里有 `dsh-fmage` → `client.js` 这一行，
 因此“页面被宿主发现”是每次刷新都会复验的，而不是只看文件是否在包里。
 

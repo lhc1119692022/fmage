@@ -161,20 +161,24 @@ window.__ModuleLoader__.load({
       pill: '生图', pillTitle: '生图提供商', pillKeySet: 'Key 已配置', pillKeyMissing: '未配置 Key',
       pillSwitchFailed: '切换失败',
       annTitle: 'Fmage 工作台', annEmpty: '还没有图片。从输入框选一张，或选择本地图片。',
-      annFromComposer: '从输入框选图', annPickFile: '选择图片', annNoDraft: '输入框里没有图片。',
+      annFromComposer: '从输入框选图', annPickFile: '从输入框选图', annNoDraft: '输入框里没有图片。',
+      annNeedsComposerImage: '标注只能作用于输入框里的图片。',
+      annSourceGone: '这张图已从输入框移除，请重新选图。',
       annToolArrow: '箭头', annToolRect: '方框', annToolEllipse: '椭圆', annToolPen: '画笔',
       annToolText: '文字', annToolMarker: '编号', annToolComment: '评论',
       annColor: '换颜色', annUndo: '撤销', annRedo: '重做', annClear: '清空',
       annCommentHint: '点击图像以添加评论', annDone: '完成', annPickFromList: '选择图片',
-      annDropHere: '松开即在此打开', annDropUnsupported: '拖入的内容不是图片。',
+      annDropHere: '松开即在此打开', annDropUnsupported: '拖入的内容不是输入框里的图片。',
+      annMustBeFirst: '标记层只能作用于第一张输入图；这张是第 {n} 张。换成第一张，或改用合成。',
+      annExported: '已保存，评论已插入输入框。', annExportedCopy: '已保存，评论已复制。',
+      annExportedSilent: '已保存；没有评论需要插入。',
       annMode: '模式', annModeMarkup: '标记层', annModeFlatten: '合成到原图',
       annModeMarkupHint: '把透明标注层作为 markup 单独发送；原图不变，标记由模型抹除。',
       annModeFlattenHint: '把标注烧进图片再发；标记可能残留在结果里。',
       annModeUnsupported: '当前模型不是 GPT Image 2.5/2.6，只能用合成。',
       annComment: '评论', annAddComment: '加一条评论', annCommentPlaceholder: '这条标注要改什么？',
       annCommentEmpty: '评论不能为空。',
-      annExport: '保存并插入', annExporting: '写入中…', annCopy: '复制路径', annCopied: '已复制',
-      annExported: '已保存，路径已插入输入框。', annExportedCopy: '已保存，路径已复制。',
+      annExport: '保存并插入', annExporting: '写入中…', annCopy: '复制评论', annCopied: '已复制',
       annTextPrompt: '标注文字', annTextRequired: '先填标注文字。',
       annRemoveComment: '删除这条评论',
       annZoomIn: '放大', annZoomOut: '缩小', annZoomReset: '恢复适应窗口',
@@ -216,15 +220,19 @@ window.__ModuleLoader__.load({
       annToolText: 'Text', annToolMarker: 'Pin', annToolComment: 'Comment',
       annColor: 'Change colour', annUndo: 'Undo', annRedo: 'Redo', annClear: 'Clear',
       annCommentHint: 'Click the image to add a comment', annDone: 'Done', annPickFromList: 'Choose an image',
-      annDropHere: 'Drop to open it here', annDropUnsupported: 'That drop was not an image.',
+      annDropHere: 'Drop to open it here', annDropUnsupported: 'That drop was not an image from the composer.',
+      annNeedsComposerImage: 'Annotations only apply to an image in the composer.',
+      annSourceGone: 'That image left the composer; pick it again.',
+      annMustBeFirst: 'The markup layer applies only to the first input image; this is image {n}. Use the first one, or flatten instead.',
       annMode: 'Mode', annModeMarkup: 'Markup layer', annModeFlatten: 'Flatten',
       annModeMarkupHint: 'Send the transparent layer as markup; the target image stays untouched and the model removes the marks.',
       annModeFlattenHint: 'Burn the marks into the image first; they may survive into the result.',
       annModeUnsupported: 'This model is not GPT Image 2.5/2.6, so only flatten is available.',
       annComment: 'Comments', annAddComment: 'Add a comment', annCommentPlaceholder: 'What should change here?',
       annCommentEmpty: 'A comment cannot be empty.',
-      annExport: 'Save and insert', annExporting: 'Writing…', annCopy: 'Copy path', annCopied: 'Copied',
-      annExported: 'Saved; the path was inserted into the composer.', annExportedCopy: 'Saved; the path was copied.',
+      annExport: 'Save and insert', annExporting: 'Writing…', annCopy: 'Copy comments', annCopied: 'Copied',
+      annExported: 'Saved; the comments were inserted into the composer.', annExportedCopy: 'Saved; the comments were copied.',
+      annExportedSilent: 'Saved; there were no comments to insert.',
       annTextPrompt: 'Annotation text', annTextRequired: 'Type the annotation text first.',
       annRemoveComment: 'Remove this comment',
       annZoomIn: 'Zoom in', annZoomOut: 'Zoom out', annZoomReset: 'Fit to window',
@@ -917,16 +925,14 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = useState(false);
       const [error, setError] = useState('');
       const [notice, setNotice] = useState('');
-      const [manifest, setManifest] = useState('');
+      const [savedId, setSavedId] = useState('');
       const [drafting, setDrafting] = useState(null);
       const [zoom, setZoom] = useState(1);
       const [label, setLabel] = useState('');
       const [pendingId, setPendingId] = useState(null);
       const [picker, setPicker] = useState(false);
       const [drafts, setDrafts] = useState([]);
-      const [dragging, setDragging] = useState(false);
-      const svgRef = useRef(null);
-      const fileRef = useRef(null);
+      const [dragging, setDragging] = useState(false);      const svgRef = useRef(null);
 
       // The default provider decides whether a markup layer can be offered, and
       // it can change through the composer pill while this panel stays mounted.
@@ -954,7 +960,7 @@ window.__ModuleLoader__.load({
         setShapes(Array.isArray(stored && stored.shapes) ? stored.shapes : []);
         setComments(Array.isArray(stored && stored.comments) ? stored.comments : []);
         setRedo([]);
-        setManifest('');
+        setSavedId('');
         setPendingId(null);
         setNotice(stored ? t('annRestored') : '');
       }, [source, t]);
@@ -990,11 +996,6 @@ window.__ModuleLoader__.load({
         setPicker(true);
       };
 
-      const openFile = async file => {
-        if (!file) return;
-        await openSource({ url: URL.createObjectURL(file), name: file.name || 'image', draftIndex: null });
-      };
-
       const pointOf = event => {
         const svg = svgRef.current;
         if (!svg || !source) return null;
@@ -1012,7 +1013,14 @@ window.__ModuleLoader__.load({
         const n = comments.length + 1;
         const commentId = `c-${id}`;
         setShapes(list => [...list, { id, type: 'marker', color, width, x: point.x, y: point.y, n }]);
-        setComments(list => [...list, { id: commentId, text: '' }]);
+        // Normalized position travels with the comment so the message can say
+        // where each note applies, the way the user would describe it.
+        setComments(list => [...list, {
+          id: commentId,
+          text: '',
+          x: Number((point.x / source.width).toFixed(4)),
+          y: Number((point.y / source.height).toFixed(4)),
+        }]);
         setRedo([]);
         setPendingId(commentId);
         setError('');
@@ -1084,52 +1092,83 @@ window.__ModuleLoader__.load({
         if (last.type === 'marker') setComments([...comments, { id: `c-${last.id}`, text: '' }]);
       };
 
+      // Codex-style comment block: the pin's normalized position plus its text,
+      // in the same shape the user would otherwise type by hand.
+      const commentText = () => {
+        const kept = comments.filter(entry => entry.text.trim());
+        if (!kept.length) return '';
+        const lines = kept.map((entry, index) => {
+          const at = Number.isFinite(entry.x) && Number.isFinite(entry.y)
+            ? `(x: ${(entry.x * 100).toFixed(1)}%, y: ${(entry.y * 100).toFixed(1)}%) `
+            : '';
+          return `${index + 1}. ${at}${entry.text.trim()}`;
+        });
+        return `图像 ${(source.draftIndex ?? 0) + 1}：\n${lines.join('\n')}\n`;
+      };
+
       const exportAnnotation = async () => {
         if (!source || busy) return;
-        const markup = mode === 'markup';
+        if (source.draftIndex === null) {
+          setError(t('annNeedsComposerImage'));
+          return;
+        }
+        // The attachment is the image the request will carry, so the annotated
+        // one has to be first; otherwise the layer would land on a different
+        // picture. Saved as flatten instead, or move it up.
+        if (mode === 'markup' && source.draftIndex !== 0) {
+          setError(t('annMustBeFirst', { n: String(source.draftIndex + 1) }));
+          return;
+        }
+        // Removing or replacing the attachment invalidates the layer: the next
+        // request would not carry the picture these marks belong to.
+        if (!composerImages().some(item => item.url === source.url)) {
+          setError(t('annSourceGone'));
+          setSource(null);
+          return;
+        }
         setBusy(true);
         setError('');
         setNotice('');
         try {
-          // The panel owns the image from here on: both modes write the target
-          // canvas, so the request never depends on which draft slot the source
-          // happened to occupy. A markup save adds the transparent layer on top
-          // of the very same pixels, which is what the edits endpoint matches on.
-          const base = document.createElement('canvas');
-          base.width = source.width;
-          base.height = source.height;
-          const baseCtx = base.getContext('2d');
-          const image = await loadImageElement(source.url);
-          baseCtx.drawImage(image, 0, 0, source.width, source.height);
-          if (!markup) shapes.forEach(shape => drawShape(baseCtx, shape));
-          const imageData = await blobToDataUrl(await pngBlobOf(base));
-
-          let layerData;
-          if (markup) {
-            const layer = document.createElement('canvas');
-            layer.width = source.width;
-            layer.height = source.height;
-            const layerCtx = layer.getContext('2d');
-            shapes.forEach(shape => drawShape(layerCtx, shape));
-            layerData = await blobToDataUrl(await pngBlobOf(layer));
-          }
-
+          // Only the marks are written. The image stays the attachment the user
+          // already has, so there is no second copy to drift from it.
+          const layer = document.createElement('canvas');
+          layer.width = source.width;
+          layer.height = source.height;
+          const layerCtx = layer.getContext('2d');
+          shapes.forEach(shape => drawShape(layerCtx, shape));
+          const layerData = await blobToDataUrl(await pngBlobOf(layer));
           const kept = comments.filter(entry => entry.text.trim());
-          const payload = markup
-            ? { mode: 'markup', image: imageData, markup: layerData, comments: kept, sourceName: source.name }
-            : { mode: 'flatten', image: imageData, comments: kept, sourceName: source.name };
+          const payload = {
+            mode,
+            layer: layerData,
+            width: source.width,
+            height: source.height,
+            comments: kept,
+            sourceName: source.name,
+          };
           const saved = await request(ANN_ROUTE, { method: 'POST', body: JSON.stringify(payload) });
-          setManifest(saved.manifest || '');
+          // Comments travel as ordinary prose, not a path; `edit_image` finds
+          // the layer on its own.
+          const text = commentText();
           let inserted = false;
-          if (inputActions && saved.manifest) {
-            try {
-              inserted = inputActions.insertText(` @${saved.manifest} `, inputActions.captureInsertion());
-            } catch { inserted = false; }
+          if (text) {
+            if (!inputActions) {
+              try { await navigator.clipboard.writeText(text); } catch { /* no clipboard */ }
+              setNotice(t('annExportedCopy'));
+            } else {
+              try {
+                inserted = inputActions.insertText(text, inputActions.captureInsertion());
+              } catch { inserted = false; }
+              if (!inserted) {
+                try { await navigator.clipboard.writeText(text); } catch { /* no clipboard */ }
+              }
+              setNotice(inserted ? t('annExported') : t('annExportedCopy'));
+            }
+          } else {
+            setNotice(t('annExportedSilent'));
           }
-          if (!inserted && saved.manifest) {
-            try { await navigator.clipboard.writeText(`@${saved.manifest}`); } catch { /* no clipboard */ }
-          }
-          setNotice(inserted ? t('annExported') : t('annExportedCopy'));
+          setSavedId(saved.id || '');
         } catch (failure) {
           setError(`${t('annFailed')}: ${failure && failure.message ? failure.message : ''}`);
         } finally {
@@ -1221,10 +1260,7 @@ window.__ModuleLoader__.load({
               }, h('img', { src: item.url, alt: item.name }))))
               : null,
             h('div', { className: 'fmg-ann-bar' },
-              h('button', { type: 'button', className: 'fmg-ann-ghost', onClick: showDrafts }, t('annFromComposer')),
-              h('button', {
-                type: 'button', className: 'fmg-ann-ghost', onClick: () => fileRef.current && fileRef.current.click(),
-              }, t('annPickFile')))));
+              h('button', { type: 'button', className: 'fmg-ann-ghost', onClick: showDrafts }, t('annFromComposer')))));
 
       const textField = tool === 'text'
         ? h('input', {
@@ -1256,7 +1292,7 @@ window.__ModuleLoader__.load({
           onClick: () => { void exportAnnotation(); },
         }, busy ? t('annExporting') : t('annExport')),
         picker ? h('span', { className: 'fmg-ann-note' }, t('annPickFromList')) : null,
-        !picker && manifest ? h('span', { className: 'fmg-ann-path' }, manifest) : null,
+        !picker && savedId ? h('span', { className: 'fmg-ann-note' }, `#${savedId}`) : null,
         !picker && error ? h('span', { className: 'fmg-ann-err', role: 'alert' }, error) : null,
         !picker && !error && notice ? h('span', { className: 'fmg-ann-note', role: 'status' }, notice) : null);
 
@@ -1270,13 +1306,13 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', className: 'fmg-ann-go', onClick: () => setPicker(false) }, t('annDone')))
         : null;
 
-      // Dropping a file from Explorer or dragging a composer thumbnail both land
-      // here. The composer installs a document-level drop handler that would
-      // otherwise add the same file to the draft as well, so both events stop
-      // propagating: the panel is a separate surface, and it says so.
+      // Dragging a composer thumbnail in binds the panel to that attachment; the
+      // panel never takes a local file, because the image being edited has to be
+      // the one the request will carry. The drop stops propagating so the
+      // composer's own document-level handler does not also take the image.
       const acceptsDrop = event => {
         const types = event.dataTransfer ? Array.from(event.dataTransfer.types || []) : [];
-        return types.includes('Files') || types.includes('text/uri-list') || types.includes('text/plain');
+        return types.includes('text/uri-list') || types.includes('text/plain');
       };
       const onDragOver = event => {
         if (!acceptsDrop(event)) return;
@@ -1290,12 +1326,12 @@ window.__ModuleLoader__.load({
         event.preventDefault();
         event.stopPropagation();
         setDragging(false);
-        const files = event.dataTransfer && event.dataTransfer.files;
-        if (files && files.length) { await openFile(files[0]); return; }
         const uri = (event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain') || '')
           .split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith('#'));
         if (!uri) { setError(t('annDropUnsupported')); return; }
-        await openSource({ url: uri, name: 'dropped', draftIndex: null });
+        const known = composerImages().find(item => item.url === uri);
+        if (!known) { setError(t('annNeedsComposerImage')); return; }
+        await openSource({ ...known, draftIndex: known.index });
       };
 
       return h('section', {
@@ -1305,10 +1341,6 @@ window.__ModuleLoader__.load({
         onDragLeave: () => setDragging(false),
         onDrop: event => { void onDrop(event); },
       },
-        h('input', {
-          ref: fileRef, type: 'file', accept: 'image/png,image/jpeg,image/webp', style: { display: 'none' },
-          onChange: event => { void openFile(event.target.files && event.target.files[0]); },
-        }),
         source ? tools : null,
         source ? commentHint : null,
         stage,

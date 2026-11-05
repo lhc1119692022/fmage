@@ -137,5 +137,5 @@ test('the sidebar tab body only appears when the right sidebar services resolve'
   assert.match(loaded, /合成到原图/);
   assert.match(loaded, /保存并插入/);
   assert.match(loaded, /viewBox="0 0 640 480"/);
-  assert.doesNotMatch(loaded, /从输入框选图/, 'the empty-state buttons give way to the toolbar');
+  assert.doesNotMatch(loaded, /fmg-ann-ghost/, 'the empty-state buttons give way to the toolbar');
 });

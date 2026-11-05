@@ -1274,6 +1274,37 @@ def markup_argument(args: argparse.Namespace) -> Path | None:
     return path
 
 
+def flatten_markup_argument(args: argparse.Namespace) -> Path | None:
+    """The `--flatten-markup` layer, painted onto the target before submission.
+
+    Models without a markup channel still get the annotations; they simply
+    arrive as part of the picture instead of beside it.
+    """
+    value = getattr(args, "flatten_markup", None)
+    if value is None:
+        return None
+    if not str(value).strip():
+        raise ValueError("--flatten-markup requires a file path.")
+    return Path(value)
+
+
+def flatten_markup_onto_image(image_path: Path, layer_path: Path, output_dir: Path) -> Path:
+    """Composite one annotation layer onto one image and return the new file."""
+    from PIL import Image
+
+    with Image.open(image_path) as base, Image.open(layer_path) as layer:
+        canvas = base.convert("RGBA")
+        if layer.size != canvas.size:
+            raise ValueError(
+                f"--flatten-markup layer is {layer.size[0]}x{layer.size[1]} but the edited image is "
+                f"{canvas.size[0]}x{canvas.size[1]}; both must have identical width and height."
+            )
+        canvas.alpha_composite(layer.convert("RGBA"))
+        output = output_dir / f"{image_path.stem}-annotated.png"
+        canvas.save(output, format="PNG")
+    return output
+
+
 def markup_image_issues(path: Path) -> list[str]:
     """Structural problems that would make the provider reject the layer."""
     from PIL import Image
@@ -1455,6 +1486,9 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     if primary_index < 0 or primary_index >= len(image_paths):
         raise ValueError("primary_image_index is outside the supplied image list.")
     markup_path = markup_argument(args)
+    flatten_layer = flatten_markup_argument(args)
+    if markup_path is not None and flatten_layer is not None:
+        raise ValueError("--markup and --flatten-markup are mutually exclusive.")
     validate_markup(args, image_paths, primary_index)
     size, size_notes = resolve_size(args, image_paths, primary_index)
     payload = common_payload(args, prompt, size)
@@ -1469,12 +1503,20 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
             "images": [str(path.resolve()) for path in image_paths],
             "image_field": image_field,
             "markup": str(markup_path.resolve()) if markup_path else None,
+            "flatten_markup": str(flatten_layer.resolve()) if flatten_layer else None,
             "notes": size_notes,
         }
 
     run_dir = root / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
     timing["output_dir_created_at"] = iso_now()
+    if flatten_layer is not None:
+        # Painted first, so the reference fit below sees the annotated pixels and
+        # the request still carries exactly one image.
+        image_paths[primary_index] = flatten_markup_onto_image(
+            image_paths[primary_index], flatten_layer, run_dir
+        )
+        size_notes.append("markup_flattened_into_target")
     if not args.size and not args.aspect:
         if markup_path:
             # The layer and the target must share one canvas, so the same fit
@@ -1605,6 +1647,10 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument(
         "--markup",
         help="Transparent PNG annotation layer aligned with the first input image (GPT Image 2.5/2.6 edits).",
+    )
+    edit.add_argument(
+        "--flatten-markup",
+        help="Transparent PNG annotation layer to paint onto the edited image before submission.",
     )
     edit.add_argument(
         "--image-field",

@@ -42,6 +42,7 @@ function crc32(buffer) {
 }
 
 const dataUrl = () => `data:image/png;base64,${pngBytes().toString('base64')}`;
+const base = () => ({ mode: 'markup', layer: dataUrl(), width: 640, height: 480 });
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'fmage-annotation-'));
@@ -58,39 +59,31 @@ function routesFor(api) {
   return routes;
 }
 
-test('saving a markup annotation writes the image, the layer and a manifest', async t => {
+test('a save writes only the layer plus its metadata', async t => {
   const { api, root } = await fixture(t);
   const saved = await api.save({
-    mode: 'markup',
-    image: dataUrl(),
-    markup: dataUrl(),
-    comments: [{ id: 1, text: 'make this vase cobalt', marker: { x: 0.4, y: 0.5 } }],
-    sourceName: 'kitchen.png',
+    ...base(),
+    comments: [{ id: 1, text: 'make this ear fold', x: 0.221, y: 0.26 }],
+    sourceName: 'cat.png',
   });
   assert.match(saved.id, /^[a-z0-9]{16}$/);
+  assert.equal(saved.consumedAt, null);
   assert.equal(saved.mode, 'markup');
-  assert.ok(saved.markup.endsWith('markup.png'));
-  assert.ok(saved.image.endsWith('image.png'));
-  assert.deepEqual(await readdir(join(root, 'annotations', saved.id)), ['annotation.json', 'image.png', 'markup.png']);
-  const manifest = JSON.parse(await readFile(join(root, 'annotations', saved.id, 'annotation.json'), 'utf8'));
-  assert.equal(manifest.comments[0].text, 'make this vase cobalt');
-  assert.equal(manifest.comments[0].marker.x, 0.4);
+  assert.ok(saved.layer.endsWith('layer.png'));
+  assert.deepEqual(await readdir(join(root, 'cache', 'annotations', saved.id)), ['layer.png', 'meta.json']);
+  const meta = JSON.parse(await readFile(join(root, 'cache', 'annotations', saved.id, 'meta.json'), 'utf8'));
+  assert.equal(meta.comments[0].text, 'make this ear fold');
+  assert.equal(meta.comments[0].x, 0.221);
+  assert.equal(meta.width, 640);
 });
 
-test('a flattened annotation stores one image and no layer', async t => {
+test('reading returns the stored metadata by id', async t => {
   const { api } = await fixture(t);
-  const saved = await api.save({ mode: 'flatten', image: dataUrl() });
-  assert.equal(saved.markup, null);
-  assert.ok(saved.image.endsWith('image.png'));
-  assert.equal(saved.mode, 'flatten');
-});
-
-test('reading returns the stored manifest by id', async t => {
-  const { api } = await fixture(t);
-  const saved = await api.save({ mode: 'flatten', image: dataUrl() });
+  const saved = await api.save(base());
   const read = await api.read({ id: saved.id });
   assert.equal(read.id, saved.id);
-  assert.equal(read.image, saved.image);
+  assert.equal(read.mode, 'markup');
+  assert.equal(read.layer, saved.layer);
 });
 
 test('unknown or malformed ids are refused', async t => {
@@ -100,44 +93,22 @@ test('unknown or malformed ids are refused', async t => {
   await assert.rejects(api.read({ id: 'a'.repeat(16) }), error => error.status === 404);
 });
 
-test('markup mode without a layer, or with a non-PNG layer, is refused', async t => {
+test('a layer that is not a transparent PNG is refused', async t => {
   const { api } = await fixture(t);
-  await assert.rejects(
-    api.save({ mode: 'markup', image: dataUrl() }),
-    /needs the transparent layer/,
-  );
-  await assert.rejects(
-    api.save({ mode: 'markup', image: dataUrl(), markup: 'data:image/jpeg;base64,/9j/4AAQ' }),
-    /must be a PNG/,
-  );
+  await assert.rejects(api.save({ ...base(), layer: 'data:image/jpeg;base64,/9j/4AAQ' }), /must be a PNG/);
+  await assert.rejects(api.save({ ...base(), layer: 'data:image/png;base64,AAAA' }), /must be a PNG/);
+  await assert.rejects(api.save({ mode: 'markup', width: 640, height: 480 }), /layer must be/);
 });
 
-test('a save without the target image is refused', async t => {
+test('an unknown mode or missing canvas is refused', async t => {
   const { api } = await fixture(t);
-  await assert.rejects(api.save({ mode: 'markup', markup: dataUrl() }), /needs the target image/);
-  await assert.rejects(api.save({ mode: 'flatten' }), /needs the target image/);
-});
-
-test('a non-PNG image and an unknown mode are refused', async t => {
-  const { api } = await fixture(t);
-  await assert.rejects(api.save({ mode: 'flatten', image: 'data:image/png;base64,AAAA' }), /must be a PNG/);
-  await assert.rejects(api.save({ mode: 'sketch', image: dataUrl() }), /mode must be/);
-});
-
-test('a flattened annotation must not carry a separate layer', async t => {
-  const { api } = await fixture(t);
-  await assert.rejects(
-    api.save({ mode: 'flatten', image: dataUrl(), markup: dataUrl() }),
-    /must not carry a separate layer/,
-  );
+  await assert.rejects(api.save({ ...base(), mode: 'sketch' }), /mode must be/);
+  await assert.rejects(api.save({ mode: 'markup', layer: dataUrl() }), /width and height/);
 });
 
 test('empty comment text is refused before anything is written', async t => {
   const { api } = await fixture(t);
-  await assert.rejects(
-    api.save({ mode: 'flatten', image: dataUrl(), comments: [{ text: '   ' }] }),
-    /text is empty/,
-  );
+  await assert.rejects(api.save({ ...base(), comments: [{ text: '   ' }] }), /text is empty/);
 });
 
 test('the route answers JSON, maps errors to status codes and keeps no-store', async t => {
@@ -146,10 +117,7 @@ test('the route answers JSON, maps errors to status codes and keeps no-store', a
   const route = routes.get(ANNOTATION_ROUTE);
   assert.ok(route);
   const created = await route.fetch(
-    new Request('http://h' + ANNOTATION_ROUTE, {
-      method: 'POST',
-      body: JSON.stringify({ mode: 'flatten', image: dataUrl() }),
-    }),
+    new Request('http://h' + ANNOTATION_ROUTE, { method: 'POST', body: JSON.stringify(base()) }),
   );
   assert.equal(created.status, 200);
   assert.equal(created.headers.get('cache-control'), 'no-store');
@@ -162,41 +130,39 @@ test('the route answers JSON, maps errors to status codes and keeps no-store', a
   assert.equal(missing.status, 404);
   const badJson = await route.fetch(new Request('http://h' + ANNOTATION_ROUTE, { method: 'POST', body: 'nope' }));
   assert.equal(badJson.status, 400);
-  assert.deepEqual(await readdir(root), ['annotations']);
+  assert.deepEqual(await readdir(root), ['cache']);
 });
 
 test('two saves never share a directory', async t => {
   const { api } = await fixture(t);
-  const first = await api.save({ mode: 'flatten', image: dataUrl() });
-  const second = await api.save({ mode: 'flatten', image: dataUrl() });
+  const first = await api.save(base());
+  const second = await api.save(base());
   assert.notEqual(first.id, second.id);
   assert.notEqual(first.directory, second.directory);
 });
 
-test('a second revision keeps the earlier files intact', async t => {
+test('a second save keeps the earlier layer intact', async t => {
   const { api } = await fixture(t);
-  const first = await api.save({ mode: 'markup', image: dataUrl(), markup: dataUrl() });
-  const second = await api.save({ mode: 'markup', image: dataUrl(), markup: dataUrl() });
-  assert.notEqual(first.id, second.id);
-  const original = await readFile(join(first.directory, 'markup.png'));
-  assert.deepEqual(original, pngBytes());
+  const first = await api.save(base());
+  await api.save(base());
+  assert.deepEqual(await readFile(join(first.directory, 'layer.png')), pngBytes());
 });
 
-test('a workspace older than the retention window is swept; fresh ones and strangers are not', async t => {
+test('an entry older than the retention window is swept; fresh ones and strangers are not', async t => {
   const { api, root } = await fixture(t);
-  const fresh = await api.save({ mode: 'flatten', image: dataUrl() });
-  const stale = await api.save({ mode: 'flatten', image: dataUrl() });
-  const stranger = join(root, 'annotations', 'c'.repeat(16));
+  const fresh = await api.save(base());
+  const stale = await api.save(base());
+  const stranger = join(root, 'cache', 'annotations', 'c'.repeat(16));
   await mkdir(stranger, { recursive: true });
   await writeFile(join(stranger, 'notes.txt'), 'keep me');
 
-  const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
-  await utimes(join(stale.directory, 'annotation.json'), old, old);
+  const old = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  await utimes(join(stale.directory, 'meta.json'), old, old);
 
-  await api.save({ mode: 'flatten', image: dataUrl() });
+  await api.save(base());
 
-  const names = await readdir(join(root, 'annotations'));
-  assert.ok(names.includes(fresh.id), 'the older-but-fresh workspace survives');
-  assert.ok(!names.includes(stale.id), 'the expired workspace is removed');
-  assert.ok(names.includes('c'.repeat(16)), 'a directory without our manifest is untouched');
+  const names = await readdir(join(root, 'cache', 'annotations'));
+  assert.ok(names.includes(fresh.id), 'the older-but-fresh entry survives');
+  assert.ok(!names.includes(stale.id), 'the expired entry is removed');
+  assert.ok(names.includes('c'.repeat(16)), 'a directory without our meta file is untouched');
 });
