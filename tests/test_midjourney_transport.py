@@ -385,6 +385,7 @@ class MidjourneyMcpTests(unittest.TestCase):
         self.assertEqual(payload["active_providers"], before["active_providers"])
         self.assertEqual(payload["retry_on_failure"], False)
         self.assertEqual(payload["retry_count"], 2)
+        self.assertIs(payload["complexity"], False)
 
     def test_partial_batch_exposes_count_mismatch_and_separate_grids(self):
         with local_relay(count=3, grid=True) as (url, calls):

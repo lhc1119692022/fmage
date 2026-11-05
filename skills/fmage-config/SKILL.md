@@ -69,6 +69,10 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
   are retried; auth and validation errors are not. Failures that already own a remote task or have
   unknown submission state are never retried. Preserve both fields during unrelated edits.
   The Desktop settings page offers the same two fields on its 重试 tab.
+- Top-level complexity is a global switch: false (default) or "low", "medium", "high". Fmage sends it
+  only to openai-images providers with a gpt-image-2.6 series model, on generation and edits; it is
+  never sent to gpt-image-2.5 or earlier and never comes from a tool argument. false omits the field,
+  so the API default (high) applies. The Desktop settings page offers it on its 生成 tab.
 - Omit timeout to use runtime defaults. Explicit positive values are preserved and request-level
   values override provider values. Migration removes the former forced 600 value; it never adds
   a timeout. Explicit budgets cover download, submission, polling and delivery together.

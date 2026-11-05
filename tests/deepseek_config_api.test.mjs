@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   createConfigApi, maskSecret, ConfigError, registerConfigRoutes,
   CONFIG_ROUTE, REVEAL_ROUTE, MODELS_ROUTE,
-  DEFAULT_RETRY_COUNT, MAX_RETRY_COUNT,
+  DEFAULT_RETRY_COUNT, MAX_RETRY_COUNT, COMPLEXITY_LEVELS,
 } from '../adapters/deepseek/config-api.mjs';
 import { DEFAULT_RETRY_COUNT as POLICY_DEFAULT_RETRY_COUNT, MAX_RETRY_COUNT as POLICY_MAX_RETRY_COUNT } from '../mcp/retry-policy.mjs';
 
@@ -109,6 +109,27 @@ test('retry defaults apply to missing and invalid stored values', async t => {
   const invalidView = await invalid.api.read();
   assert.equal(invalidView.retry_on_failure, false);
   assert.equal(invalidView.retry_count, DEFAULT_RETRY_COUNT);
+});
+
+test('complexity reads, validates and round-trips as a global switch', async t => {
+  const { api, path } = await fixture(t, base());
+  const view = await api.read();
+  assert.equal(view.complexity, false, 'missing complexity reads as off');
+  for (const level of [...COMPLEXITY_LEVELS, false]) {
+    const { revision } = await api.read();
+    await api.update({ revision, changes: { complexity: level } });
+    assert.equal(JSON.parse(await readFile(path, 'utf8')).complexity, level);
+    assert.equal((await api.read()).complexity, level);
+  }
+  const { revision } = await api.read();
+  for (const bad of ['xhigh', 'High', true, 1, null]) {
+    await assert.rejects(
+      api.update({ revision, changes: { complexity: bad } }),
+      error => error instanceof ConfigError && /complexity must be false/.test(error.message),
+    );
+  }
+  const invalid = await fixture(t, { providers: {}, complexity: 'max' });
+  assert.equal((await invalid.api.read()).complexity, false);
 });
 
 test('retry bounds match the generation retry policy', () => {

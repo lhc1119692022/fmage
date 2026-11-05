@@ -42,6 +42,7 @@
   "show_provider_pill": true,
   "retry_on_failure": false,
   "retry_count": 2,
+  "complexity": false,
   "output_dir": "",
   "cache_dir": "",
   "providers": {

@@ -36,15 +36,19 @@ try {
   const plugin = await import(pathToFileURL(join(target, 'index.mjs')).href);
   await plugin.apply(ctx);
   const catalog = await provider.list();
-  assert.equal(catalog.length, 5);
-  assert.equal(catalog.find(s => s.name === 'fmage-direct').invocation.modelInvocable, false);
+  assert.equal(catalog.length, 7);
+  for (const name of ['fmage-direct', 'fmage-svg', 'fmage-gif']) {
+    assert.equal(catalog.find(s => s.name === name).invocation.modelInvocable, false);
+  }
   for (const candidate of catalog) {
     const skill = await provider.get(candidate, { signal: lifecycle.signal });
     assert(skill.content.includes('DeepSeek Harness 桌面版适配'));
     assert(!skill.content.includes('$fmage'));
   }
-  assert.equal(tools.size, 8);
+  assert.equal(tools.size, 10);
   assert(tools.has('mcp__Fmage__generate_image'));
+  assert(tools.has('mcp__Fmage__generate_svg'));
+  assert(tools.has('mcp__Fmage__generate_gif'));
   assert(!tools.has('mcp__Fmage__probe_image_generation'));
   assert(!tools.has('mcp__Fmage__trace_image_job_plan'));
   assert(tools.has('mcp__Fmage__regress_image'));

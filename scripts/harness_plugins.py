@@ -17,14 +17,18 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILLS = ("fmage", "fmage-direct", "fmage-config", "fmage-workflow", "fmage-image-regression")
+SKILLS = ("fmage", "fmage-direct", "fmage-config", "fmage-workflow", "fmage-image-regression", "fmage-svg", "fmage-gif")
 DESCRIPTIONS = {
     "fmage": "Fmage 图片生成与编辑：理解并扩写本次提示词，支持参考图、批量图片及指定模型。仅用于用户要求交付图片时；直传请求使用 fmage-direct。",
     "fmage-direct": "Fmage 直传生图：仅在用户明确选择此入口时使用。保留提示词原文，不扩写、不翻译、不润色，只提取明确的交付参数。",
     "fmage-config": "Fmage 配置：显示或打开 providers.json，按用户要求配置平台、模型或工作流；不显示密钥，也不发起生图。",
     "fmage-workflow": "Fmage 工作流：运行已配置的 RunningHub 工作流、查询进度和取回图片。入口附带图片时按默认工作流执行，不额外要求提示词。",
     "fmage-image-regression": "Fmage 图片退步：对本地图片执行固定的缩小、模糊与单色噪点处理；通过 regress_image 一次完成，不调用创意生图模型。",
+    "fmage-svg": "Fmage SVG：仅在用户明确选择此入口时使用。通过 generate_svg 用 gpt-image-2.6 生成单个静态 SVG 矢量图。",
+    "fmage-gif": "Fmage GIF：仅在用户明确选择此入口时使用。通过 generate_gif 用 gpt-image-2.6 生成单个 GIF 动图。",
 }
+# Entries the model must never select on its own; only the user invokes them.
+EXPLICIT_ONLY_SKILLS = frozenset({"fmage-direct", "fmage-svg", "fmage-gif"})
 RUNTIME_SCRIPTS = (
     "banana_models.py", "gemini_generate_content_transport.py",
     "midjourney_transport.py", "transport_common.py",
@@ -34,9 +38,9 @@ CONFIG_FILES = ("providers.example.json", "workflows.example.json", "midjourney-
 # Harness checks dsh peers with includePrerelease=True. Keep the oldest
 # supported runtime as the floor, allowing future releases and prereleases.
 DEEPSEEK_PEER_VERSIONS = ">=0.2.0-rc.2"
-# The server lists eight tools: trace_image_job_plan and probe_image_generation
+# The server lists ten of its twelve tools: trace_image_job_plan and probe_image_generation
 # stay callable by name but are no longer part of the advertised surface.
-MCP_TOOL_COUNT = 8
+MCP_TOOL_COUNT = 10
 
 
 def local_root() -> Path:
@@ -68,6 +72,7 @@ def adapt(text: str) -> str:
     text = text.replace("mcp__Fmage.", "mcp__Fmage__")
     text = re.sub(r"\$fmage([a-z-]*)", r"/fmage\1", text)
     text = text.replace("`/Fmage 直传生图`", "`/fmage-direct`")
+    text = text.replace("`/Fmage SVG`", "`/fmage-svg`").replace("`/Fmage GIF`", "`/fmage-gif`")
     text = text.replace("`view_image`", "the host's image inspection tool")
     text = text.replace("config/workflows.example.json", "../../config/workflows.example.json")
     text = text.replace("config/providers.example.json", "../../config/providers.example.json")
@@ -83,7 +88,8 @@ def skill_text(name: str) -> str:
     prelude = (
         "# DeepSeek Harness 桌面版适配\n\n"
         "工具名使用 mcp__Fmage__ 前缀，例如 mcp__Fmage__generate_image、mcp__Fmage__edit_image。\n"
-        "只使用当前请求选择的入口；/fmage-direct 或用户明确说“Fmage 直传生图”才选择直传。"
+        "只使用当前请求选择的入口；/fmage-direct 或用户明确说“Fmage 直传生图”才选择直传；"
+        "/fmage-svg、/fmage-gif 或用户明确说“Fmage SVG”“Fmage GIF”才使用 generate_svg、generate_gif。"
         "普通生图使用 fmage。命令的展示名称以当前宿主的技能菜单为准。\n"
         "附件使用宿主给出的可读取本地路径；若只有附件标识，先用宿主的附件能力解析路径，"
         "不得把标识当作文件路径。输出使用工具返回的图片和文件链接；不能预览时交付实际保存路径。\n"
@@ -98,7 +104,7 @@ def skill_text(name: str) -> str:
         )
     return (
         f"---\nname: {name}\ndescription: {json.dumps(DESCRIPTIONS[name], ensure_ascii=False)}\n"
-        f"user-invocable: true\ndisable-model-invocation: {'true' if name == 'fmage-direct' else 'false'}\n"
+        f"user-invocable: true\ndisable-model-invocation: {'true' if name in EXPLICIT_ONLY_SKILLS else 'false'}\n"
         f"---\n\n{prelude}{body}"
     )
 
@@ -113,13 +119,13 @@ def payload() -> dict[str, bytes]:
     catalog = []
     for name in SKILLS:
         files[f"skills/{name}/SKILL.md"] = skill_text(name).encode("utf-8")
-        catalog.append({"name": name, "description": DESCRIPTIONS[name], "modelInvocable": name != "fmage-direct"})
+        catalog.append({"name": name, "description": DESCRIPTIONS[name], "modelInvocable": name not in EXPLICIT_ONLY_SKILLS})
         for path in sorted((ROOT / "skills" / name / "references").glob("*.md")):
             files[f"skills/{name}/references/{path.name}"] = adapt(path.read_text(encoding="utf-8")).encode("utf-8")
     version = read_json(ROOT / ".codex-plugin/plugin.json")["version"]
     files["package.json"] = json_bytes({
         "name": "dsh-fmage", "version": version,
-        "description": "Fmage：图片生成、直传生图、图片退步、RunningHub 工作流与配置；DeepSeek Harness 桌面版专用。",
+        "description": "Fmage：图片生成、直传生图、SVG 与 GIF 生成、图片退步、RunningHub 工作流与配置；DeepSeek Harness 桌面版专用。",
         "type": "module", "main": "index.mjs",
         "exports": {".": "./index.mjs", "./client": "./client.js", "./package.json": "./package.json"},
         # dsh.client publishes the settings page into the Desktop/Web client module graph.
@@ -534,7 +540,7 @@ def verify_deepseek_loader(runtime: DeepSeekRuntime, profile: Path) -> None:
             capture_output=True, text=True, encoding="utf-8", timeout=45, check=False)
     if result.returncode or '"nativeProfileLoader":true' not in result.stdout:
         raise RuntimeError(f"DeepSeek native profile activation probe failed: {result.stderr or result.stdout}")
-    print(f"DeepSeek {runtime.kind} isolated native profile activation verified: 5 skills, {MCP_TOOL_COUNT} MCP tools (not the live desktop process)")
+    print(f"DeepSeek {runtime.kind} isolated native profile activation verified: {len(SKILLS)} skills, {MCP_TOOL_COUNT} MCP tools (not the live desktop process)")
     graph_temp = Path(temporary) / "client-graph"
     graph = subprocess.run([
         *runtime.probe, str(ROOT / "tests/deepseek_client_graph.mjs"),
@@ -557,9 +563,9 @@ def deepseek_runtime_status(installed: Path, files: dict[str, bytes]) -> str:
             return "NOT verified: activation heartbeat is stale"
         if loaded.get("sha256") != expected["sha256"] or loaded.get("version") != expected["version"]:
             return "RELOAD REQUIRED: desktop still has a previous payload loaded"
-        if loaded.get("skillCount") != 5 or loaded.get("toolCount") != MCP_TOOL_COUNT or not loaded.get("mcpReady"):
+        if loaded.get("skillCount") != len(SKILLS) or loaded.get("toolCount") != MCP_TOOL_COUNT or not loaded.get("mcpReady"):
             return "NOT ready: skill/MCP registration is incomplete"
-        return f"live activation verified: {loaded['version']}, pid={loaded['pid']}, 5 skills, {MCP_TOOL_COUNT} tools"
+        return f"live activation verified: {loaded['version']}, pid={loaded['pid']}, {len(SKILLS)} skills, {MCP_TOOL_COUNT} tools"
     except (OSError, ValueError, KeyError):
         return "NOT verified: invalid or legacy activation receipt"
 

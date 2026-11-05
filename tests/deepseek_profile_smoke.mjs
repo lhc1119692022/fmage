@@ -62,11 +62,15 @@ try {
     await host.plugin(boot.PluginPackages, { resolution });
   });
   const skills = await ctx.skills.list();
-  assert.equal(skills.length, 5);
-  assert.equal(skills.find(s => s.name === 'fmage-direct').invocation.modelInvocable, false);
+  assert.equal(skills.length, 7);
+  for (const name of ['fmage-direct', 'fmage-svg', 'fmage-gif']) {
+    assert.equal(skills.find(s => s.name === name).invocation.modelInvocable, false);
+  }
   const names = [...ctx.tools.view().visible.keys()].filter(n => n.startsWith('mcp__Fmage__'));
-  assert.equal(names.length, 8);
+  assert.equal(names.length, 10);
   assert(names.includes('mcp__Fmage__generate_image'));
+  assert(names.includes('mcp__Fmage__generate_svg'));
+  assert(names.includes('mcp__Fmage__generate_gif'));
   assert(!names.includes('mcp__Fmage__probe_image_generation'));
   assert(!names.includes('mcp__Fmage__trace_image_job_plan'));
   assert(names.includes('mcp__Fmage__regress_image'));

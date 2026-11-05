@@ -16,8 +16,8 @@ const root = fileURLToPath(new URL('./', import.meta.url));
 // server keeps its own default only for hosts that cannot say it.
 const dataHome = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'fmage');
 const configPath = join(dataHome, 'providers.json');
-// Ten server tools minus the two diagnostics the server no longer lists.
-const EXPECTED_TOOL_COUNT = 8;
+// Twelve server tools minus the two diagnostics the server no longer lists.
+const EXPECTED_TOOL_COUNT = 10;
 
 export async function apply(ctx) {
   ctx.skills.registerProvider(control => {
@@ -56,10 +56,11 @@ export async function apply(ctx) {
   const { version, sha256 } = JSON.parse(readFileSync(join(root, '.fmage-build.json'), 'utf8'));
   const receipt = join(root, '.fmage-runtime.json');
   const loadedAt = new Date().toISOString();
+  const skillCount = JSON.parse(readFileSync(join(root, 'catalog.json'), 'utf8')).length;
   const report = () => {
     const toolCount = [...ctx.tools.view().visible.keys()].filter(n => n.startsWith('mcp__Fmage__')).length;
     writeFileSync(receipt + '.tmp', JSON.stringify({ version, sha256, pid: process.pid, loadedAt,
-      heartbeatAt: new Date().toISOString(), skillCount: 5, toolCount, mcpReady: toolCount === EXPECTED_TOOL_COUNT }));
+      heartbeatAt: new Date().toISOString(), skillCount, toolCount, mcpReady: toolCount === EXPECTED_TOOL_COUNT }));
     renameSync(receipt + '.tmp', receipt);
   };
   report();
@@ -72,5 +73,5 @@ export async function apply(ctx) {
       catch (error) { if (error.code !== 'ENOENT') ctx.logger.warn(`Fmage runtime receipt cleanup: ${error.message}`); }
     };
   });
-  ctx.logger.info(`Fmage ${version}: five native skills and MCP tools loaded`);
+  ctx.logger.info(`Fmage ${version}: ${skillCount} native skills and MCP tools loaded`);
 }

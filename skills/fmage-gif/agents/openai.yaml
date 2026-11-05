@@ -1,0 +1,7 @@
+interface:
+  display_name: "Fmage GIF"
+  short_description: "仅显式调用，用 gpt-image-2.6 生成单个 GIF 动图"
+  default_prompt: "Use $fmage-gif to generate this as an animated GIF."
+
+policy:
+  allow_implicit_invocation: false

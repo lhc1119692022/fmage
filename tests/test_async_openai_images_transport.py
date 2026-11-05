@@ -86,17 +86,19 @@ class Image25RoutingTests(unittest.TestCase):
         args = image808_args("generate", Path(tempfile.gettempdir()), "--model", "gpt-image-2.5")
         transport.validate_async_arguments(args)
 
-    def test_image_2_5_accepts_xhigh_and_max(self) -> None:
-        for quality in ("xhigh", "max"):
-            args = image808_args(
-                "generate",
-                Path(tempfile.gettempdir()),
-                "--model",
-                "gpt-image-2.5",
-                "--quality",
-                quality,
-            )
-            transport.validate_async_arguments(args)
+    def test_image_2_5_and_2_6_accept_xhigh_and_max(self) -> None:
+        for model in ("gpt-image-2.5", "gpt-image-2.6-sunburst", "gpt-image-2.6-flare"):
+            for quality in ("xhigh", "max"):
+                with self.subTest(model=model, quality=quality):
+                    args = image808_args(
+                        "generate",
+                        Path(tempfile.gettempdir()),
+                        "--model",
+                        model,
+                        "--quality",
+                        quality,
+                    )
+                    transport.validate_async_arguments(args)
 
 
 def call_server(config: dict[str, object], tool_name: str, arguments: dict[str, object]) -> dict[str, object]:

@@ -315,6 +315,24 @@ class Image25QualityTests(unittest.TestCase):
                 self.assertEqual(transport.is_image_2_5_model(model), image_2_5)
                 self.assertEqual(transport.is_gpt_image_model(model), gpt_image)
 
+    def test_image_2_6_family_recognition_and_extended_quality_support(self) -> None:
+        cases = (
+            ("gpt-image-2.6-sunburst", True, True),
+            ("gpt-image-2.6-flare", True, True),
+            ("openai/GPT-IMAGE-2.6-FLARE", True, True),
+            ("渠道【GPT_IMAGE_2.6_sunburst】", True, True),
+            ("gpt-image-2.5-sunburst-2026-09-08", False, True),
+            ("gpt-image-2.60", False, False),
+            ("gpt-image-2.6ish", False, False),
+            ("gpt-image-2", False, False),
+            ("gpt-image-1.5", False, False),
+            (None, False, False),
+        )
+        for model, image_2_6, extended in cases:
+            with self.subTest(model=model):
+                self.assertEqual(transport.is_image_2_6_model(model), image_2_6)
+                self.assertEqual(transport.supports_extended_quality(model), extended)
+
     def test_namespaced_models_preserve_extended_quality_and_transparency(self) -> None:
         for command in ("generate", "edit"):
             for quality in ("xhigh", "max"):
@@ -345,6 +363,19 @@ class Image25QualityTests(unittest.TestCase):
             )
             transport.validate_common(args)
 
+    def test_image_2_6_quality_tiers_are_accepted_for_generate_and_edit(self) -> None:
+        for command in ("generate", "edit"):
+            for model in ("gpt-image-2.6-sunburst", "openai/gpt-image-2.6-flare"):
+                for quality in ("xhigh", "max"):
+                    with self.subTest(command=command, model=model, quality=quality):
+                        args = transport.build_parser().parse_args([
+                            command, "--prompt", "test", "--model", model, "--quality", quality,
+                        ])
+                        transport.validate_common(args)
+                        payload = transport.common_payload(args, "test", "2048x2048")
+                        self.assertEqual(payload["model"], model)
+                        self.assertEqual(payload["quality"], quality)
+
     def test_legacy_image_models_reject_new_quality_tiers(self) -> None:
         parser = transport.build_parser()
         for quality in ("xhigh", "max"):
@@ -363,13 +394,118 @@ class Image25QualityTests(unittest.TestCase):
                 transport.validate_common(args)
 
     def test_lookalike_models_reject_extended_quality(self) -> None:
-        for model in ("gpt-image-2.50", "openai/gpt-image-2.50", "gpt-image-20", "gpt-image-2.5ish"):
+        for model in (
+            "gpt-image-2.50", "openai/gpt-image-2.50", "gpt-image-20", "gpt-image-2.5ish",
+            "gpt-image-2.60", "gpt-image-2.6ish",
+        ):
             with self.subTest(model=model):
                 args = transport.build_parser().parse_args([
                     "generate", "--prompt", "test", "--model", model, "--quality", "max",
                 ])
                 with self.assertRaisesRegex(ValueError, "supported only for gpt-image-2.5"):
                     transport.validate_common(args)
+
+
+class Image26ComplexityAndFormatTests(unittest.TestCase):
+    def parse(self, *argv: str) -> argparse.Namespace:
+        return transport.build_parser().parse_args(list(argv))
+
+    def test_complexity_is_sent_only_for_image_2_6_generate_and_edit(self) -> None:
+        for command in ("generate", "edit"):
+            for level in ("low", "medium", "high"):
+                with self.subTest(command=command, level=level):
+                    args = self.parse(command, "--prompt", "t", "--model", "gpt-image-2.6-flare", "--complexity", level)
+                    transport.validate_common(args)
+                    self.assertEqual(transport.common_payload(args, "t", "auto")["complexity"], level)
+
+    def test_complexity_is_never_sent_without_the_flag(self) -> None:
+        args = self.parse("generate", "--prompt", "t", "--model", "gpt-image-2.6-sunburst")
+        transport.validate_common(args)
+        self.assertNotIn("complexity", transport.common_payload(args, "t", "auto"))
+
+    def test_complexity_is_rejected_for_earlier_models(self) -> None:
+        for model in ("gpt-image-2.5-sunburst", "gpt-image-2", "gpt-image-2.60"):
+            with self.subTest(model=model):
+                args = self.parse("generate", "--prompt", "t", "--model", model, "--complexity", "low")
+                with self.assertRaisesRegex(ValueError, "complexity is supported only for gpt-image-2.6"):
+                    transport.validate_common(args)
+
+    def test_svg_and_gif_require_image_2_6_generation(self) -> None:
+        for fmt in ("svg", "gif"):
+            with self.subTest(fmt=fmt):
+                args = self.parse("generate", "--prompt", "t", "--model", "gpt-image-2.5-flare", "--output-format", fmt)
+                with self.assertRaisesRegex(ValueError, "supported only for gpt-image-2.6"):
+                    transport.validate_common(args)
+                args = self.parse("edit", "--prompt", "t", "--model", "gpt-image-2.6-flare", "--output-format", fmt)
+                with self.assertRaisesRegex(ValueError, "not edits"):
+                    transport.validate_common(args)
+
+    def test_gif_frame_fields_and_auto_size(self) -> None:
+        args = self.parse(
+            "generate", "--prompt", "t", "--model", "gpt-image-2.6-flare", "--output-format", "gif",
+            "--frame-count", "24", "--frame-duration-ms", "80", "--size", "1024x1024",
+        )
+        transport.validate_common(args)
+        size, notes = transport.resolve_size(args, [])
+        self.assertEqual(size, "auto")
+        self.assertIn("gif_frame_size_auto", notes)
+        payload = transport.common_payload(args, "t", size)
+        self.assertEqual((payload["frame_count"], payload["frame_duration_ms"]), (24, 80))
+        self.assertEqual(payload["output_format"], "gif")
+
+    def test_gif_frame_ranges_and_format_binding(self) -> None:
+        cases = (
+            (["--output-format", "gif", "--frame-count", "1"], "frame-count must be between 2 and 64"),
+            (["--output-format", "gif", "--frame-count", "65"], "frame-count must be between 2 and 64"),
+            (["--output-format", "gif", "--frame-duration-ms", "10"], "frame-duration-ms must be between 20 and 2000"),
+            (["--frame-count", "24"], "only be used with --output-format gif"),
+        )
+        for extra, message in cases:
+            with self.subTest(extra=extra):
+                args = self.parse("generate", "--prompt", "t", "--model", "gpt-image-2.6-flare", *extra)
+                with self.assertRaisesRegex(ValueError, message):
+                    transport.validate_common(args)
+
+    def test_svg_size_is_not_checked(self) -> None:
+        args = self.parse("generate", "--prompt", "t", "--model", "gpt-image-2.6-flare", "--output-format", "svg")
+        self.assertEqual(transport.resolve_size(args, [])[0], "auto")
+
+    def test_special_formats_do_not_replace_latest_state(self) -> None:
+        self.assertFalse(transport.writes_latest_state({"output_format": "svg"}, [Path("a.svg")]))
+        self.assertFalse(transport.writes_latest_state({"output_format": "png"}, [Path("a.gif")]))
+        self.assertTrue(transport.writes_latest_state({"output_format": "png"}, [Path("a.png")]))
+
+
+class SpecialFormatSavingTests(unittest.TestCase):
+    SVG = b'<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8"/></svg>'
+
+    def test_sniffing_recognizes_svg_and_gif(self) -> None:
+        import transport_common as common
+
+        self.assertEqual(common.sniff_extension(self.SVG), "svg")
+        self.assertEqual(common.sniff_extension(b"\xef\xbb\xbf  <svg viewBox='0 0 1 1'/>"), "svg")
+        self.assertEqual(common.sniff_extension(b"GIF89a" + b"\0" * 16), "gif")
+        self.assertEqual(common.sniff_extension(b"GIF87a" + b"\0" * 16), "gif")
+        self.assertEqual(common.sniff_extension(b"<html><body/></html>"), "png")
+
+    def test_svg_and_gif_payloads_save_with_their_extension_and_skip_dimension_checks(self) -> None:
+        import transport_common as common
+
+        buffer = BytesIO()
+        frames = [Image.new("P", (4, 4), color) for color in (0, 1)]
+        frames[0].save(buffer, format="GIF", save_all=True, append_images=frames[1:], duration=80, loop=0)
+        response = {"data": [
+            {"b64_json": base64.b64encode(self.SVG).decode()},
+            {"b64_json": "data:image/gif;base64," + base64.b64encode(buffer.getvalue()).decode()},
+        ]}
+        with tempfile.TemporaryDirectory() as temp_dir, mock.patch.dict("os.environ", {"FMAGE_DIRECT_OUTPUT_DIR": ""}):
+            saved = common.save_response_images_from_data(response, Path(temp_dir), 30, "svg")
+            self.assertEqual([path.suffix for path in saved], [".svg", ".gif"])
+            self.assertEqual(saved[0].read_bytes(), self.SVG)
+            metadata = common.collect_image_metadata(saved)
+            self.assertEqual([item["format"] for item in metadata], ["svg", "gif"])
+            self.assertTrue(all("width" not in item for item in metadata))
+            self.assertEqual(common.output_size_warnings("1024x1024", metadata), [])
 
 
 class RequestHeaderTests(unittest.TestCase):

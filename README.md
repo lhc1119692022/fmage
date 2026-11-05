@@ -1,7 +1,7 @@
 # Fmage：DeepSeek Harness Desktop 图片插件
 
-Fmage 是面向 DeepSeek Harness Desktop 的图片生成与编辑插件，提供五个原生技能
-（生图、直传生图、配置、RunningHub 工作流、图片退步）和十个 `mcp__Fmage__*` 工具。
+Fmage 是面向 DeepSeek Harness Desktop 的图片生成与编辑插件，提供七个原生技能
+（生图、直传生图、SVG、GIF、配置、RunningHub 工作流、图片退步）和十二个 `mcp__Fmage__*` 工具。
 DeepSeek Desktop 是主要宿主，功能与验证都以它为基准；Codex 继续作为兼容宿主，
 构建与安装见 [宿主适配](adapters/README.md)。
 
@@ -43,8 +43,10 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 - API Key 默认以首尾字符加星号显示，点击眼睛图标才向本机 Host 读取并显示完整值；留空不改动即保留原密钥。
 - 工作流：RunningHub 连接只保留 API Key 可编辑，不显示名称，Base URL 固定为国际站
   `https://www.runninghub.ai`；工作流配置只有工作流 ID、输出节点、实例类型、输入映射和默认工作流。
-- 目录：`output_dir` 与 `cache_dir`，留空使用默认位置。
-- 重试：`retry_on_failure` 开关与 `retry_count`（额外尝试次数，0–10），规则见下一节。
+- 设置：一个标签内分三组。
+  - 目录：`output_dir` 与 `cache_dir`，留空使用默认位置。
+  - 重试：`retry_on_failure` 开关与 `retry_count`（额外尝试次数，0–10），规则见下一节。
+  - 生成：`complexity`（关闭/低/中/高），只对 gpt-image-2.6 生效，规则见「生成复杂度」一节。
 - 默认提供商：提供商卡右侧的星标设为默认；拖动只改变回退顺序。开关控制是否在对话输入栏显示生图胶囊。
 - 输入栏胶囊：显示当前默认提供商，点开即可切换。它只写 `default_provider`，与设置页共用同一份配置；
   `default_provider` 为空或不在 `active_providers` 中时，回退到第一个启用的提供商。
@@ -63,13 +65,29 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 ```
 
 `retry_on_failure` 是开关，默认 `false`；`retry_count` 是额外尝试次数（0–10），默认 `2`。
-这两项也能在设置页的「重试」标签里修改，保存后下一次生图请求即生效。
+这两项也能在设置页「设置」标签的「重试」分组里修改，保存后下一次生图请求即生效。
 每次重试都会启动一次**全新的上游请求**，不会轮询或复用已经失败的请求结果。重试只针对限流、
 并发不足、网关 5xx、超时和网络中断等临时失败；鉴权、参数校验等永久失败会立即返回。
 已经拿到远端任务 ID 的失败、以及结果未知的提交（`submission_uncertain`）不会重试，
 以免重复生成或重复计费。重试间隔按次数递增（约 1 秒、2 秒…），让出并发槽位。
 成功后的结果会带 `generation_attempts` 和重试警告；失败时报错会注明总尝试次数。
 `get_provider_status` 的 `generation_retry` 字段显示当前生效值。
+
+### 生成复杂度（gpt-image-2.6）
+
+`providers.json` 顶层的 `complexity` 是全局开关，取值 `false`（默认）、`"low"`、`"medium"`、`"high"`：
+
+```json
+{
+  "complexity": false
+}
+```
+
+- `false` 时请求里不带该字段，由 API 按默认值（high）规划。
+- 设为档位后，只有 `openai-images` 且模型属于 gpt-image-2.6 系列的提供商会在生成与编辑请求里带上它；
+  2.5 及更早版本、Gemini 和 Midjourney 一律不发送。
+- 它不是工具参数，对话里的要求不会改变它；在设置页「设置」标签的「生成」分组或直接编辑文件修改。
+- `get_provider_status` 的 `complexity` 字段显示 `setting`（配置值）和 `applied`（对所选提供商实际发送的值，不发送时为 `null`）。
 
 保存前校验字段；文件在页面打开后被其他程序修改时会拒绝保存，并给出「重新读取并覆盖」，
 不会被一次冲突卡死。每次保存先在配置目录
@@ -99,11 +117,12 @@ python scripts/refresh_local_runtime.py --check  # 只读校验安装、包内�
 
 ## Image Entry Points
 
-The plugin exposes five independent skills while sharing one MCP server and one provider/transport layer:
+The plugin exposes seven independent skills while sharing one MCP server and one provider/transport layer:
 
 - `Fmage 配置` (`fmage-config`) manages local provider configuration.
 - `Fmage 图像生成` (`fmage`) is the default image entry and keeps the original understanding-and-expansion behavior.
 - `Fmage 直传生图` (`fmage-direct`) is explicit-only. Invoke `/Fmage 直传生图` or `$fmage-direct` before the image request to preserve the prompt without expansion, translation, polishing, or paraphrase.
+- `Fmage SVG` (`fmage-svg`) and `Fmage GIF` (`fmage-gif`) are explicit-only entries for the `generate_svg` and `generate_gif` tools. See "SVG and GIF output" below.
 - `Fmage 图片退步` (`fmage-image-regression`) runs the fixed local regression pipeline.
 - `Fmage 工作流` (`fmage-workflow`) runs configured RunningHub workflows.
 
@@ -192,12 +211,31 @@ variants, including `openai/gpt-image-2.5-sunburst`, while preserving the config
 in the request. The GPT Image family defaults to `quality=high` across legacy, current,
 and future numeric versions; the default does not depend on a `gpt-image-2` prefix.
 An explicit supported quality selection is preserved. Extended `xhigh`/`max` quality is
-confirmed for the 2.5 series using `openai-images`; other versions remain usable with base
-tiers and map extended requests to `high` with a warning until support is confirmed.
-Version boundaries distinguish 2.5 from 2.50; this is family recognition, not typo
-correction or automatic provider/model switching.
+confirmed for the 2.5 and 2.6 series (Sunburst and Flare, including dated snapshots) using
+`openai-images`; other versions remain usable with base tiers and map extended requests to
+`high` with a warning until support is confirmed.
+Version boundaries distinguish 2.5 from 2.50 and 2.6 from 2.60; this is family recognition,
+not typo correction or automatic provider/model switching.
 
-The plugin card supports at most three `interface.defaultPrompt` entries. Those card actions are separate from the five skill entry points above, which are declared by each skill's `agents/openai.yaml`. To prevent a missing Fmage MCP catalog from silently falling back to native image generation, keep the generic image skill disabled and disable the host feature as well:
+### SVG and GIF output
+
+`generate_svg` and `generate_gif` are separate tools so the standard `generate_image`,
+`edit_image`, and batch tools never produce these formats; they reject `output_format` svg/gif
+outright. Both tools are generation-only, produce one result (n=1), and require the selected
+provider to use `openai-images` with a gpt-image-2.6 model. They have no size, background,
+compression, or reference-image parameters. Low quality still needs `quality_user_requested=true`.
+
+- SVG: the returned payload is saved as UTF-8 XML in a `.svg` file.
+- GIF: defaults to 24 frames at 80 ms per frame. `frame_count` accepts 2–64. `duration_seconds`
+  is converted at 12 fps, and a conversion above 64 or below 2 frames is an error. Passing both
+  `frame_count` and `duration_seconds` is also an error. `frame_duration_ms` accepts 20–2000 and
+  is rounded to 10 ms. Frame size is always `auto`, which keeps the request within the API's
+  8,294,400-pixel total budget.
+- Results skip local size and dimension checks and are returned as a file path with a markdown
+  preview, not as embedded MCP image content. They never replace `latest.json`, so `use_latest`
+  edits keep pointing at the last raster image.
+
+The plugin card supports at most three `interface.defaultPrompt` entries. Those card actions are separate from the seven skill entry points above, which are declared by each skill's `agents/openai.yaml`. To prevent a missing Fmage MCP catalog from silently falling back to native image generation, keep the generic image skill disabled and disable the host feature as well:
 
 ```text
 codex features disable image_generation

@@ -28,6 +28,8 @@ EXPECTED_MCP_TOOL_NAMES = {
     "edit_image_batch",
     "get_image_task_status",
     "get_provider_status",
+    "generate_svg",
+    "generate_gif",
 }
 REQUIRED_SKILLS = {
     "fmage-workflow": True,
@@ -35,6 +37,8 @@ REQUIRED_SKILLS = {
     "fmage-config": True,
     "fmage-direct": False,
     "fmage-image-regression": True,
+    "fmage-svg": False,
+    "fmage-gif": False,
 }
 
 

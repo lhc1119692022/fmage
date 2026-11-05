@@ -25,6 +25,8 @@ REMOVED_PROMPT_FIELDS = (
 REMOVED_TRANSPORTS = {"zenmux-vertex"}
 # A fresh retry is a new paid provider request, so it stays opt-in.
 RETRY_DEFAULTS = {"retry_on_failure": False, "retry_count": 2}
+# gpt-image-2.6 complexity switch: false never sends the field.
+GENERATION_DEFAULTS = {"complexity": False}
 
 
 def resolve_config_path(explicit: str | None = None) -> Path:
@@ -139,6 +141,10 @@ def migrate_payload(payload: dict[str, Any]) -> list[str]:
         if name not in payload:
             payload[name] = value
             changes.append(f"added retry configuration field: {name}")
+    for name, value in GENERATION_DEFAULTS.items():
+        if name not in payload:
+            payload[name] = value
+            changes.append(f"added generation configuration field: {name}")
 
     return changes
 

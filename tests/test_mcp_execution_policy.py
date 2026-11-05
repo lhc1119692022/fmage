@@ -339,6 +339,67 @@ class McpExecutionPolicyTests(unittest.TestCase):
             self.assertTrue(any("retried 1 time" in warning for warning in result["warnings"]))
             self.assertTrue(Path(result["images"][0]).is_file())
 
+    def test_svg_and_gif_tools_save_files_without_replacing_latest_state(self):
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3"/></svg>'
+        gif = io.BytesIO()
+        frames = [Image.new("P", (4, 4), color) for color in (0, 1)]
+        frames[0].save(gif, format="GIF", save_all=True, append_images=frames[1:], duration=80, loop=0)
+        bodies = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+                bodies.append(body)
+                data = svg if body.get("output_format") == "svg" else gif.getvalue()
+                payload = json.dumps({"data": [{"b64_json": base64.b64encode(data).decode()}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *args):
+                pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                config = root / "providers.json"
+                config.write_text(json.dumps({
+                    "active_providers": ["test"], "cache_dir": str(root / "cache"),
+                    "output_dir": str(root / "output"), "complexity": "low",
+                    "providers": {"test": {
+                        "transport": "openai-images", "model": "gpt-image-2.6-flare",
+                        "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+                        "api_key": "test-only-key",
+                    }},
+                }), encoding="utf-8")
+                svg_result = self.call(config, "generate_svg", {"prompt": "simple badge", "verbose": True})
+                gif_result = self.call(config, "generate_gif", {"prompt": "blinking dot", "duration_seconds": 2})
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join()
+
+            self.assertEqual([body["output_format"] for body in bodies], ["svg", "gif"])
+            self.assertEqual([body.get("complexity") for body in bodies], ["low", "low"])
+            self.assertEqual((bodies[1]["frame_count"], bodies[1]["frame_duration_ms"]), (24, 80))
+            self.assertEqual(bodies[1]["size"], "auto")
+            self.assertNotIn("frame_count", bodies[0])
+            for body in bodies:
+                self.assertNotIn("output_compression", body)
+                self.assertNotIn("stream", body)
+                self.assertNotIn("n", body) if "n" not in body else self.assertEqual(body["n"], 1)
+            svg_path, gif_path = Path(svg_result["images"][0]), Path(gif_result["images"][0])
+            self.assertEqual((svg_path.suffix, gif_path.suffix), (".svg", ".gif"))
+            self.assertEqual(svg_path.read_bytes(), svg)
+            self.assertTrue(gif_path.read_bytes().startswith(b"GIF89a"))
+            self.assertEqual(list(root.rglob("latest.json")), [])
+            self.assertFalse(any("size" in warning.lower() and "mismatch" in warning.lower()
+                                 for warning in svg_result.get("warnings", []) + gif_result.get("warnings", [])))
+
     def call_raw(self, config, tool, arguments):
         request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                    "params": {"name": tool, "arguments": arguments}}

@@ -20,6 +20,8 @@ const TOOL_PROBE = "probe_image_generation";
 const TOOL_STATUS = "get_provider_status";
 const TOOL_TASK_STATUS = "get_image_task_status";
 const TOOL_REGRESS = "regress_image";
+const TOOL_GENERATE_SVG = "generate_svg";
+const TOOL_GENERATE_GIF = "generate_gif";
 const BASE_INITIALIZE_INSTRUCTIONS =
   "For Fmage 工作流 or configured workflow requests, use fmage-workflow and workflow_image; the following generation prompt rules apply only to ordinary generation/edit entries. " +
   "Select the image skill before interpreting the request or inspecting attachments. Use fmage by default; " +
@@ -28,7 +30,8 @@ const BASE_INITIALIZE_INSTRUCTIONS =
   "Follow that skill's complete prompt policy, then call the matching base image tool immediately. " +
   "Set prompt_mode to expand for fmage or direct for fmage-direct. This records the entry already selected, not a later prompt-processing step. " +
   "The selection is request-local; polling follows the submitted task without changing its mode. " +
-  "Do not create a separate plan, preparation pass, trace/status preflight, or repeated rewrite.";
+  "Do not create a separate plan, preparation pass, trace/status preflight, or repeated rewrite. " +
+  "Use fmage-svg with generate_svg, or fmage-gif with generate_gif, only when the user explicitly invokes Fmage SVG or Fmage GIF for this request; never call those tools otherwise.";
 const MAX_EMBEDDED_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_CHILD_OUTPUT_BYTES = 2 * 1024 * 1024;
 const HELPER_TIMEOUT_GRACE_SECONDS = 60;
@@ -65,6 +68,8 @@ const GPT_IMAGE_MODEL_PATTERNS = Object.fromEntries(
     readFileSync(join(PLUGIN_ROOT, "config", "gpt-image-model-families.json"), "utf8"),
   )).map(([family, pattern]) => [family, new RegExp(pattern, "i")]),
 );
+// Families documented to accept quality xhigh and max; keep in sync with the Python transport.
+const GPT_IMAGE_EXTENDED_QUALITY_FAMILIES = ["gpt-image-2.5", "gpt-image-2.6"];
 const ASYNC_DEFAULT_RESPONSE_FORMAT = "url";
 
 const TRANSPORTS = {
@@ -194,6 +199,9 @@ function imageMimeType(value) {
   if (path.endsWith(".png")) return "image/png";
   if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
   if (path.endsWith(".webp")) return "image/webp";
+  // GIF embeds natively. SVG is delivered by path/link only: MCP image content
+  // supports raster media, and hosts that render SVG do so from the link.
+  if (path.endsWith(".gif")) return "image/gif";
   return null;
 }
 
@@ -859,6 +867,7 @@ function commonArguments(args, promptFile, provider) {
     appendOption(argv, "--background", args.background ?? "auto");
     appendOption(argv, "--output-format", args.output_format ?? "png");
     appendOption(argv, "--output-compression", args.output_compression);
+    appendSpecialFormatArguments(argv, args, provider);
   } else if (provider.transport === TRANSPORT_GEMINI_GENERATE_CONTENT) {
     appendOption(argv, "--generation-config-format", provider.raw.generation_config_format);
     appendOption(argv, "--output-format", args.output_format ?? "png");
@@ -918,6 +927,7 @@ function asyncImageArguments(args, promptFile, provider) {
   appendOption(argv, "--background", args.background ?? "auto");
   appendOption(argv, "--output-format", args.output_format ?? "png");
   appendOption(argv, "--output-compression", args.output_compression);
+  appendSpecialFormatArguments(argv, args, provider);
   appendOption(
     argv,
     "--response-format",
@@ -930,6 +940,130 @@ function asyncImageArguments(args, promptFile, provider) {
   appendOption(argv, "--pending-total-timeout", timeoutSeconds(args.timeout, provider.raw.timeout, args._pending_total_timeout));
   appendFlag(argv, "--dry-run", args.dry_run);
   return argv;
+}
+
+const COMPLEXITY_LEVELS = ["low", "medium", "high"];
+const SPECIAL_OUTPUT_FORMATS = ["svg", "gif"];
+const SPECIAL_FORMAT_TOOL_NAMES = { svg: TOOL_GENERATE_SVG, gif: TOOL_GENERATE_GIF };
+const SPECIAL_FORMAT_QUALITIES = ["low", "medium", "high", "xhigh", "max"];
+const GIF_DEFAULT_FRAME_COUNT = 24;
+const GIF_DEFAULT_FRAME_DURATION_MS = 80;
+const GIF_SECONDS_FPS = 12;
+const GIF_MIN_FRAMES = 2;
+const GIF_MAX_FRAMES = 64;
+const GIF_MIN_FRAME_DURATION_MS = 20;
+const GIF_MAX_FRAME_DURATION_MS = 2000;
+
+function gifFrameCount(args) {
+  const hasCount = args.frame_count !== undefined && args.frame_count !== null;
+  const hasSeconds = args.duration_seconds !== undefined && args.duration_seconds !== null;
+  if (hasCount && hasSeconds) {
+    throw new Error("Pass either frame_count or duration_seconds, not both.");
+  }
+  if (hasSeconds) {
+    const seconds = Number(args.duration_seconds);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      throw new Error("duration_seconds must be a positive number.");
+    }
+    const frames = Math.round(seconds * GIF_SECONDS_FPS);
+    if (frames > GIF_MAX_FRAMES) {
+      throw new Error(
+        `duration_seconds=${seconds} converts to ${frames} frames at ${GIF_SECONDS_FPS} fps, ` +
+          `above the ${GIF_MAX_FRAMES}-frame GIF limit. Use at most ${(GIF_MAX_FRAMES / GIF_SECONDS_FPS).toFixed(1)} seconds or pass frame_count.`,
+      );
+    }
+    if (frames < GIF_MIN_FRAMES) {
+      throw new Error(
+        `duration_seconds=${seconds} converts to ${frames} frame(s) at ${GIF_SECONDS_FPS} fps, ` +
+          `below the ${GIF_MIN_FRAMES}-frame GIF minimum.`,
+      );
+    }
+    return frames;
+  }
+  if (!hasCount) return GIF_DEFAULT_FRAME_COUNT;
+  const count = Number(args.frame_count);
+  if (!Number.isInteger(count) || count < GIF_MIN_FRAMES || count > GIF_MAX_FRAMES) {
+    throw new Error(`frame_count must be an integer from ${GIF_MIN_FRAMES} to ${GIF_MAX_FRAMES}.`);
+  }
+  return count;
+}
+
+function gifFrameDuration(args) {
+  if (args.frame_duration_ms === undefined || args.frame_duration_ms === null) return GIF_DEFAULT_FRAME_DURATION_MS;
+  const duration = Number(args.frame_duration_ms);
+  if (!Number.isInteger(duration) || duration < GIF_MIN_FRAME_DURATION_MS || duration > GIF_MAX_FRAME_DURATION_MS) {
+    throw new Error(
+      `frame_duration_ms must be an integer from ${GIF_MIN_FRAME_DURATION_MS} to ${GIF_MAX_FRAME_DURATION_MS}.`,
+    );
+  }
+  // The API rounds frame durations to 10 ms; send the value it will apply.
+  return Math.round(duration / 10) * 10;
+}
+
+/** Run the explicit-only generate_svg / generate_gif entries (gpt-image-2.6, generations, n=1). */
+async function runSpecialFormatCommand(format, rawArgs = {}) {
+  const prompt = nonEmptyString(rawArgs.prompt);
+  if (!prompt) throw new Error("The prompt argument must contain one complete prompt.");
+  const quality = nonEmptyString(rawArgs.quality);
+  if (quality && !SPECIAL_FORMAT_QUALITIES.includes(quality)) {
+    throw new Error(`quality must be one of: ${SPECIAL_FORMAT_QUALITIES.join(", ")}.`);
+  }
+  const provider = await resolveProvider(rawArgs.provider, !rawArgs.dry_run);
+  if (!isImage26Provider(provider)) {
+    throw new Error(
+      `${SPECIAL_FORMAT_TOOL_NAMES[format]} requires an openai-images provider with a gpt-image-2.6 series model; ` +
+        `provider "${provider.name}" uses model "${provider.model}" (transport "${provider.transport}").`,
+    );
+  }
+  const args = enforceQualityPolicy({
+    prompt,
+    provider: provider.name,
+    ...(quality ? { quality } : {}),
+    ...(rawArgs.quality_user_requested === true ? { quality_user_requested: true } : {}),
+    ...(rawArgs.timeout !== undefined ? { timeout: rawArgs.timeout } : {}),
+    ...(rawArgs.dry_run ? { dry_run: true } : {}),
+    ...(rawArgs.verbose ? { verbose: true } : {}),
+    output_format: format,
+    output_format_user_requested: true,
+    _special_output_tool: format,
+  });
+  if (format === "gif") {
+    args.frame_count = gifFrameCount(rawArgs);
+    args.frame_duration_ms = gifFrameDuration(rawArgs);
+  }
+  return runSingleImageCommand("generate", args, provider);
+}
+
+/**
+ * Global providers.json `complexity` switch: false (default, never sent) or
+ * low/medium/high. It is never taken from tool arguments.
+ */
+function imageComplexitySetting(config) {
+  const value = config?.complexity;
+  if (value === undefined || value === false) return false;
+  if (!COMPLEXITY_LEVELS.includes(value)) {
+    throw new Error('complexity must be false, "low", "medium", or "high".');
+  }
+  return value;
+}
+
+function isImage26Provider(provider) {
+  return provider?.transport === TRANSPORT_OPENAI_IMAGES &&
+    GPT_IMAGE_MODEL_PATTERNS["gpt-image-2.6"].test(nonEmptyString(provider?.model) || "");
+}
+
+/** The configured complexity, sent only to gpt-image-2.6 series models. */
+function complexityForProvider(provider) {
+  const level = imageComplexitySetting(provider?.config);
+  return level && isImage26Provider(provider) ? level : null;
+}
+
+function appendSpecialFormatArguments(argv, args, provider) {
+  appendOption(argv, "--complexity", complexityForProvider(provider));
+  if (args.output_format === "gif") {
+    appendOption(argv, "--frame-count", args.frame_count);
+    appendOption(argv, "--frame-duration-ms", args.frame_duration_ms);
+  }
 }
 
 function defaultQualityForProvider(provider) {
@@ -1114,6 +1248,12 @@ function bananaModelCapability(provider) {
 }
 
 function enforceModelCapabilityPolicy(args = {}, provider) {
+  const outputFormat = nonEmptyString(args.output_format)?.toLowerCase();
+  if (SPECIAL_OUTPUT_FORMATS.includes(outputFormat) && args._special_output_tool !== outputFormat) {
+    throw new Error(
+      `output_format "${outputFormat}" is available only through the ${SPECIAL_FORMAT_TOOL_NAMES[outputFormat]} tool.`,
+    );
+  }
   if (provider.transport === TRANSPORT_MIDJOURNEY) {
     // MJ flags belong only to the opaque prompt. Never infer pixel tiers or JSON controls.
     const result = { ...args };
@@ -1134,7 +1274,9 @@ function enforceModelCapabilityPolicy(args = {}, provider) {
   const quality = nonEmptyString(args.quality);
   const supportsExtendedQuality =
     provider.transport === TRANSPORT_OPENAI_IMAGES &&
-    GPT_IMAGE_MODEL_PATTERNS["gpt-image-2.5"].test(nonEmptyString(provider.model) || "");
+    GPT_IMAGE_EXTENDED_QUALITY_FAMILIES.some((family) =>
+      GPT_IMAGE_MODEL_PATTERNS[family].test(nonEmptyString(provider.model) || ""),
+    );
   if (["xhigh", "max"].includes(quality) && !supportsExtendedQuality) {
     const result = { ...args, quality: "high" };
     result._model_capability_policy_warning =
@@ -1250,6 +1392,9 @@ function sanitizeRequest(request) {
     background,
     output_format: outputFormat,
     output_compression: request.output_compression,
+    complexity: request.complexity,
+    frame_count: request.frame_count,
+    frame_duration_ms: request.frame_duration_ms,
     output_mime_type: request.output_mime_type,
     response_format: request.response_format,
     parameters: request.parameters,
@@ -1732,8 +1877,13 @@ async function publishResultImages(result, args, provider) {
       await removeEmptyAncestors(dirname(originalManifest), cleanupBoundary);
     }
   }
-  await writeGlobalLatestState(result);
-  await removeProviderLatestState(cacheDir);
+  // SVG/GIF results are not edit inputs and never replace latest.json.
+  const specialOutput = Boolean(args._special_output_tool) ||
+    publishedImages.some((image) => SPECIAL_OUTPUT_FORMATS.includes(extname(image).slice(1).toLowerCase()));
+  if (!specialOutput) {
+    await writeGlobalLatestState(result);
+    await removeProviderLatestState(cacheDir);
+  }
   for (const directory of Array.from(cleanupDirectories).sort((left, right) => right.length - left.length)) {
     await removeEmptyAncestors(directory, cleanupBoundary);
   }
@@ -2156,7 +2306,33 @@ function imageEntryArguments(args) {
   if (Array.isArray(args.jobs) && args.jobs.some((job) => job?.prompt_mode !== undefined)) {
     throw new Error("Set prompt_mode only at the batch level; jobs cannot select another image entry.");
   }
+  // Standard tools never produce SVG/GIF, even without format consent (which would
+  // otherwise silently fall back to png). Only the dedicated tools set the marker.
+  for (const entry of [args, ...(Array.isArray(args.jobs) ? args.jobs : [])]) {
+    const format = nonEmptyString(entry?.output_format)?.toLowerCase();
+    if (SPECIAL_OUTPUT_FORMATS.includes(format) && entry?._special_output_tool !== format) {
+      throw new Error(
+        `output_format "${format}" is available only through the ${SPECIAL_FORMAT_TOOL_NAMES[format]} tool.`,
+      );
+    }
+  }
   return { ...args, prompt_mode: mode };
+}
+
+/** The special-format marker is internal; callers can never supply it. */
+function withoutInternalMarkers(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    return args ?? {};
+  }
+  const { _special_output_tool: _ignored, ...rest } = args;
+  if (Array.isArray(rest.jobs)) {
+    rest.jobs = rest.jobs.map((job) => {
+      if (!job || typeof job !== "object") return job;
+      const { _special_output_tool: _jobIgnored, ...jobRest } = job;
+      return jobRest;
+    });
+  }
+  return rest;
 }
 
 async function runImageCommand(command, args) {
@@ -2630,6 +2806,97 @@ function imageInputPaths(value) {
   return images;
 }
 
+function specialFormatProperties(format) {
+  const properties = {
+    prompt: {
+      type: "string",
+      minLength: 1,
+      description:
+        format === "gif"
+          ? "One complete prompt describing the subject, the motion, and the desired loop."
+          : "One complete prompt for a static vector graphic such as an icon, logo, or illustration.",
+    },
+    provider: {
+      type: "string",
+      description: "Active provider name or unique shorthand with a gpt-image-2.6 series model; omit for default.",
+    },
+    quality: {
+      type: "string",
+      enum: SPECIAL_FORMAT_QUALITIES,
+      description:
+        format === "svg"
+          ? "Quality of the internal reference image the SVG is traced from. Defaults to high; low requires quality_user_requested=true."
+          : "Generation quality. Defaults to high; low requires quality_user_requested=true.",
+    },
+    quality_user_requested: {
+      type: "boolean",
+      description: "True only when the user explicitly requested the quality tier.",
+    },
+  };
+  if (format === "gif") {
+    Object.assign(properties, {
+      frame_count: {
+        type: "integer",
+        minimum: GIF_MIN_FRAMES,
+        maximum: GIF_MAX_FRAMES,
+        description: `Number of frames (${GIF_MIN_FRAMES}-${GIF_MAX_FRAMES}). Defaults to ${GIF_DEFAULT_FRAME_COUNT}. Do not combine with duration_seconds.`,
+      },
+      duration_seconds: {
+        type: "number",
+        exclusiveMinimum: 0,
+        description:
+          `Requested animation length in seconds; converted at ${GIF_SECONDS_FPS} frames per second. ` +
+          `A result above ${GIF_MAX_FRAMES} or below ${GIF_MIN_FRAMES} frames is rejected before any provider call.`,
+      },
+      frame_duration_ms: {
+        type: "integer",
+        minimum: GIF_MIN_FRAME_DURATION_MS,
+        maximum: GIF_MAX_FRAME_DURATION_MS,
+        description: `Milliseconds per frame (${GIF_MIN_FRAME_DURATION_MS}-${GIF_MAX_FRAME_DURATION_MS}, rounded to 10). Defaults to ${GIF_DEFAULT_FRAME_DURATION_MS}.`,
+      },
+    });
+  }
+  Object.assign(properties, {
+    timeout: {
+      type: "integer",
+      minimum: 1,
+      description: "Optional timeout in seconds; omitted uses the runtime default.",
+    },
+    dry_run: {
+      type: "boolean",
+      description: "Validate and show the request without a provider call.",
+    },
+    verbose: {
+      type: "boolean",
+      description: "Return full prompts/request details.",
+    },
+  });
+  return properties;
+}
+
+function specialFormatToolDefinition(format) {
+  const gif = format === "gif";
+  return {
+    name: SPECIAL_FORMAT_TOOL_NAMES[format],
+    title: gif ? "Generate GIF with Fmage" : "Generate SVG with Fmage",
+    description: gif
+      ? "Explicit Fmage GIF entry only: generate one animated GIF with a gpt-image-2.6 model. Frame size is always auto."
+      : "Explicit Fmage SVG entry only: generate one static SVG vector graphic with a gpt-image-2.6 model.",
+    inputSchema: {
+      type: "object",
+      properties: specialFormatProperties(format),
+      required: ["prompt"],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  };
+}
+
 function commonProperties(editing = false) {
   const properties = {
     prompt: promptProperty(),
@@ -2671,7 +2938,7 @@ function commonProperties(editing = false) {
       type: "string",
       enum: ["low", "medium", "high", "xhigh", "max", "auto"],
       description:
-        "Delivery tier. xhigh and max are native to gpt-image-2.5 series models using openai-images. This shared enum is not a capability list for every provider: when the selected transport does not expose an extended tier, the server maps xhigh/max to high, keeps the provider and model unchanged, and records the mapping in warnings. Otherwise supported values are low, medium, high, and auto. Always pass an explicitly requested tier for supported families. Midjourney is excluded: keep MJ quality flags in prompt and omit this field.",
+        "Delivery tier. xhigh and max are native to gpt-image-2.5 and gpt-image-2.6 series models using openai-images. This shared enum is not a capability list for every provider: when the selected transport does not expose an extended tier, the server maps xhigh/max to high, keeps the provider and model unchanged, and records the mapping in warnings. Otherwise supported values are low, medium, high, and auto. Always pass an explicitly requested tier for supported families. Midjourney is excluded: keep MJ quality flags in prompt and omit this field.",
     },
     quality_user_requested: {
       type: "boolean",
@@ -2948,6 +3215,8 @@ function toolDefinitions() {
         openWorldHint: true,
       },
     },
+    specialFormatToolDefinition("svg"),
+    specialFormatToolDefinition("gif"),
     {
       name: TOOL_GENERATE_BATCH,
       title: "Generate Image Batch with Fmage",
@@ -3297,6 +3566,7 @@ async function providerStatus(requestedProvider) {
     api_key_source: provider.apiKeySource,
     available_providers: Object.keys(provider.config.providers),
     generation_retry: { enabled: retry.enabled, retries: retry.retries },
+    complexity: { setting: imageComplexitySetting(provider.config), applied: complexityForProvider(provider) },
     output_dir: finalOutputRoot({}, provider),
     cache_dir: transportOutputRoot({}, provider),
     task_dir: taskStoreRoot(),
@@ -3309,6 +3579,7 @@ async function providerStatus(requestedProvider) {
 }
 
 async function handleToolCall(id, params) {
+  params = { ...(params ?? {}), arguments: withoutInternalMarkers(params?.arguments) };
   if (params?.name === 'workflow_image') {
     const result = await workflowService(params.arguments ?? {});
     sendResult(id, {content:[{type:'text',text:JSON.stringify(result)}],structuredContent:result});
@@ -3366,6 +3637,17 @@ async function handleToolCall(id, params) {
         includeProviderMetadata: Boolean(request.include_provider_metadata),
       }),
       structuredContent: probedResult,
+    });
+    return;
+  }
+
+  if (params?.name === TOOL_GENERATE_SVG || params?.name === TOOL_GENERATE_GIF) {
+    const format = params.name === TOOL_GENERATE_SVG ? "svg" : "gif";
+    const result = await runSpecialFormatCommand(format, params.arguments ?? {});
+    const responseResult = compactImageResultForResponse(result, params.arguments ?? {});
+    sendResult(id, {
+      content: await imageContent(responseResult, { embedImages: false, verbose: Boolean(params.arguments?.verbose) }),
+      structuredContent: responseResult,
     });
     return;
   }
@@ -3463,6 +3745,7 @@ async function handleToolCall(id, params) {
             `Model: ${status.model}\n` +
             `Base URL: ${status.base_url}\n` +
             `API key configured: ${status.api_key_configured}\n` +
+            `Complexity: ${status.complexity.setting} (applied: ${status.complexity.applied ?? "not sent"})\n` +
             `Config: ${status.config_path}`,
         },
       ],

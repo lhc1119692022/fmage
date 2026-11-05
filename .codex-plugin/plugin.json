@@ -1,6 +1,6 @@
 {
   "name": "fmage",
-  "version": "0.1.0+codex.20261104114004",
+  "version": "0.1.0+codex.20261105070917",
   "description": "Generate and reference-edit images through independent OpenAI Images, Gemini/Nano Banana, and Midjourney adapters, with expanded and direct prompt entries and a local image-regression pipeline.",
   "author": {
     "name": "Local developer"
@@ -20,7 +20,8 @@
       "Image editing",
       "Local image regression",
       "Multiple providers",
-      "Expanded and direct-prompt image entries"
+      "Expanded and direct-prompt image entries",
+      "Explicit SVG and GIF entries (gpt-image-2.6)"
     ],
     "defaultPrompt": [
       "Generate this image with Fmage.",

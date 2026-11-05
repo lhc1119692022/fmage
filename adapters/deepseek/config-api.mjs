@@ -12,6 +12,9 @@ export const INSTANCE_TYPES = ['default', 'plus', 'ultra'];
 // the bounds are repeated here and a test keeps both copies identical.
 export const DEFAULT_RETRY_COUNT = 2;
 export const MAX_RETRY_COUNT = 10;
+// Mirrors COMPLEXITY_LEVELS in mcp/server.mjs. false (default) never sends the
+// field; a level is sent only to gpt-image-2.6 series models.
+export const COMPLEXITY_LEVELS = ['low', 'medium', 'high'];
 const NAME = /^[^\u0000-\u001f]{1,100}$/;
 const DIGITS = /^\d{1,40}$/;
 const MODEL_LIST_TIMEOUT_MS = 15000;
@@ -216,6 +219,7 @@ export function view(path, { exists, revision, config }) {
     cache_dir: typeof config.cache_dir === 'string' ? config.cache_dir : '',
     retry_on_failure: config.retry_on_failure === true,
     retry_count: normalizeRetryCount(config.retry_count),
+    complexity: COMPLEXITY_LEVELS.includes(config.complexity) ? config.complexity : false,
   };
 }
 function text(value, field, { required = false, max = 2000 } = {}) {
@@ -369,6 +373,12 @@ export function applyUpdate(config, update) {
       throw new ConfigError(`retry_count must be an integer from 0 to ${MAX_RETRY_COUNT}.`);
     }
     next.retry_count = count;
+  }
+  if (update.complexity !== undefined) {
+    if (update.complexity !== false && !COMPLEXITY_LEVELS.includes(update.complexity)) {
+      throw new ConfigError('complexity must be false, "low", "medium", or "high".');
+    }
+    next.complexity = update.complexity;
   }
   // A rename or disable can strand the explicit default; clear it so resolution
   // falls back to the first active provider instead of failing later.

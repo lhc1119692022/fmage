@@ -143,7 +143,7 @@ class HarnessPluginsTests(unittest.TestCase):
             files = hp.payload()
             self.assertIn('NOT verified', hp.deepseek_runtime_status(root, files))
             receipt = {**json.loads(files['.fmage-build.json']), 'pid': 123,
-                       'skillCount': 5, 'toolCount': hp.MCP_TOOL_COUNT, 'mcpReady': True,
+                       'skillCount': len(hp.SKILLS), 'toolCount': hp.MCP_TOOL_COUNT, 'mcpReady': True,
                        'heartbeatAt': datetime.now(timezone.utc).isoformat()}
             hp.atomic_write(root / '.fmage-runtime.json', hp.json_bytes(receipt))
             self.assertIn('live activation verified', hp.deepseek_runtime_status(root, files))
@@ -236,9 +236,17 @@ class HarnessPluginsTests(unittest.TestCase):
             text = files[f"skills/{name}/SKILL.md"].decode()
             self.assertTrue(text.startswith(f"---\nname: {name}\n"))
             self.assertIn(hp.DESCRIPTIONS[name], text)
-            self.assertIn(f"disable-model-invocation: {'true' if name == 'fmage-direct' else 'false'}", text)
+            explicit_only = name in {"fmage-direct", "fmage-svg", "fmage-gif"}
+            self.assertIn(f"disable-model-invocation: {'true' if explicit_only else 'false'}", text)
+            self.assertNotIn("/Fmage SVG", text)
+            self.assertNotIn("/Fmage GIF", text)
             self.assertNotIn("$fmage", text)
             self.assertNotIn("mcp__Fmage.", text)
+        catalog = {entry["name"]: entry for entry in json.loads(files["catalog.json"])}
+        self.assertEqual(set(catalog), set(hp.SKILLS))
+        for name in ("fmage-direct", "fmage-svg", "fmage-gif"):
+            self.assertFalse(catalog[name]["modelInvocable"])
+        self.assertTrue(catalog["fmage"]["modelInvocable"])
         regression = files["skills/fmage-image-regression/SKILL.md"].decode()
         self.assertIn("regress_image", regression)
         self.assertNotIn("degrade_image.py", regression)

@@ -85,8 +85,31 @@ def is_image_2_5_model(model: str | None) -> bool:
     return bool(GPT_IMAGE_MODEL_PATTERNS["gpt-image-2.5"].search(model or ""))
 
 
+def is_image_2_6_model(model: str | None) -> bool:
+    return bool(GPT_IMAGE_MODEL_PATTERNS["gpt-image-2.6"].search(model or ""))
+
+
+# Families documented to accept quality xhigh and max, in addition to the
+# low/medium/high/auto tiers every GPT Image model accepts.
+EXTENDED_QUALITY_FAMILIES = ("gpt-image-2.5", "gpt-image-2.6")
+
+
+def supports_extended_quality(model: str | None) -> bool:
+    return any(GPT_IMAGE_MODEL_PATTERNS[family].search(model or "") for family in EXTENDED_QUALITY_FAMILIES)
+
+
 def is_gpt_image_model(model: str | None) -> bool:
     return bool(GPT_IMAGE_MODEL_PATTERNS["gpt-image"].search(model or ""))
+
+
+# GPT Image 2.6 generations-only formats. SVG is static vector XML and GIF is an
+# animation, so neither has raster canvas sizing or dimension checks locally.
+SPECIAL_OUTPUT_FORMATS = {"svg", "gif"}
+COMPLEXITY_LEVELS = ("low", "medium", "high")
+GIF_MIN_FRAMES = 2
+GIF_MAX_FRAMES = 64
+GIF_MIN_FRAME_DURATION_MS = 20
+GIF_MAX_FRAME_DURATION_MS = 2000
 
 
 def default_resolution_for_model(model: str | None) -> str:
@@ -582,6 +605,13 @@ def selected_resolution(args: argparse.Namespace) -> tuple[str, list[str]]:
 
 
 def resolve_size(args: argparse.Namespace, image_paths: list[Path], primary_index: int = 0) -> tuple[str, list[str]]:
+    output_format = getattr(args, "output_format", None)
+    if output_format == "gif":
+        # GIF size is per frame and is always delegated to the API.
+        return "auto", ["gif_frame_size_auto"]
+    if output_format == "svg":
+        # SVG size describes only the internal reference image; pass it unchanged.
+        return (args.size or "auto"), ["svg_size_unchecked"]
     if args.size:
         if args.size.lower() == "auto":
             return "auto", ["explicit_auto_size"]
@@ -996,8 +1026,16 @@ def write_manifest(
     manifest_path = run_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    write_latest_state(root, manifest_path, images, manifest["created_at"])
+    if writes_latest_state(request_payload, images):
+        write_latest_state(root, manifest_path, images, manifest["created_at"])
     return manifest_path
+
+
+def writes_latest_state(request_payload: dict[str, Any], images: list[Path]) -> bool:
+    # SVG and GIF results are not edit inputs, so they never replace latest.json.
+    if request_payload.get("output_format") in SPECIAL_OUTPUT_FORMATS:
+        return False
+    return not any(path.suffix.lower().lstrip(".") in SPECIAL_OUTPUT_FORMATS for path in images)
 
 
 def common_payload(args: argparse.Namespace, prompt: str, size: str) -> dict[str, Any]:
@@ -1012,6 +1050,13 @@ def common_payload(args: argparse.Namespace, prompt: str, size: str) -> dict[str
     }
     if args.output_compression is not None:
         payload["output_compression"] = args.output_compression
+    if getattr(args, "complexity", None):
+        payload["complexity"] = args.complexity
+    if args.output_format == "gif":
+        if getattr(args, "frame_count", None) is not None:
+            payload["frame_count"] = args.frame_count
+        if getattr(args, "frame_duration_ms", None) is not None:
+            payload["frame_duration_ms"] = args.frame_duration_ms
     return payload
 
 
@@ -1022,8 +1067,10 @@ def protected_output_fields(args: argparse.Namespace) -> set[str]:
 
 
 def validate_common(args: argparse.Namespace) -> None:
-    if args.quality in {"xhigh", "max"} and not is_image_2_5_model(args.model):
-        raise ValueError("--quality xhigh and --quality max are supported only for gpt-image-2.5 series models.")
+    if args.quality in {"xhigh", "max"} and not supports_extended_quality(args.model):
+        raise ValueError(
+            "--quality xhigh and --quality max are supported only for gpt-image-2.5 and gpt-image-2.6 series models."
+        )
     if args.background == "transparent" and not is_gpt_image_model(args.model):
         raise ValueError("Transparent backgrounds are supported only for GPT Image models.")
     if args.background == "transparent" and args.output_format == "jpeg":
@@ -1033,6 +1080,28 @@ def validate_common(args: argparse.Namespace) -> None:
             raise ValueError("--output-compression can only be used with --output-format jpeg or webp.")
         if not 0 <= args.output_compression <= 100:
             raise ValueError("--output-compression must be between 0 and 100.")
+    complexity = getattr(args, "complexity", None)
+    if complexity and not is_image_2_6_model(args.model):
+        raise ValueError("--complexity is supported only for gpt-image-2.6 series models.")
+    if args.output_format in SPECIAL_OUTPUT_FORMATS:
+        if not is_image_2_6_model(args.model):
+            raise ValueError(
+                f"--output-format {args.output_format} is supported only for gpt-image-2.6 series models."
+            )
+        if getattr(args, "command", None) == "edit":
+            raise ValueError(
+                f"--output-format {args.output_format} is supported only for image generation, not edits."
+            )
+    frame_count = getattr(args, "frame_count", None)
+    frame_duration = getattr(args, "frame_duration_ms", None)
+    if (frame_count is not None or frame_duration is not None) and args.output_format != "gif":
+        raise ValueError("--frame-count and --frame-duration-ms can only be used with --output-format gif.")
+    if frame_count is not None and not GIF_MIN_FRAMES <= frame_count <= GIF_MAX_FRAMES:
+        raise ValueError(f"--frame-count must be between {GIF_MIN_FRAMES} and {GIF_MAX_FRAMES}.")
+    if frame_duration is not None and not GIF_MIN_FRAME_DURATION_MS <= frame_duration <= GIF_MAX_FRAME_DURATION_MS:
+        raise ValueError(
+            f"--frame-duration-ms must be between {GIF_MIN_FRAME_DURATION_MS} and {GIF_MAX_FRAME_DURATION_MS}."
+        )
 
 def api_key(args: argparse.Namespace) -> str:
     value = configured_value(PROVIDER_API_KEY, args.api_key_env)
@@ -1235,8 +1304,11 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--quality", choices=["low", "medium", "high", "xhigh", "max", "auto"], default="high")
     parser.add_argument("--moderation", choices=["low", "auto"], default="low")
     parser.add_argument("--background", choices=["auto", "opaque", "transparent"], default="auto")
-    parser.add_argument("--output-format", choices=["png", "jpeg", "webp"], default="png")
+    parser.add_argument("--output-format", choices=["png", "jpeg", "webp", "svg", "gif"], default="png")
     parser.add_argument("--output-compression", type=int)
+    parser.add_argument("--complexity", choices=list(COMPLEXITY_LEVELS), help="gpt-image-2.6 planning complexity.")
+    parser.add_argument("--frame-count", type=int, help="GIF frame count (2-64).")
+    parser.add_argument("--frame-duration-ms", type=int, help="GIF frame duration in milliseconds (20-2000).")
     parser.add_argument("--base-url", default=configured_value(PROVIDER_BASE_URL, "PROVIDER_BASE_URL", DEFAULT_BASE_URL))
     parser.add_argument("--model", default=configured_value(PROVIDER_IMAGE_MODEL, "PROVIDER_IMAGE_MODEL", DEFAULT_MODEL))
     parser.add_argument("--api-key-env", default="PROVIDER_API_KEY")

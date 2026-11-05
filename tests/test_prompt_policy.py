@@ -24,6 +24,8 @@ BASELINE_TOOL_NAMES = STANDARD_IMAGE_TOOLS | {
     "get_image_task_status",
     "get_provider_status",
 }
+# Explicit-only entries; they never share the generate_image schema.
+SPECIAL_FORMAT_TOOLS = {"generate_svg", "generate_gif"}
 # Callable by name but deliberately absent from tools/list.
 HIDDEN_DIAGNOSTIC_TOOLS = {"trace_image_job_plan", "probe_image_generation"}
 BASELINE_INSTRUCTIONS = (
@@ -34,7 +36,8 @@ BASELINE_INSTRUCTIONS = (
     "Follow that skill's complete prompt policy, then call the matching base image tool immediately. "
     "Set prompt_mode to expand for fmage or direct for fmage-direct. This records the entry already selected, not a later prompt-processing step. "
     "The selection is request-local; polling follows the submitted task without changing its mode. "
-    "Do not create a separate plan, preparation pass, trace/status preflight, or repeated rewrite."
+    "Do not create a separate plan, preparation pass, trace/status preflight, or repeated rewrite. "
+    "Use fmage-svg with generate_svg, or fmage-gif with generate_gif, only when the user explicitly invokes Fmage SVG or Fmage GIF for this request; never call those tools otherwise."
 )
 TRANSPARENT_TEST_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlD7xkAAAAASUVORK5CYII="
@@ -190,7 +193,8 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         response = call_server(config, "tools/list", {})
         tools = tool_map(response)
 
-        self.assertEqual(set(tools), BASELINE_TOOL_NAMES)
+        self.assertEqual(set(tools), BASELINE_TOOL_NAMES | SPECIAL_FORMAT_TOOLS)
+        self.assertEqual(len(tools), 10)
         serialized = json.dumps(tools, ensure_ascii=False).lower()
         for removed_detail in (
             "dall-e",
@@ -594,6 +598,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             ("gemini-3.1-flash-image-preview", "gemini-generate-content"),
             ("gpt-image-2.50", "openai-images"),
             ("openai/gpt-image-2.50", "openai-images"),
+            ("gpt-image-2.60", "openai-images"),
             ("openai/gpt-image-3", "openai-images"),
             ("openai/gpt-image-20", "openai-images"),
         ):
@@ -688,6 +693,7 @@ class PromptPolicyIsolationTests(unittest.TestCase):
         for model in (
             "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
             "openai/gpt-image-2.5-sunburst", "渠道【GPT_IMAGE_2.5_sunburst】",
+            "gpt-image-2.6-sunburst", "gpt-image-2.6-flare", "openai/gpt-image-2.6-flare",
         ):
             config = provider_config(["test"], {"test": provider(model)})
             for quality in ("xhigh", "max"):
@@ -787,6 +793,116 @@ class PromptPolicyIsolationTests(unittest.TestCase):
             self.assertIn("error", response)
             self.assertIn("removed prompt-preparation fields", response["error"]["message"])
             self.assertIn(field, response["error"]["message"])
+
+
+class Image26ComplexityAndSpecialFormatTests(unittest.TestCase):
+    def config(self, model: str = "gpt-image-2.6-sunburst", complexity: object = "medium") -> dict[str, object]:
+        config = provider_config(["p"], {"p": provider(model)})
+        if complexity is not None:
+            config["complexity"] = complexity
+        return config
+
+    def call(self, config: dict[str, object], name: str, **arguments: object) -> dict[str, object]:
+        return call_server(
+            config, "tools/call", {"name": name, "arguments": {"dry_run": True, "verbose": True, **arguments}},
+        )
+
+    def request(self, response: dict[str, object]) -> dict[str, object]:
+        self.assertNotIn("error", response)
+        return response["result"]["structuredContent"]["request"]
+
+    def test_special_skills_are_explicit_only(self) -> None:
+        for name, tool in (("fmage-svg", "generate_svg"), ("fmage-gif", "generate_gif")):
+            with self.subTest(skill=name):
+                skill = (PLUGIN_ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+                metadata = (PLUGIN_ROOT / "skills" / name / "agents" / "openai.yaml").read_text(encoding="utf-8")
+                self.assertIn("Select it before any prompt interpretation", skill)
+                self.assertIn(f"`{tool}`", skill)
+                self.assertIn("allow_implicit_invocation: false", metadata)
+
+    def test_special_tool_schemas_are_closed_and_minimal(self) -> None:
+        tools = tool_map(call_server(self.config(), "tools/list", {}))
+        svg = tools["generate_svg"]["inputSchema"]
+        gif = tools["generate_gif"]["inputSchema"]
+        self.assertFalse(svg["additionalProperties"])
+        self.assertFalse(gif["additionalProperties"])
+        for forbidden in ("size", "aspect", "resolution", "background", "output_format", "output_compression", "complexity", "images"):
+            self.assertNotIn(forbidden, svg["properties"])
+            self.assertNotIn(forbidden, gif["properties"])
+        self.assertTrue({"frame_count", "duration_seconds", "frame_duration_ms"} <= set(gif["properties"]))
+        self.assertNotIn("frame_count", svg["properties"])
+        self.assertNotIn("complexity", all_property_names(tools["generate_image"]["inputSchema"]))
+
+    def test_complexity_is_global_and_only_sent_to_image_2_6(self) -> None:
+        self.assertEqual(self.request(self.call(self.config(), "generate_image", prompt="x"))["complexity"], "medium")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            reference = Path(temporary_directory) / "reference.png"
+            reference.write_bytes(TRANSPARENT_TEST_PNG)
+            edit = self.call(self.config(), "edit_image", prompt="x", images=[str(reference)])
+            self.assertEqual(self.request(edit)["complexity"], "medium")
+        for model in ("gpt-image-2.5-sunburst", "gpt-image-2"):
+            with self.subTest(model=model):
+                self.assertNotIn("complexity", self.request(self.call(self.config(model, "high"), "generate_image", prompt="x")))
+        for value in (False, None):
+            with self.subTest(setting=value):
+                self.assertNotIn("complexity", self.request(self.call(self.config(complexity=value), "generate_image", prompt="x")))
+
+    def test_status_reports_complexity_setting(self) -> None:
+        response = call_server(self.config(), "tools/call", {"name": "get_provider_status", "arguments": {}})
+        self.assertEqual(response["result"]["structuredContent"]["complexity"], {"setting": "medium", "applied": "medium"})
+        response = call_server(self.config("gpt-image-2.5-flare"), "tools/call", {"name": "get_provider_status", "arguments": {}})
+        self.assertIsNone(response["result"]["structuredContent"]["complexity"]["applied"])
+
+    def test_svg_request_shape(self) -> None:
+        request = self.request(self.call(self.config(), "generate_svg", prompt="bakery logo"))
+        self.assertEqual(request["output_format"], "svg")
+        self.assertEqual(request["size"], "auto")
+        self.assertEqual(request["quality"], "high")
+        self.assertNotIn("frame_count", request)
+
+    def test_gif_defaults_and_seconds_conversion(self) -> None:
+        request = self.request(self.call(self.config(), "generate_gif", prompt="lantern loop"))
+        self.assertEqual((request["output_format"], request["size"]), ("gif", "auto"))
+        self.assertEqual((request["frame_count"], request["frame_duration_ms"]), (24, 80))
+        request = self.request(self.call(self.config(), "generate_gif", prompt="x", duration_seconds=3, frame_duration_ms=87))
+        self.assertEqual((request["frame_count"], request["frame_duration_ms"]), (36, 90))
+        request = self.request(self.call(self.config(), "generate_gif", prompt="x", frame_count=64))
+        self.assertEqual(request["frame_count"], 64)
+
+    def test_gif_limits_fail_before_any_provider_call(self) -> None:
+        cases = (
+            ({"duration_seconds": 6}, "at most 5.3 seconds"),
+            ({"duration_seconds": 0.1}, "frame"),
+            ({"frame_count": 65}, "frame_count"),
+            ({"frame_count": 24, "duration_seconds": 2}, "duration_seconds"),
+            ({"frame_duration_ms": 10}, "frame_duration_ms"),
+        )
+        for extra, message in cases:
+            with self.subTest(extra=extra):
+                response = self.call(self.config(), "generate_gif", prompt="x", **extra)
+                self.assertIn("error", response)
+                self.assertIn(message, response["error"]["message"])
+
+    def test_special_tools_require_image_2_6(self) -> None:
+        for tool in ("generate_svg", "generate_gif"):
+            with self.subTest(tool=tool):
+                response = self.call(self.config("gpt-image-2.5-sunburst"), tool, prompt="x")
+                self.assertIn("error", response)
+                self.assertIn("gpt-image-2.6", response["error"]["message"])
+
+    def test_standard_tools_reject_special_formats(self) -> None:
+        for fmt, tool in (("svg", "generate_svg"), ("gif", "generate_gif")):
+            for consent in (True, False):
+                with self.subTest(fmt=fmt, consent=consent):
+                    response = self.call(
+                        self.config(), "generate_image", prompt="x",
+                        output_format=fmt, output_format_user_requested=consent,
+                    )
+                    self.assertIn("error", response)
+                    self.assertIn(f"only through the {tool} tool", response["error"]["message"])
+        response = self.call(self.config(), "generate_image", prompt="x", _special_output_tool="gif",
+                             output_format="gif", output_format_user_requested=True)
+        self.assertIn("error", response)
 
 
 if __name__ == "__main__":

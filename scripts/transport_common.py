@@ -405,6 +405,10 @@ def webp_dimensions(data: bytes) -> tuple[int, int] | None:
     return None
 
 
+# SVG (vector) and GIF (animated) results skip local size and dimension checks.
+UNCHECKED_DIMENSION_SUFFIXES = {".svg", ".gif"}
+
+
 def image_dimensions(path: Path) -> tuple[int, int] | None:
     data = path.read_bytes()[:512 * 1024]
     return png_dimensions(data) or jpeg_dimensions(data) or webp_dimensions(data)
@@ -417,7 +421,18 @@ def sniff_extension(data: bytes, preferred: str = "png") -> str:
         return "jpg"
     if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         return "webp"
-    return preferred if preferred in {"png", "jpg", "jpeg", "webp"} else "png"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    if looks_like_svg(data):
+        return "svg"
+    return preferred if preferred in {"png", "jpg", "jpeg", "webp", "svg", "gif"} else "png"
+
+
+def looks_like_svg(data: bytes) -> bool:
+    head = data[:4096].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    if head.startswith(b"<svg"):
+        return True
+    return head.startswith((b"<?xml", b"<!doctype svg", b"<!--")) and b"<svg" in head
 
 
 def decode_b64_image(value: str) -> bytes:
@@ -523,6 +538,10 @@ def collect_image_metadata(images: list[Path]) -> list[dict[str, Any]]:
     metadata: list[dict[str, Any]] = []
     for path in images:
         item: dict[str, Any] = {"path": str(path.resolve())}
+        if path.suffix.lower() in UNCHECKED_DIMENSION_SUFFIXES:
+            item["format"] = path.suffix.lower().lstrip(".")
+            metadata.append(item)
+            continue
         dimensions = image_dimensions(path)
         if dimensions:
             width, height = dimensions
@@ -549,6 +568,8 @@ def output_size_warnings(requested_size: str | None, image_metadata: list[dict[s
     warnings: list[str] = []
     for index, item in enumerate(image_metadata, start=1):
         image_name = Path(str(item.get("path") or f"image_{index}")).name
+        if Path(image_name).suffix.lower() in UNCHECKED_DIMENSION_SUFFIXES:
+            continue
         width = item.get("width")
         height = item.get("height")
         if not isinstance(width, int) or not isinstance(height, int):

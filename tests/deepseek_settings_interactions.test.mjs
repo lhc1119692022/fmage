@@ -48,7 +48,7 @@ test('settings page pins providers and lists fetched models', { skip: !available
     if (url === 'api/fmage.config') {
       if (init && init.method === 'PUT') {
         saved = JSON.parse(init.body);
-        return response({ ...view, retry_on_failure: true, retry_count: 4 });
+        return response({ ...view, retry_on_failure: true, retry_count: 4, complexity: 'medium' });
       }
       return response(view);
     }
@@ -83,7 +83,8 @@ test('settings page pins providers and lists fetched models', { skip: !available
       register: (ns, dicts) => { dictionaries = { ns, dicts }; return () => {}; },
       bind: () => key => dictionaries.dicts.zh[key] ?? key,
     },
-    slots: { inject: (name, cb) => cb(), register: (options, c) => { registration = options; component = c; } },
+    // The input-bar pill registers a second slot; keep the settings section.
+    slots: { inject: (name, cb) => cb(), register: (options, c) => { if (options.name === 'settings.section') { registration = options; component = c; } } },
   };
   plugin.apply(ctx);
   assert.equal(registration.id, 'fmage');
@@ -108,7 +109,7 @@ test('settings page pins providers and lists fetched models', { skip: !available
   assert.equal(top.nextElementSibling, panel, 'the scroll panel follows the top block');
   assert.equal(panel.nextElementSibling, bar, 'the action bar sits outside the scroll panel');
   assert.equal(panel.getAttribute('role'), 'tabpanel');
-  assert.equal(top.querySelectorAll('button[role="tab"]').length, 4);
+  assert.equal(top.querySelectorAll('button[role="tab"]').length, 3);
   assert.equal(bar.parentElement, section);
   assert.ok(panel.contains(cards()[0]), 'cards live inside the scroll panel');
 
@@ -158,9 +159,12 @@ test('settings page pins providers and lists fetched models', { skip: !available
   assert.equal(modelRequests, 1);
   assert.ok(calls.includes('api/fmage.models'));
 
-  const retryTab = [...container.querySelectorAll('button[role="tab"]')].find(button => button.textContent === '重试');
-  assert.ok(retryTab, 'retry tab is rendered');
-  await act(async () => { retryTab.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
+  const settingsTab = [...container.querySelectorAll('button[role="tab"]')].find(button => button.textContent === '设置');
+  assert.ok(settingsTab, 'settings tab is rendered');
+  await act(async () => { settingsTab.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
+  // Folders, retry and generation share one panel as titled groups.
+  assert.deepEqual([...container.querySelectorAll('.fmg-panel .fmg-group-title')].map(node => node.textContent),
+    ['目录', '重试', '生成']);
   const retrySwitch = container.querySelector('button[role="switch"][aria-label="失败后自动重试"]');
   assert.ok(retrySwitch, 'retry switch is rendered');
   assert.equal(retrySwitch.getAttribute('aria-checked'), 'false');
@@ -178,6 +182,17 @@ test('settings page pins providers and lists fetched models', { skip: !available
   });
   assert.equal(countInput.value, '4');
 
+  const complexitySelect = window.document.getElementById('fmg-complexity');
+  assert.ok(complexitySelect, 'complexity select is rendered');
+  assert.equal(complexitySelect.value, 'false');
+  assert.deepEqual([...complexitySelect.options].map(option => option.value), ['false', 'low', 'medium', 'high']);
+  const setSelectValue = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+  await act(async () => {
+    setSelectValue.call(complexitySelect, 'medium');
+    complexitySelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+  });
+  assert.equal(window.document.getElementById('fmg-complexity').value, 'medium');
+
   const saveButton = [...container.querySelectorAll('button')].find(button => button.textContent === '保存');
   assert.ok(saveButton, 'save button is rendered');
   assert.equal(saveButton.disabled, false);
@@ -185,6 +200,7 @@ test('settings page pins providers and lists fetched models', { skip: !available
   await act(async () => {});
   assert.equal(saved.changes.retry_on_failure, true);
   assert.equal(saved.changes.retry_count, 4);
+  assert.equal(saved.changes.complexity, 'medium');
   assert.equal(saved.changes.output_dir, '');
 
   const accepted = saved;

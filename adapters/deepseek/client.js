@@ -65,6 +65,9 @@ window.__ModuleLoader__.load({
    how tall the tab content grows; the reserved gutter stops the cards from
    shifting when a scrollbar appears. */
 .fmg-panel{flex:1 1 0;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:10px;padding-bottom:8px}
+.fmg-group{display:flex;flex-direction:column;gap:10px}
+.fmg-group+.fmg-group{border-top:.5px solid var(--dsw-alias-border-l2);padding-top:14px;margin-top:4px}
+.fmg-group-title{margin:0}
 .fmg-setting{display:flex;align-items:center;gap:14px;border:.5px solid var(--dsw-alias-border-l2);border-radius:12px;padding:10px 12px}
 .fmg-setting-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .fmg-setting-title{font-weight:600}
@@ -113,7 +116,10 @@ window.__ModuleLoader__.load({
 `;
     const zh = {
       nav: 'Fmage 生图', title: 'Fmage 生图',
-      tabProviders: '提供商', tabWorkflows: '工作流', tabPaths: '目录', tabRetry: '重试',
+      tabProviders: '提供商', tabWorkflows: '工作流', tabSettings: '设置',
+      groupPaths: '目录', groupRetry: '重试', groupGeneration: '生成',
+      complexity: '复杂度 (complexity)', complexityOff: 'False（不发送）', complexityLow: 'Low', complexityMedium: 'Medium', complexityHigh: 'High',
+      complexityHint: '仅对 gpt-image-2.6 系列模型生效，生成与编辑都会发送；2.5 及更早模型永不发送。False 表示不发送，由官方默认按 high 处理。',
       add: '添加提供商', addWorkflow: '添加工作流',
       name: '名称', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API Key',
       enable: '启用 {name}', remove: '移除', show: '显示密钥', hide: '隐藏密钥',
@@ -141,7 +147,10 @@ window.__ModuleLoader__.load({
     };
     const en = {
       nav: 'Fmage images', title: 'Fmage images',
-      tabProviders: 'Providers', tabWorkflows: 'Workflows', tabPaths: 'Folders', tabRetry: 'Retry',
+      tabProviders: 'Providers', tabWorkflows: 'Workflows', tabSettings: 'Settings',
+      groupPaths: 'Folders', groupRetry: 'Retry', groupGeneration: 'Generation',
+      complexity: 'Complexity', complexityOff: 'False (not sent)', complexityLow: 'Low', complexityMedium: 'Medium', complexityHigh: 'High',
+      complexityHint: 'Applies only to gpt-image-2.6 series models, on both generation and edits; never sent to 2.5 or earlier. False omits the field, so the API default (high) applies.',
       add: 'Add provider', addWorkflow: 'Add workflow',
       name: 'Name', transport: 'Transport', baseUrl: 'Base URL', model: 'Model', apiKey: 'API key',
       enable: 'Enable {name}', remove: 'Remove', show: 'Show key', hide: 'Hide key',
@@ -216,6 +225,7 @@ window.__ModuleLoader__.load({
         output_dir: view.output_dir, cache_dir: view.cache_dir,
         retry_on_failure: view.retry_on_failure === true,
         retry_count: String(view.retry_count ?? DEFAULT_RETRY_COUNT),
+        complexity: ['low', 'medium', 'high'].includes(view.complexity) ? view.complexity : false,
       };
     };
     /** Retry count stays a string while editing, so the field can be empty mid-edit. */
@@ -243,6 +253,7 @@ window.__ModuleLoader__.load({
         show_provider_pill: draft.showProviderPill !== false,
         output_dir: draft.output_dir, cache_dir: draft.cache_dir,
         retry_on_failure: draft.retry_on_failure === true, retry_count: retryCountOf(draft.retry_count, t),
+        complexity: draft.complexity || false,
       };
     }
     /** Insertion slot in the original list for dropping before/after a target row. */
@@ -516,7 +527,9 @@ window.__ModuleLoader__.load({
         id: key(), from: null, name: '', connection: connectionNames[0] || '', workflow_id: '',
         description: '', instance_type: 'default', outputs: '', inputsText: '{}',
       });
-      const tabs = [['providers', t('tabProviders')], ['workflows', t('tabWorkflows')], ['paths', t('tabPaths')], ['retry', t('tabRetry')]];
+      const tabs = [['providers', t('tabProviders')], ['workflows', t('tabWorkflows')], ['settings', t('tabSettings')]];
+      const group = (id, title, children) => h('section', { key: id, className: 'fmg-group', 'aria-labelledby': `fmg-group-${id}` },
+        h('h4', { id: `fmg-group-${id}`, className: 'fmg-group-title' }, title), ...children);
       const empty = list => list.length ? null : h('p', { className: 'fmg-empty' }, t('none'));
       const connectionNames = draft.connections.map(c => c.name).filter(Boolean);
       const panels = {
@@ -559,13 +572,12 @@ window.__ModuleLoader__.load({
           }))),
           h(React.Fragment, { key: 'we' }, empty(draft.workflows)),
         ],
-        paths: [
+        settings: [group('paths', t('groupPaths'), [
           h('p', { key: 'i', className: 'fmg-intro' }, t('pathHint')),
           h('div', { key: 'f', className: 'fmg-fields' },
             Field({ id: 'fmg-out', label: t('outputDir'), children: h('input', { id: 'fmg-out', value: draft.output_dir, spellCheck: false, onChange: e => set({ output_dir: e.target.value }) }) }),
             Field({ id: 'fmg-cache', label: t('cacheDir'), children: h('input', { id: 'fmg-cache', value: draft.cache_dir, spellCheck: false, onChange: e => set({ cache_dir: e.target.value }) }) })),
-        ],
-        retry: [
+        ]), group('retry', t('groupRetry'), [
           h('p', { key: 'i', className: 'fmg-intro' }, t('retryHint')),
           h('div', { key: 's', className: 'fmg-setting' },
             h('div', { className: 'fmg-setting-main' },
@@ -582,7 +594,15 @@ window.__ModuleLoader__.load({
                 inputMode: 'numeric', value: draft.retry_count, onChange: e => set({ retry_count: e.target.value }),
               }),
               h('p', { className: 'fmg-hint' }, t('retryCountHint'))) })),
-        ],
+        ]), group('generation', t('groupGeneration'), [
+          h('p', { key: 'i', className: 'fmg-intro' }, t('complexityHint')),
+          h('div', { key: 'f', className: 'fmg-fields' },
+            Field({ id: 'fmg-complexity', label: t('complexity'), children: h('select', {
+              id: 'fmg-complexity', value: draft.complexity || 'false',
+              onChange: e => set({ complexity: e.target.value === 'false' ? false : e.target.value }),
+            }, [['false', 'complexityOff'], ['low', 'complexityLow'], ['medium', 'complexityMedium'], ['high', 'complexityHigh']]
+              .map(([value, label]) => h('option', { key: value, value }, t(label)))) })),
+        ])],
       };
       return h('section', { className: 'fmg', 'aria-labelledby': 'fmg-title' },
         // Title, path, and tabs stay outside the scroll region.

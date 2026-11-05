@@ -1,0 +1,7 @@
+interface:
+  display_name: "Fmage SVG"
+  short_description: "仅显式调用，用 gpt-image-2.6 生成单个静态 SVG 矢量图"
+  default_prompt: "Use $fmage-svg to generate this as an SVG vector graphic."
+
+policy:
+  allow_implicit_invocation: false
