@@ -136,6 +136,7 @@ window.__ModuleLoader__.load({
 .fmg-ann-comment{display:flex;align-items:flex-start;gap:6px}
 .fmg-ann-comment-no{flex:none;width:18px;height:18px;border-radius:50%;background:var(--dsw-alias-state-business-primary,#4c78ff);color:#fff;font-size:11px;line-height:18px;text-align:center}
 .fmg-ann-comment input{flex:1;min-width:0;font:inherit;font-size:12px;padding:4px 7px;border:.5px solid var(--dsw-alias-border-l4);border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:inherit}
+.fmg-ann-text-input{flex:1;min-width:0;font:inherit;font-size:12px;padding:5px 8px;border:.5px solid var(--dsw-alias-border-l4);border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:inherit}
 .fmg-ann-foot{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .fmg-ann-path{flex:1 1 100%;font-family:var(--dsw-font-mono,monospace);font-size:11px;word-break:break-all;color:var(--dsw-alias-label-tertiary)}
 .fmg-ann-err{flex:1 1 100%;color:var(--dsw-alias-state-danger-primary,#d33);font-size:11.5px}
@@ -171,6 +172,8 @@ window.__ModuleLoader__.load({
       annExport: '保存并插入', annExporting: '写入中…', annCopy: '复制路径', annCopied: '已复制',
       annExported: '已保存，路径已插入输入框。', annExportedCopy: '已保存，路径已复制。',
       annTextPrompt: '标注文字', annNeedSelection: '先在图上画一处标注。',
+      annTextHint: '填好文字后，在图上点一下落笔。', annTextRequired: '先填标注文字。',
+      annRemoveComment: '删除这条评论',
       annZoomIn: '放大', annZoomOut: '缩小', annZoomReset: '恢复适应窗口',
       annLoadFailed: '图片读取失败。', annFailed: '操作失败', annRestored: '已恢复上次的标注。',
       showPill: '在输入栏显示生图胶囊', showPillHint: '关闭后仍可在下方列表切换默认提供商；改动在下一次请求生效。',
@@ -220,6 +223,8 @@ window.__ModuleLoader__.load({
       annExport: 'Save and insert', annExporting: 'Writing…', annCopy: 'Copy path', annCopied: 'Copied',
       annExported: 'Saved; the path was inserted into the composer.', annExportedCopy: 'Saved; the path was copied.',
       annTextPrompt: 'Annotation text', annNeedSelection: 'Draw one annotation first.',
+      annTextHint: 'Type the text, then click the image to place it.', annTextRequired: 'Type the annotation text first.',
+      annRemoveComment: 'Remove this comment',
       annZoomIn: 'Zoom in', annZoomOut: 'Zoom out', annZoomReset: 'Fit to window',
       annLoadFailed: 'The image could not be read.', annFailed: 'The operation failed', annRestored: 'Restored the previous annotation.',
       showPill: 'Show the image provider pill in the composer', showPillHint: 'Turning it off keeps the list below and the saved default; changes apply to the next request.',
@@ -894,6 +899,7 @@ window.__ModuleLoader__.load({
       const [manifest, setManifest] = useState('');
       const [drafting, setDrafting] = useState(null);
       const [zoom, setZoom] = useState(1);
+      const [label, setLabel] = useState('');
       const svgRef = useRef(null);
       const fileRef = useRef(null);
 
@@ -978,10 +984,16 @@ window.__ModuleLoader__.load({
         const id = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const width = Math.max(2, Math.round(Math.min(source.width, source.height) / 220));
         if (tool === 'text') {
-          const value = window.prompt(t('annTextPrompt'), '');
-          if (!value) return;
+          // Electron does not implement window.prompt, so the text comes from
+          // the toolbar field instead of a blocking browser dialog.
+          const value = label.trim();
+          if (!value) {
+            setError(t('annTextRequired'));
+            return;
+          }
           setShapes(list => [...list, { id, type: 'text', color, width, x: point.x, y: point.y, text: value }]);
           setRedo([]);
+          setError('');
           return;
         }
         if (tool === 'marker') {
@@ -1079,10 +1091,10 @@ window.__ModuleLoader__.load({
       };
 
       const tools = h('div', { className: 'fmg-ann-bar' },
-        ANN_TOOLS.map(([id, label]) => h('button', {
+        ANN_TOOLS.map(([id, label_]) => h('button', {
           key: id, type: 'button', className: 'fmg-ann-tool', 'aria-pressed': tool === id,
-          title: t(label), onClick: () => setTool(id),
-        }, t(label))),
+          title: t(label_), onClick: () => setTool(id),
+        }, t(label_))),
         h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
         h('div', { className: 'fmg-ann-swatches' }, ANN_COLORS.map(value => h('button', {
           key: value, type: 'button', className: 'fmg-ann-swatch', 'aria-pressed': color === value,
@@ -1123,6 +1135,18 @@ window.__ModuleLoader__.load({
         h('span', { className: 'fmg-ann-note' },
           capable ? t(mode === 'markup' ? 'annModeMarkupHint' : 'annModeFlattenHint') : t('annModeUnsupported')));
 
+      const textBar = tool === 'text'
+        ? h('div', { className: 'fmg-ann-bar' },
+          h('input', {
+            className: 'fmg-ann-text-input',
+            value: label,
+            placeholder: t('annTextPrompt'),
+            'aria-label': t('annTextPrompt'),
+            onChange: event => setLabel(event.target.value),
+          }),
+          h('span', { className: 'fmg-ann-note' }, t('annTextHint')))
+        : null;
+
       const commentBar = h('div', { className: 'fmg-ann-comments' },
         comments.map((entry, index) => h('div', { key: entry.id, className: 'fmg-ann-comment' },
           h('span', { className: 'fmg-ann-comment-no' }, String(index + 1)),
@@ -1134,7 +1158,16 @@ window.__ModuleLoader__.load({
               const value = event.target.value;
               setComments(list => list.map(item => (item.id === entry.id ? { ...item, text: value } : item)));
             },
-          }))),
+          }),
+          h('button', {
+            type: 'button', className: 'fmg-ann-tool', title: t('annRemoveComment'),
+            'aria-label': t('annRemoveComment'),
+            onClick: () => {
+              const marker = shapes.find(shape => shape.type === 'marker' && shape.n === index + 1);
+              setComments(list => list.filter(item => item.id !== entry.id));
+              if (marker) setShapes(list => list.filter(shape => shape.id !== marker.id));
+            },
+          }, '×'))),
         h('div', { className: 'fmg-ann-foot' },
           h('button', {
             type: 'button', className: 'fmg-ann-btn',
@@ -1176,6 +1209,7 @@ window.__ModuleLoader__.load({
           onChange: event => { void openFile(event.target.files && event.target.files[0]); },
         }),
         tools,
+        textBar,
         modeBar,
         stage,
         source ? commentBar : null,
