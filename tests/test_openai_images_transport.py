@@ -279,6 +279,44 @@ class EditReferencePreparationTests(unittest.TestCase):
                 self.assertGreater(image.getpixel((0, 0))[0], 40)
             self.assertIn("reference_center_cropped_to_requested_ratio", notes)
 
+    def test_rounding_delta_keeps_the_reference_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            self.horizontal_gradient(reference, (2095, 726))
+            output, notes = transport.prepare_edit_reference(reference, "2096x736", Path(temp_dir))
+            self.assertEqual(output, reference)
+            self.assertIn("reference_image_kept_within_canvas_tolerance", notes)
+            self.assertEqual(list(Path(temp_dir).glob("*.png")), [reference])
+
+    def test_same_framing_at_another_resolution_keeps_the_reference_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            self.horizontal_gradient(reference, (1448, 1086))
+            output, notes = transport.prepare_edit_reference(reference, "2368x1776", Path(temp_dir))
+            self.assertEqual(output, reference)
+            self.assertIn("reference_image_kept_within_canvas_tolerance", notes)
+            self.assertEqual(list(Path(temp_dir).glob("*.png")), [reference])
+
+    def test_rounding_delta_skips_a_requested_crop(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            self.horizontal_gradient(reference, (2095, 726))
+            output, notes = transport.prepare_edit_reference(
+                reference, "2096x736", Path(temp_dir), crop=True
+            )
+            self.assertEqual(output, reference)
+            self.assertIn("reference_crop_skipped_within_canvas_tolerance", notes)
+            self.assertEqual(list(Path(temp_dir).glob("*.png")), [reference])
+
+    def test_rescale_note_only_when_the_source_was_resampled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "reference.png"
+            self.horizontal_gradient(reference, (1200, 400))
+            output, notes = transport.prepare_edit_reference(reference, "1200x480", Path(temp_dir))
+            self.assertNotEqual(output, reference)
+            self.assertIn("reference_image_edges_extended_without_cropping", notes)
+            self.assertNotIn("reference_image_scaled_without_cropping", notes)
+
     def test_crop_intent_detection_distinguishes_resize_from_crop(self) -> None:
         self.assertTrue(transport.has_crop_intent("裁成16:9"))
         self.assertTrue(transport.has_crop_intent("crop it to 16:9"))

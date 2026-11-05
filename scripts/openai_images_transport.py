@@ -460,10 +460,25 @@ def extend_reference_to_canvas(
                 canvas.paste(image.crop(box).resize(size), position)
         output = output_dir / f"{path.stem}-extended.png"
         canvas.save(output, format="PNG")
-    notes = ["reference_image_scaled_without_cropping"]
+    notes: list[str] = []
+    if (scaled_width, scaled_height) != (width, height):
+        notes.append("reference_image_scaled_without_cropping")
     if left or right or top or bottom:
         notes.append("reference_image_edges_extended_without_cropping")
     return output, notes
+
+
+# A canvas that only rounds the reference up to the transport's multiple, or
+# that matches its framing at another resolution, asks the model to redraw the
+# same composition. Rewriting the file for that resamples the source and can
+# leave invented edge pixels the model mistakes for content, so the reference
+# is sent unchanged and only `size` moves. 2% absorbs 16-pixel rounding on
+# ordinary edges; anything larger is a real reframe.
+REFERENCE_ASPECT_TOLERANCE = 0.02
+
+
+def reference_aspect_delta(dimensions: tuple[int, int], target: tuple[int, int]) -> float:
+    return abs(math.log((target[0] / target[1]) / (dimensions[0] / dimensions[1])))
 
 
 def prepare_edit_reference(
@@ -476,6 +491,13 @@ def prepare_edit_reference(
     target = parse_size(target_size)
     if not dimensions or not target or dimensions == target:
         return path, []
+    if reference_aspect_delta(dimensions, target) <= REFERENCE_ASPECT_TOLERANCE:
+        note = (
+            "reference_crop_skipped_within_canvas_tolerance"
+            if crop
+            else "reference_image_kept_within_canvas_tolerance"
+        )
+        return path, [note]
     if crop:
         return crop_reference_to_canvas(path, dimensions, target, output_dir)
     return extend_reference_to_canvas(path, dimensions, target, output_dir)
