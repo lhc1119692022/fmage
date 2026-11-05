@@ -13,12 +13,15 @@ description: Explicit-only Fmage GIF entry. Generate one animated GIF with the g
 
 ## Tool Call
 
-- Call `generate_gif` once. It generates on the generations endpoint with `n=1`; there is no GIF edit, batch, or reference-image path. If the user asks to edit a GIF or supplies reference images, explain that the API does not support GIF edits and stop.
+- Call `generate_gif` once with `n=1`; there is no batch path.
+  - Without reference images it uses the generations endpoint.
+  - When the user supplies reference images (or attaches images to the request), pass their paths or URLs in `images`; the tool then uses the image edits endpoint, like `edit_image`. Pass `use_latest: true` only when the user explicitly asks to animate the latest still image.
+  - In the prompt, say how the references are used (subject, style, or starting frame) and describe the motion.
 - The tool requires an `openai-images` provider with a `gpt-image-2.6` series model (for example `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare`). Omit `provider` unless the user names one. If the tool rejects the provider, report the error; do not switch providers on your own.
 - Animation parameters:
-  - Defaults when the user specifies nothing: 24 frames, 80 ms per frame (about 2 seconds at 12 fps). Omit both fields to use them.
-  - A frame count (`24帧`) maps to `frame_count` (2–64).
-  - A length in seconds (`3秒`) maps to `duration_seconds`; the server converts it at 12 fps. Never pass both `frame_count` and `duration_seconds`. The server rejects a conversion above 64 frames (more than about 5.3 seconds) or below 2 frames before any provider call; report that error instead of picking another value.
+  - Defaults when the user specifies nothing: 16 frames, 80 ms per frame (about 1.3 seconds). Omit both fields to use them.
+  - A frame count (`12帧`) maps to `frame_count` (2–16).
+  - A length in seconds (`1秒`) maps to `duration_seconds`; the server converts it at 12 fps. Never pass both `frame_count` and `duration_seconds`. The server rejects a conversion above 16 frames (more than about 1.3 seconds) or below 2 frames before any provider call; report that error instead of picking another value. To make a longer loop, the user can raise `frame_duration_ms` instead.
   - A per-frame time or speed in milliseconds maps to `frame_duration_ms` (20–2000, rounded to 10).
 - Frame size is always `auto`; the tool has no size, aspect, or resolution argument. Ignore user frame-size requests and tell the user the API chooses the frame size within its total pixel budget (8,294,400 pixels per request).
 - `quality`: omit it unless the user selects a tier; pass `quality_user_requested: true` when the selected tier differs from `high`.

@@ -946,11 +946,11 @@ const COMPLEXITY_LEVELS = ["low", "medium", "high"];
 const SPECIAL_OUTPUT_FORMATS = ["svg", "gif"];
 const SPECIAL_FORMAT_TOOL_NAMES = { svg: TOOL_GENERATE_SVG, gif: TOOL_GENERATE_GIF };
 const SPECIAL_FORMAT_QUALITIES = ["low", "medium", "high", "xhigh", "max"];
-const GIF_DEFAULT_FRAME_COUNT = 24;
+const GIF_DEFAULT_FRAME_COUNT = 16;
 const GIF_DEFAULT_FRAME_DURATION_MS = 80;
 const GIF_SECONDS_FPS = 12;
 const GIF_MIN_FRAMES = 2;
-const GIF_MAX_FRAMES = 64;
+const GIF_MAX_FRAMES = 16;
 const GIF_MIN_FRAME_DURATION_MS = 20;
 const GIF_MAX_FRAME_DURATION_MS = 2000;
 
@@ -1000,10 +1000,17 @@ function gifFrameDuration(args) {
   return Math.round(duration / 10) * 10;
 }
 
-/** Run the explicit-only generate_svg / generate_gif entries (gpt-image-2.6, generations, n=1). */
+/**
+ * Run the explicit-only generate_svg / generate_gif entries (gpt-image-2.6, n=1).
+ * SVG always uses the generations endpoint. GIF switches to the edits endpoint,
+ * like edit_image, when reference images or use_latest are supplied.
+ */
 async function runSpecialFormatCommand(format, rawArgs = {}) {
   const prompt = nonEmptyString(rawArgs.prompt);
   if (!prompt) throw new Error("The prompt argument must contain one complete prompt.");
+  const images = format === "gif" ? imageInputPaths(rawArgs.images) : [];
+  const useLatest = format === "gif" && rawArgs.use_latest === true;
+  const command = images.length || useLatest ? "edit" : "generate";
   const quality = nonEmptyString(rawArgs.quality);
   if (quality && !SPECIAL_FORMAT_QUALITIES.includes(quality)) {
     throw new Error(`quality must be one of: ${SPECIAL_FORMAT_QUALITIES.join(", ")}.`);
@@ -1030,8 +1037,10 @@ async function runSpecialFormatCommand(format, rawArgs = {}) {
   if (format === "gif") {
     args.frame_count = gifFrameCount(rawArgs);
     args.frame_duration_ms = gifFrameDuration(rawArgs);
+    if (images.length) args.images = images;
+    if (useLatest) args.use_latest = true;
   }
-  return runSingleImageCommand("generate", args, provider);
+  return runSingleImageCommand(command, args, provider);
 }
 
 /**
@@ -2854,6 +2863,15 @@ function specialFormatProperties(format) {
         maximum: GIF_MAX_FRAME_DURATION_MS,
         description: `Milliseconds per frame (${GIF_MIN_FRAME_DURATION_MS}-${GIF_MAX_FRAME_DURATION_MS}, rounded to 10). Defaults to ${GIF_DEFAULT_FRAME_DURATION_MS}.`,
       },
+      images: {
+        type: "array",
+        items: { type: "string" },
+        description: "Reference image paths or URLs. When present, the GIF is made on the image edits endpoint.",
+      },
+      use_latest: {
+        type: "boolean",
+        description: "Use the latest still image output as the reference; also selects the edits endpoint.",
+      },
     });
   }
   Object.assign(properties, {
@@ -2880,7 +2898,7 @@ function specialFormatToolDefinition(format) {
     name: SPECIAL_FORMAT_TOOL_NAMES[format],
     title: gif ? "Generate GIF with Fmage" : "Generate SVG with Fmage",
     description: gif
-      ? "Explicit Fmage GIF entry only: generate one animated GIF with a gpt-image-2.6 model. Frame size is always auto."
+      ? "Explicit Fmage GIF entry only: generate one animated GIF with a gpt-image-2.6 model, optionally from reference images. Frame size is always auto."
       : "Explicit Fmage SVG entry only: generate one static SVG vector graphic with a gpt-image-2.6 model.",
     inputSchema: {
       type: "object",

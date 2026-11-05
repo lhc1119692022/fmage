@@ -474,27 +474,33 @@ class Image26ComplexityAndFormatTests(unittest.TestCase):
                 args = self.parse("generate", "--prompt", "t", "--model", "gpt-image-2.5-flare", "--output-format", fmt)
                 with self.assertRaisesRegex(ValueError, "supported only for gpt-image-2.6"):
                     transport.validate_common(args)
-                args = self.parse("edit", "--prompt", "t", "--model", "gpt-image-2.6-flare", "--output-format", fmt)
-                with self.assertRaisesRegex(ValueError, "not edits"):
-                    transport.validate_common(args)
+        args = self.parse("edit", "--prompt", "t", "--model", "gpt-image-2.6-flare", "--output-format", "svg")
+        with self.assertRaisesRegex(ValueError, "not edits"):
+            transport.validate_common(args)
+        # GIF output is accepted on the edits endpoint.
+        args = self.parse(
+            "edit", "--prompt", "t", "--model", "gpt-image-2.6-flare", "--output-format", "gif", "--frame-count", "16",
+        )
+        transport.validate_common(args)
+        self.assertEqual(transport.resolve_size(args, [])[0], "auto")
 
     def test_gif_frame_fields_and_auto_size(self) -> None:
         args = self.parse(
             "generate", "--prompt", "t", "--model", "gpt-image-2.6-flare", "--output-format", "gif",
-            "--frame-count", "24", "--frame-duration-ms", "80", "--size", "1024x1024",
+            "--frame-count", "16", "--frame-duration-ms", "80", "--size", "1024x1024",
         )
         transport.validate_common(args)
         size, notes = transport.resolve_size(args, [])
         self.assertEqual(size, "auto")
         self.assertIn("gif_frame_size_auto", notes)
         payload = transport.common_payload(args, "t", size)
-        self.assertEqual((payload["frame_count"], payload["frame_duration_ms"]), (24, 80))
+        self.assertEqual((payload["frame_count"], payload["frame_duration_ms"]), (16, 80))
         self.assertEqual(payload["output_format"], "gif")
 
     def test_gif_frame_ranges_and_format_binding(self) -> None:
         cases = (
-            (["--output-format", "gif", "--frame-count", "1"], "frame-count must be between 2 and 64"),
-            (["--output-format", "gif", "--frame-count", "65"], "frame-count must be between 2 and 64"),
+            (["--output-format", "gif", "--frame-count", "1"], "frame-count must be between 2 and 16"),
+            (["--output-format", "gif", "--frame-count", "17"], "frame-count must be between 2 and 16"),
             (["--output-format", "gif", "--frame-duration-ms", "10"], "frame-duration-ms must be between 20 and 2000"),
             (["--frame-count", "24"], "only be used with --output-format gif"),
         )

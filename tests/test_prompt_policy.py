@@ -826,10 +826,12 @@ class Image26ComplexityAndSpecialFormatTests(unittest.TestCase):
         gif = tools["generate_gif"]["inputSchema"]
         self.assertFalse(svg["additionalProperties"])
         self.assertFalse(gif["additionalProperties"])
-        for forbidden in ("size", "aspect", "resolution", "background", "output_format", "output_compression", "complexity", "images"):
+        for forbidden in ("size", "aspect", "resolution", "background", "output_format", "output_compression", "complexity"):
             self.assertNotIn(forbidden, svg["properties"])
             self.assertNotIn(forbidden, gif["properties"])
-        self.assertTrue({"frame_count", "duration_seconds", "frame_duration_ms"} <= set(gif["properties"]))
+        self.assertNotIn("images", svg["properties"])
+        self.assertTrue({"frame_count", "duration_seconds", "frame_duration_ms", "images", "use_latest"} <= set(gif["properties"]))
+        self.assertEqual(gif["properties"]["frame_count"]["maximum"], 16)
         self.assertNotIn("frame_count", svg["properties"])
         self.assertNotIn("complexity", all_property_names(tools["generate_image"]["inputSchema"]))
 
@@ -863,18 +865,33 @@ class Image26ComplexityAndSpecialFormatTests(unittest.TestCase):
     def test_gif_defaults_and_seconds_conversion(self) -> None:
         request = self.request(self.call(self.config(), "generate_gif", prompt="lantern loop"))
         self.assertEqual((request["output_format"], request["size"]), ("gif", "auto"))
-        self.assertEqual((request["frame_count"], request["frame_duration_ms"]), (24, 80))
-        request = self.request(self.call(self.config(), "generate_gif", prompt="x", duration_seconds=3, frame_duration_ms=87))
-        self.assertEqual((request["frame_count"], request["frame_duration_ms"]), (36, 90))
-        request = self.request(self.call(self.config(), "generate_gif", prompt="x", frame_count=64))
-        self.assertEqual(request["frame_count"], 64)
+        self.assertEqual((request["frame_count"], request["frame_duration_ms"]), (16, 80))
+        request = self.request(self.call(self.config(), "generate_gif", prompt="x", duration_seconds=1, frame_duration_ms=87))
+        self.assertEqual((request["frame_count"], request["frame_duration_ms"]), (12, 90))
+        request = self.request(self.call(self.config(), "generate_gif", prompt="x", frame_count=16))
+        self.assertEqual(request["frame_count"], 16)
+
+    def test_gif_reference_images_use_the_edits_endpoint(self) -> None:
+        plain = self.call(self.config(), "generate_gif", prompt="x")
+        self.assertTrue(plain["result"]["structuredContent"]["endpoint"].endswith("/images/generations"))
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            reference = Path(temporary_directory) / "reference.png"
+            reference.write_bytes(TRANSPARENT_TEST_PNG)
+            response = self.call(self.config(), "generate_gif", prompt="make it wave", images=[str(reference)], frame_count=8)
+            content = response["result"]["structuredContent"]
+            self.assertTrue(content["endpoint"].endswith("/images/edits"))
+            self.assertEqual([Path(item).name for item in content["images"]], ["reference.png"])
+            self.assertEqual((content["request"]["output_format"], content["request"]["size"]), ("gif", "auto"))
+            self.assertEqual(content["request"]["frame_count"], 8)
+        svg = tool_map(call_server(self.config(), "tools/list", {}))["generate_svg"]["inputSchema"]
+        self.assertNotIn("use_latest", svg["properties"])
 
     def test_gif_limits_fail_before_any_provider_call(self) -> None:
         cases = (
-            ({"duration_seconds": 6}, "at most 5.3 seconds"),
+            ({"duration_seconds": 2}, "at most 1.3 seconds"),
             ({"duration_seconds": 0.1}, "frame"),
-            ({"frame_count": 65}, "frame_count"),
-            ({"frame_count": 24, "duration_seconds": 2}, "duration_seconds"),
+            ({"frame_count": 17}, "frame_count"),
+            ({"frame_count": 8, "duration_seconds": 1}, "duration_seconds"),
             ({"frame_duration_ms": 10}, "frame_duration_ms"),
         )
         for extra, message in cases:

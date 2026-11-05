@@ -377,7 +377,7 @@ class McpExecutionPolicyTests(unittest.TestCase):
                     }},
                 }), encoding="utf-8")
                 svg_result = self.call(config, "generate_svg", {"prompt": "simple badge", "verbose": True})
-                gif_result = self.call(config, "generate_gif", {"prompt": "blinking dot", "duration_seconds": 2})
+                gif_result = self.call(config, "generate_gif", {"prompt": "blinking dot", "duration_seconds": 1})
             finally:
                 server.shutdown()
                 server.server_close()
@@ -385,7 +385,7 @@ class McpExecutionPolicyTests(unittest.TestCase):
 
             self.assertEqual([body["output_format"] for body in bodies], ["svg", "gif"])
             self.assertEqual([body.get("complexity") for body in bodies], ["low", "low"])
-            self.assertEqual((bodies[1]["frame_count"], bodies[1]["frame_duration_ms"]), (24, 80))
+            self.assertEqual((bodies[1]["frame_count"], bodies[1]["frame_duration_ms"]), (12, 80))
             self.assertEqual(bodies[1]["size"], "auto")
             self.assertNotIn("frame_count", bodies[0])
             for body in bodies:

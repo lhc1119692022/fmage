@@ -107,7 +107,7 @@ def is_gpt_image_model(model: str | None) -> bool:
 SPECIAL_OUTPUT_FORMATS = {"svg", "gif"}
 COMPLEXITY_LEVELS = ("low", "medium", "high")
 GIF_MIN_FRAMES = 2
-GIF_MAX_FRAMES = 64
+GIF_MAX_FRAMES = 16
 GIF_MIN_FRAME_DURATION_MS = 20
 GIF_MAX_FRAME_DURATION_MS = 2000
 
@@ -1110,10 +1110,9 @@ def validate_common(args: argparse.Namespace) -> None:
             raise ValueError(
                 f"--output-format {args.output_format} is supported only for gpt-image-2.6 series models."
             )
-        if getattr(args, "command", None) == "edit":
-            raise ValueError(
-                f"--output-format {args.output_format} is supported only for image generation, not edits."
-            )
+        # GIF output is accepted on the edits endpoint (reference-image GIFs); SVG edits are not.
+        if args.output_format == "svg" and getattr(args, "command", None) == "edit":
+            raise ValueError("--output-format svg is supported only for image generation, not edits.")
     frame_count = getattr(args, "frame_count", None)
     frame_duration = getattr(args, "frame_duration_ms", None)
     if (frame_count is not None or frame_duration is not None) and args.output_format != "gif":
@@ -1329,7 +1328,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output-format", choices=["png", "jpeg", "webp", "svg", "gif"], default="png")
     parser.add_argument("--output-compression", type=int)
     parser.add_argument("--complexity", choices=list(COMPLEXITY_LEVELS), help="gpt-image-2.6 planning complexity.")
-    parser.add_argument("--frame-count", type=int, help="GIF frame count (2-64).")
+    parser.add_argument("--frame-count", type=int, help="GIF frame count (2-16).")
     parser.add_argument("--frame-duration-ms", type=int, help="GIF frame duration in milliseconds (20-2000).")
     parser.add_argument("--base-url", default=configured_value(PROVIDER_BASE_URL, "PROVIDER_BASE_URL", DEFAULT_BASE_URL))
     parser.add_argument("--model", default=configured_value(PROVIDER_IMAGE_MODEL, "PROVIDER_IMAGE_MODEL", DEFAULT_MODEL))

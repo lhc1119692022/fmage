@@ -221,13 +221,19 @@ not typo correction or automatic provider/model switching.
 
 `generate_svg` and `generate_gif` are separate tools so the standard `generate_image`,
 `edit_image`, and batch tools never produce these formats; they reject `output_format` svg/gif
-outright. Both tools are generation-only, produce one result (n=1), and require the selected
-provider to use `openai-images` with a gpt-image-2.6 model. They have no size, background,
-compression, or reference-image parameters. Low quality still needs `quality_user_requested=true`.
+outright. Both tools produce one result (n=1) and require the selected provider to use
+`openai-images` with a gpt-image-2.6 model. They have no size, background, or compression
+parameters. Low quality still needs `quality_user_requested=true`.
 
-- SVG: the returned payload is saved as UTF-8 XML in a `.svg` file.
-- GIF: defaults to 24 frames at 80 ms per frame. `frame_count` accepts 2–64. `duration_seconds`
-  is converted at 12 fps, and a conversion above 64 or below 2 frames is an error. Passing both
+- SVG: generation-only, with no reference-image parameters. The returned payload is saved as
+  UTF-8 XML in a `.svg` file.
+- GIF: without references it uses `/images/generations`. With `images` (reference paths or URLs)
+  or `use_latest=true` it uses `/images/edits`, the same multipart route as `edit_image`. The
+  OpenAI guide says the edits endpoint does not output GIF, but the edit API reference lists
+  `gif` and community tests report it works, so Fmage sends it and reports any upstream error.
+- GIF: defaults to 16 frames at 80 ms per frame. `frame_count` accepts 2–16 (the current API
+  limit; older docs said 64). `duration_seconds`
+  is converted at 12 fps, and a conversion above 16 or below 2 frames is an error. Passing both
   `frame_count` and `duration_seconds` is also an error. `frame_duration_ms` accepts 20–2000 and
   is rounded to 10 ms. Frame size is always `auto`, which keeps the request within the API's
   8,294,400-pixel total budget.
