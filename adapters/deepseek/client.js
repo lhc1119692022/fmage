@@ -893,6 +893,7 @@ window.__ModuleLoader__.load({
       const [comments, setComments] = useState([]);
       const [mode, setMode] = useState('flatten');
       const [capable, setCapable] = useState(false);
+      const [manualMode, setManualMode] = useState(false);
       const [busy, setBusy] = useState(false);
       const [error, setError] = useState('');
       const [notice, setNotice] = useState('');
@@ -903,20 +904,26 @@ window.__ModuleLoader__.load({
       const svgRef = useRef(null);
       const fileRef = useRef(null);
 
+      // The default provider decides whether a markup layer can be offered, and
+      // it can change through the composer pill while this panel stays mounted.
+      // Re-read on focus, but never override a mode the user picked by hand.
       useEffect(() => {
         let alive = true;
-        request(ROUTE).then(view => {
-          if (!alive) return undefined;
-          const providers = Array.isArray(view.providers) ? view.providers : [];
-          const active = providers.find(item => item.name === view.default_provider && item.enabled)
-            || providers.find(item => item.enabled) || null;
-          const supported = Boolean(active) && active.transport === 'openai-images' && isMarkupModel(active.model);
-          setCapable(supported);
-          setMode(supported ? 'markup' : 'flatten');
-          return undefined;
-        }).catch(() => { /* config unavailable: flatten stays the default */ });
-        return () => { alive = false; };
-      }, []);
+        const sync = () => {
+          request(ROUTE).then(view => {
+            if (!alive) return;
+            const providers = Array.isArray(view.providers) ? view.providers : [];
+            const active = providers.find(item => item.name === view.default_provider && item.enabled)
+              || providers.find(item => item.enabled) || null;
+            const supported = Boolean(active) && active.transport === 'openai-images' && isMarkupModel(active.model);
+            setCapable(supported);
+            setMode(current => (manualMode ? current : supported ? 'markup' : 'flatten'));
+          }).catch(() => { /* config unavailable: keep the current mode */ });
+        };
+        sync();
+        window.addEventListener('focus', sync);
+        return () => { alive = false; window.removeEventListener('focus', sync); };
+      }, [manualMode]);
 
       // Restore the layer whenever the source changes; the key is the image's
       // own identity, so reopening the same attachment resumes the same marks.
@@ -932,8 +939,9 @@ window.__ModuleLoader__.load({
 
       useEffect(() => {
         if (!source) return;
-        writeAnnotation(annotationKey(source), { shapes, comments, mode });
-      }, [source, shapes, comments, mode]);
+        // Only the marks belong to the image; the mode follows the provider.
+        writeAnnotation(annotationKey(source), { shapes, comments });
+      }, [source, shapes, comments]);
 
       const openDraftImage = async index => {
         setError('');
@@ -1125,11 +1133,11 @@ window.__ModuleLoader__.load({
         h('button', {
           type: 'button', className: 'fmg-ann-tool', 'aria-pressed': mode === 'markup',
           disabled: !capable,
-          onClick: () => setMode('markup'),
+          onClick: () => { setManualMode(true); setMode('markup'); },
         }, t('annModeMarkup')),
         h('button', {
           type: 'button', className: 'fmg-ann-tool', 'aria-pressed': mode === 'flatten',
-          onClick: () => setMode('flatten'),
+          onClick: () => { setManualMode(true); setMode('flatten'); },
         }, t('annModeFlatten')),
         h('span', { className: 'fmg-ann-chip' }, mode === 'markup' ? 'markup' : 'flatten'),
         h('span', { className: 'fmg-ann-note' },
