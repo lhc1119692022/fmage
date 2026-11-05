@@ -125,20 +125,19 @@ test('the sidebar tab body only appears when the right sidebar services resolve'
   assert.match(html, /fmg-ann/);
   assert.match(html, /fmg-ann-empty/);
 
-  // Loaded layout: one bar, four entries, no second toolbar.
+  // Loaded layout: one bar with four labelled entries, plus the stroke slider.
   const loaded = renderToString(requireReact('react').createElement(tabBody.component, {
     inputActions: { insertText: () => false, captureInsertion: () => ({}) },
     initialSource: { url: 'about:blank', name: 'cat.png', draftIndex: 0, width: 640, height: 480 },
   }));
   assert.equal((loaded.match(/fmg-ann-bar/g) || []).length, 1, 'exactly one toolbar');
   assert.match(loaded, /viewBox="0 0 640 480"/);
-  assert.match(loaded, /aria-label="标注工具"/);
-  assert.match(loaded, /aria-label="添加评论"/);
-  assert.match(loaded, /合成到原图/);
-  assert.match(loaded, />保存</);
-  // The drawing tools live behind the submenu, not on the main bar.
-  assert.doesNotMatch(loaded, /aria-label="画笔"/);
-  assert.doesNotMatch(loaded, /fmg-ann-range/);
+  for (const label of ['标注', '添加评论', '合成', '保存']) {
+    assert.match(loaded, new RegExp(`>${label}<`), `main bar shows ${label}`);
+  }
+  assert.match(loaded, /fmg-ann-slider/, 'the stroke slider sits on the image');
+  assert.match(loaded, /mask id="fmg-ann-erase"/, 'eraser strokes are a real mask');
+  assert.doesNotMatch(loaded, /aria-label="画笔"/, 'tools are behind the submenu');
 
   const draw = renderToString(requireReact('react').createElement(tabBody.component, {
     inputActions: { insertText: () => false, captureInsertion: () => ({}) },
@@ -148,7 +147,6 @@ test('the sidebar tab body only appears when the right sidebar services resolve'
   assert.equal((draw.match(/fmg-ann-bar/g) || []).length, 1, 'the submenu replaces the bar, never adds one');
   assert.match(draw, /aria-label="画笔"/);
   assert.match(draw, /aria-label="橡皮"/);
-  assert.match(draw, /fmg-ann-range/);
   assert.match(draw, /aria-label="返回"/);
   assert.doesNotMatch(draw, />保存</, 'saving lives on the main bar');
 });
