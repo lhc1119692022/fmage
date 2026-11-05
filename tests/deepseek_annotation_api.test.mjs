@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
@@ -173,4 +173,23 @@ test('a second revision keeps the earlier files intact', async t => {
   assert.notEqual(first.id, second.id);
   const original = await readFile(join(first.directory, 'markup.png'));
   assert.deepEqual(original, pngBytes());
+});
+
+test('a workspace older than the retention window is swept; fresh ones and strangers are not', async t => {
+  const { api, root } = await fixture(t);
+  const fresh = await api.save({ mode: 'flatten', image: dataUrl() });
+  const stale = await api.save({ mode: 'flatten', image: dataUrl() });
+  const stranger = join(root, 'annotations', 'c'.repeat(16));
+  await mkdir(stranger, { recursive: true });
+  await writeFile(join(stranger, 'notes.txt'), 'keep me');
+
+  const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+  await utimes(join(stale.directory, 'annotation.json'), old, old);
+
+  await api.save({ mode: 'flatten', image: dataUrl() });
+
+  const names = await readdir(join(root, 'annotations'));
+  assert.ok(names.includes(fresh.id), 'the older-but-fresh workspace survives');
+  assert.ok(!names.includes(stale.id), 'the expired workspace is removed');
+  assert.ok(names.includes('c'.repeat(16)), 'a directory without our manifest is untouched');
 });

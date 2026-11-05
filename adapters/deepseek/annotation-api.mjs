@@ -6,7 +6,7 @@
 // but no writable path, and the Conversation layer materializes an attachment
 // only after the message is sent. Writing both files here means the edit can
 // name real paths before anything is submitted.
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
@@ -15,6 +15,10 @@ const NO_STORE = { 'cache-control': 'no-store' };
 const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 96 * 1024 * 1024;
 const MANIFEST_NAME = 'annotation.json';
+// Each save writes a new directory and nothing ever overwrites one, because a
+// request may still be reading the layer it was given. Old workspaces are
+// removed by age instead: a week is far longer than any single edit.
+const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 class AnnotationError extends Error {
   constructor(message, status = 400) {
@@ -107,6 +111,30 @@ function manifestOf(body) {
 }
 
 /**
+ * Drop workspaces older than the retention window.
+ *
+ * Best effort and age-based only: the caller's own directory is always kept,
+ * and a directory without our manifest is never touched.
+ */
+async function pruneExpired(directory, keep) {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - RETENTION_MS;
+  await Promise.all(entries.filter(entry => entry.isDirectory()).map(async entry => {
+    const target = join(directory, entry.name);
+    if (target === keep) return;
+    try {
+      const manifest = await stat(join(target, MANIFEST_NAME));
+      if (manifest.mtimeMs < cutoff) await rm(target, { recursive: true, force: true });
+    } catch { /* not an annotation workspace, or already gone */ }
+  }));
+}
+
+/**
  * Persist one annotation workspace.
  *
  * Writes `image.png` (the untouched target), `markup.png` (the layer, markup
@@ -165,6 +193,9 @@ export function createAnnotationApi(root) {
         markup: markup === undefined ? null : join(target, 'markup.png'),
       };
       await writeFile(join(target, MANIFEST_NAME), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+      // Best effort; a failed sweep never fails the save the user asked for.
+      // Awaited so the response reflects the state on disk.
+      await pruneExpired(directory, target);
       return { id, directory: target, manifest: join(target, MANIFEST_NAME), ...manifest };
     },
   };

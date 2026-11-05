@@ -244,7 +244,8 @@ numbered pins, and writes the result through `POST /api/fmage.annotation`:
 Both modes leave the draft alone. The path of the written `annotation.json` is inserted into the
 composer, so the assistant reads the mode and comments from it rather than guessing. Files live
 under `<DSH_HOME>/fmage/annotations/<id>/` and each save gets a new id, so an edit that already
-read a layer never sees it replaced.
+read a layer never sees it replaced. Workspaces older than seven days are swept on the next save;
+directories without an `annotation.json` are never touched.
 
 ### SVG and GIF output
 

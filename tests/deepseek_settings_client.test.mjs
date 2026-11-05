@@ -95,11 +95,20 @@ test('the sidebar tab body only appears when the right sidebar services resolve'
       register: (options, component) => { if (options.name === 'sidebar.right.pane.tab') tabBody = { options, component }; return () => {}; },
     },
   };
+  let annotate;
   const ctx = {
     effect: fn => { fn(); },
     inject: (names, cb) => { if (names.includes('sidebarRightTabs')) cb(owner); },
     locale: { register: (ns, dicts) => { dictionaries = dicts; return () => {}; }, bind: () => key => dictionaries.zh[key] ?? key },
-    slots: { inject: (name, cb) => { if (name === 'settings.section' || name === 'conversation.input.right') cb(); }, register: () => () => {} },
+    slots: {
+      inject: (name, cb) => {
+        if (name === 'settings.section' || name === 'conversation.input.right') cb();
+      },
+      register: (options, component) => {
+        if (options.id === 'fmage-annotate') annotate = component;
+        return () => {};
+      },
+    },
   };
   plugin.apply(ctx);
   assert.equal(registration.id, 'dsh-fmage/annotation');
@@ -109,10 +118,18 @@ test('the sidebar tab body only appears when the right sidebar services resolve'
   assert.ok(tabBody);
   assert.equal(tabBody.options.key, 'dsh-fmage/annotation');
   assert.equal(typeof tabBody.component, 'function');
+
+  // The composer entry must open the registered kind, not a guessed one.
+  assert.equal(typeof annotate, 'function');
+  const entry = annotate();
+  entry.props.onClick();
+  assert.equal(opened, 'fmage-annotation');
+
   const { renderToString } = requireReact('react-dom/server');
   const html = renderToString(requireReact('react').createElement(tabBody.component, {
     inputActions: { insertText: () => false, captureInsertion: () => ({}) },
   }));
   assert.match(html, /标注工作台/);
   assert.match(html, /从输入框选图/);
+  assert.match(html, /标记层/);
 });
