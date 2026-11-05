@@ -113,52 +113,83 @@ window.__ModuleLoader__.load({
 .fmg-pill-check{display:grid;place-items:center;flex:0 0 16px;color:var(--dsw-alias-label-primary)}
 .fmg-pill-check svg{width:16px;height:16px}
 .fmg-pill-error{margin:4px;padding:6px 7px;border-radius:8px;background:rgba(239,68,68,.08);color:#ef4444;font-size:11px;line-height:16px;word-break:break-all}
-/* Sidebar annotation workbench: one floating bar, Codex-style controls. */
-.fmg-ann{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-layer-1);overflow:hidden}
-.fmg-ann-stage{flex:1 1 0;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:64px 14px 20px;touch-action:none}
-.fmg-ann-frame{position:relative;display:inline-block;max-width:100%;line-height:0;transform-origin:center center;will-change:transform}
-.fmg-ann-frame img{display:block;max-width:100%;max-height:100%;user-select:none;-webkit-user-drag:none;border-radius:6px}
-.fmg-ann-svg{position:absolute;left:0;top:0;width:100%;height:100%;touch-action:none}
-.fmg-ann-bar{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;padding:4px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);box-shadow:0 8px 22px rgba(0,0,0,.12);z-index:6;max-width:calc(100% - 16px)}
-.fmg-ann-ib{height:30px;min-width:30px;display:inline-flex;align-items:center;justify-content:center;gap:4px;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#52525b);cursor:pointer;padding:0 7px;flex:none;font:inherit;font-size:12px}
-.fmg-ann-ib:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06))}
-.fmg-ann-ib[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.09));color:var(--dsw-alias-label-primary,#18181b)}
-.fmg-ann-ib:disabled{opacity:.32;cursor:default}
-.fmg-ann-text{height:30px;padding:0 11px;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-primary,#18181b);font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;flex:none}
-.fmg-ann-text:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06))}
-.fmg-ann-text[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.09))}
-.fmg-ann-text:disabled{opacity:.4;cursor:default}
-.fmg-ann-save{height:30px;padding:0 14px;border:0;border-radius:999px;background:#4c78ff;color:#fff;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;flex:none}
-.fmg-ann-save:disabled{opacity:.45;cursor:default}
-.fmg-ann-sep{width:1px;height:16px;margin:0 2px;background:rgba(0,0,0,.12);flex:none}
-.fmg-ann-dot{width:28px;height:28px;display:grid;place-items:center;border:0;background:transparent;cursor:pointer;padding:0;flex:none}
-.fmg-ann-dot i{width:14px;height:14px;border-radius:50%;display:block;box-shadow:0 0 0 2px rgba(0,0,0,.14)}
-.fmg-ann-hint{position:absolute;top:52px;left:50%;transform:translateX(-50%);padding:5px 12px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);color:var(--dsw-alias-label-secondary,#52525b);font-size:12px;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.1);z-index:5}
-/* Brushed-size pip that follows the pointer. */
-.fmg-ann-pip{position:absolute;border:1.5px solid rgba(255,255,255,.95);outline:1px solid rgba(0,0,0,.45);border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:8}
-/* Codex-style vertical stroke slider pinned to the image edge. */
-.fmg-ann-slider{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:22px;height:128px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);box-shadow:0 6px 18px rgba(0,0,0,.14);z-index:7;cursor:pointer;touch-action:none}
-.fmg-ann-slider::before{content:"";position:absolute;left:50%;top:14px;bottom:14px;width:2px;transform:translateX(-50%);background:rgba(0,0,0,.12);border-radius:2px}
-.fmg-ann-knob{position:absolute;left:50%;width:12px;height:12px;border-radius:50%;background:#fff;border:1.5px solid rgba(0,0,0,.55);transform:translate(-50%,-50%);box-shadow:0 1px 3px rgba(0,0,0,.25);pointer-events:none}
-.fmg-ann-pin{position:absolute;transform:translate(10px,-50%);z-index:9}
-.fmg-ann-card{width:252px;padding:10px;border-radius:16px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);box-shadow:0 12px 32px rgba(0,0,0,.2);color:var(--dsw-alias-label-primary,#18181b);display:flex;gap:8px;align-items:flex-start}
-.fmg-ann-badge{flex:none;min-width:20px;height:20px;margin-top:2px;padding:0 5px;border-radius:999px;background:#4c78ff;color:#fff;font-size:11px;line-height:20px;text-align:center}
-.fmg-ann-card textarea{flex:1;min-width:0;min-height:44px;max-height:180px;resize:none;border:0;outline:none;background:transparent;color:inherit;font:inherit;font-size:12.5px;line-height:18px}
-.fmg-ann-card-actions{flex:none;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
-.fmg-ann-ghost{height:24px;padding:0 9px;border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:999px;background:transparent;color:var(--dsw-alias-label-primary,#18181b);font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap}
-.fmg-ann-confirm{height:24px;padding:0 10px;border:0;border-radius:999px;background:#18181b;color:#fff;font:inherit;font-size:11.5px;cursor:pointer}
-.fmg-ann-textin{position:absolute;z-index:9;min-width:120px;padding:2px 4px;border:1px dashed rgba(0,0,0,.45);border-radius:4px;background:rgba(255,255,255,.92);color:inherit;font:inherit;outline:none;resize:none;overflow:hidden;white-space:pre}
-.fmg-ann-sel{position:absolute;z-index:8;border:1px solid #4c78ff;pointer-events:none}
-.fmg-ann-handle{position:absolute;width:14px;height:14px;border-radius:3px;background:#fff;border:1.5px solid #4c78ff;pointer-events:auto;cursor:pointer;display:grid;place-items:center;padding:0;font-size:0;line-height:0}
-.fmg-ann-handle.is-del{top:-16px;right:-16px;cursor:pointer}
-.fmg-ann-handle.is-size{right:-16px;bottom:-16px;cursor:nwse-resize}
-.fmg-ann-note{flex:0 1 auto;color:var(--dsw-alias-label-tertiary,#6b7280);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
-.fmg-ann-err{flex:0 1 auto;color:var(--dsw-alias-state-danger-primary,#d33);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px}
-.fmg-ann-empty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px 14px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px}
+/* Sidebar annotation workbench, modelled on the Codex image viewer. */
+.fmg-ann{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-layer-1);overflow:hidden;user-select:none;container-type:inline-size}
+.fmg-ann-stage{position:relative;flex:1 1 0;min-height:0;overflow:hidden;touch-action:none}
+.fmg-ann-frame{position:absolute;transform-origin:50% 50%;will-change:transform}
+.fmg-ann-frame img{display:block;width:100%;height:100%;user-select:none;-webkit-user-drag:none;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,.14)}
+.fmg-ann-svg{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+.fmg-ann-layer{position:absolute;inset:0;pointer-events:none;z-index:4}
+.fmg-ann-bar{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:8;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2px;min-height:40px;padding:5px;border-radius:12px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.08));box-shadow:0 6px 20px rgba(0,0,0,.12),0 1px 2px rgba(0,0,0,.06);white-space:nowrap;width:max-content;max-width:calc(100% - 16px);box-sizing:border-box}
+.fmg-ann-tb{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary,#1c2024);font:inherit;font-size:13px;line-height:1;cursor:pointer;flex:none}
+.fmg-ann-tb svg{flex:none;color:var(--dsw-alias-label-secondary,#60646c)}
+.fmg-ann-tb:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
+.fmg-ann-tb:disabled{opacity:.4;cursor:default}
+.fmg-ann-mode span{transition:color .12s}
+.fmg-ann-mode .is-on{color:var(--dsw-alias-label-primary,#1c2024);font-weight:600}
+.fmg-ann-mode .is-off{color:var(--dsw-alias-label-tertiary,#8b8d98)}
+.fmg-ann-mode .is-slash{color:var(--dsw-alias-label-tertiary,#b9bbc6);margin:0 -3px}
+.fmg-ann-save{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border:0;border-radius:8px;background:#3e63dd;color:#fff;font:inherit;font-size:13px;font-weight:500;line-height:1;cursor:pointer;flex:none}
+.fmg-ann-save:hover:not(:disabled){background:#3358d4}
+.fmg-ann-save:disabled{opacity:.5;cursor:default}
+.fmg-ann-sep{width:1px;height:18px;margin:0 8px;background:var(--dsw-alias-border-l2,rgba(0,0,0,.1));flex:none}
+.fmg-ann-ib{display:inline-grid;place-items:center;width:28px;height:30px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#60646c);cursor:pointer;flex:none}
+.fmg-ann-ib:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));color:var(--dsw-alias-label-primary,#1c2024)}
+.fmg-ann-ib[aria-pressed=true]{background:rgba(62,99,221,.12);color:#3e63dd}
+.fmg-ann-ib:disabled{opacity:.3;cursor:default}
+.fmg-ann-dot{display:grid;place-items:center;width:30px;height:30px;padding:0;border:0;border-radius:8px;background:transparent;cursor:pointer}
+.fmg-ann-dot:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
+.fmg-ann-dot i{display:block;width:16px;height:16px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
+/* Narrow sidebars: tighten spacing so every control stays on screen with its icon and label. */
+@container (max-width:420px){.fmg-ann-bar{gap:1px;padding:5px 4px}.fmg-ann-tb{gap:4px;padding:0 6px}.fmg-ann-save{gap:4px;padding:0 9px}.fmg-ann-sep{margin:0 5px}.fmg-ann-ib{width:24px}.fmg-ann-dot{width:26px}}
+@container (max-width:330px){.fmg-ann-tb,.fmg-ann-save,.fmg-ann-prompt{font-size:12px;padding:0 5px}.fmg-ann-tb svg,.fmg-ann-save svg{width:14px;height:14px}.fmg-ann-sep{margin:0 2px}.fmg-ann-ib{width:21px}.fmg-ann-ib svg{width:16px;height:16px}.fmg-ann-dot{width:22px}}
+.fmg-ann-palette{position:absolute;top:56px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,22px);gap:7px;padding:9px;border-radius:12px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.08));box-shadow:0 8px 24px rgba(0,0,0,.16);z-index:9}
+.fmg-ann-palette button{width:22px;height:22px;padding:0;border:0;border-radius:50%;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
+.fmg-ann-palette button[aria-pressed=true]{box-shadow:0 0 0 2px var(--dsw-alias-bg-layer-3,#fff),0 0 0 3.5px #3e63dd}
+.fmg-ann-prompt{display:inline-flex;align-items:center;gap:7px;padding:0 8px 0 6px;color:var(--dsw-alias-label-primary,#1c2024);font-size:13px}
+.fmg-ann-prompt svg{color:var(--dsw-alias-label-secondary,#60646c)}
+/* Codex stroke slider: a white pill on the left edge, thin rail, round knob. */
+.fmg-ann-slider{position:absolute;left:12px;top:50%;transform:translateY(-50%);z-index:7;width:34px;height:min(220px,62%);border-radius:17px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.08));box-shadow:0 4px 14px rgba(0,0,0,.12);cursor:pointer;touch-action:none;outline:none;box-sizing:border-box}
+.fmg-ann-slider:focus-visible{box-shadow:0 0 0 2px #3e63dd}
+.fmg-ann-track{position:absolute;left:50%;top:16px;bottom:16px;width:2px;margin-left:-1px;border-radius:1px;background:rgba(0,0,0,.14)}
+.fmg-ann-knob{position:absolute;left:50%;width:16px;height:16px;margin:0 0 -8px -8px;border-radius:50%;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.2),0 1px 3px rgba(0,0,0,.22);cursor:grab}
+.fmg-ann-slider.is-sliding,.fmg-ann-slider.is-sliding .fmg-ann-knob{cursor:grabbing}
+.fmg-ann-bubble{position:absolute;left:30px;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:7px;height:26px;padding:0 9px;border-radius:8px;background:#1c2024;color:#fff;font-size:11.5px;white-space:nowrap;pointer-events:none;font-variant-numeric:tabular-nums}
+.fmg-ann-bubble i{display:block;border-radius:50%;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.5)}
+.fmg-ann-pip{position:absolute;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 0 0 1px rgba(255,255,255,.95),0 0 0 2px rgba(0,0,0,.4)}
+/* Comments: teardrop pin, Codex pill for a new one, card for editing. */
+.fmg-ann-pin{position:absolute;width:24px;height:24px;margin-top:-24px;display:grid;place-items:center;box-sizing:border-box;padding:0;border:2px solid #fff;border-radius:12px 12px 12px 2px;background:#3e63dd;color:#fff;font:inherit;font-size:11.5px;font-weight:700;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,.3);cursor:pointer;pointer-events:auto}
+.fmg-ann-pin.is-flip{margin-left:-24px;border-radius:12px 12px 2px 12px}
+.fmg-ann-pin[aria-pressed=true]{background:#2f52c8}
+.fmg-ann-pill{position:absolute;display:flex;align-items:center;gap:6px;height:40px;padding:0 5px 0 15px;border-radius:20px;background:#fff;box-shadow:0 6px 22px rgba(0,0,0,.2),0 0 0 .5px rgba(0,0,0,.06);transform:translateY(-50%);box-sizing:border-box;pointer-events:auto}
+.fmg-ann-pill input{flex:1;min-width:0;height:100%;padding:0;border:0;outline:none;background:transparent;color:#1c2024;font:inherit;font-size:13px}
+.fmg-ann-pill input::placeholder,.fmg-ann-card textarea::placeholder{color:#8b8d98}
+.fmg-ann-send{flex:none;display:grid;place-items:center;width:30px;height:30px;padding:0;border:0;border-radius:50%;background:#1c2024;color:#fff;cursor:pointer}
+.fmg-ann-card{position:absolute;display:flex;flex-direction:column;gap:8px;padding:12px 12px 10px 15px;border-radius:18px;background:#fff;box-shadow:0 8px 28px rgba(0,0,0,.22),0 0 0 .5px rgba(0,0,0,.06);transform:translateY(-50%);box-sizing:border-box;pointer-events:auto}
+.fmg-ann-card textarea{display:block;width:100%;min-height:56px;max-height:160px;margin:0;padding:0;border:0;outline:none;resize:none;background:transparent;color:#1c2024;font:inherit;font-size:13px;line-height:20px;user-select:text}
+.fmg-ann-card-foot{display:flex;align-items:center;gap:6px}
+.fmg-ann-card-foot .fmg-ann-ib{width:28px;height:28px;margin:0 auto 0 -6px;color:#1c2024}
+.fmg-ann-ghost{height:28px;padding:0 13px;border:.5px solid rgba(0,0,0,.16);border-radius:14px;background:#fff;color:#1c2024;font:inherit;font-size:12.5px;cursor:pointer}
+.fmg-ann-confirm{height:28px;padding:0 13px;border:0;border-radius:14px;background:#1c2024;color:#fff;font:inherit;font-size:12.5px;cursor:pointer}
+/* Text: typed in place, then held by a selection box with corner handles. */
+.fmg-ann-textin{position:absolute;margin:0;padding:0;border:0;outline:1px dashed rgba(62,99,221,.95);outline-offset:3px;background:transparent;resize:none;overflow:hidden;white-space:pre;line-height:1.25;z-index:3;user-select:text;box-sizing:content-box;pointer-events:auto;caret-color:currentColor}
+.fmg-ann-sel{position:absolute;box-sizing:border-box;border:1.5px solid #3e63dd;border-radius:2px;cursor:move;pointer-events:auto}
+.fmg-ann-handle{position:absolute;width:22px;height:22px;display:grid;place-items:center;padding:0;border:0;border-radius:50%;background:#fff;color:#1c2024;box-shadow:0 1px 4px rgba(0,0,0,.32);cursor:pointer}
+.fmg-ann-handle.is-rotate{left:-11px;top:-11px;background:#3e63dd;color:#fff;cursor:grab}
+.fmg-ann-handle.is-del{right:-11px;top:-11px;background:#e5484d;color:#fff}
+.fmg-ann-handle.is-size{right:-11px;bottom:-11px;cursor:nwse-resize}
+.fmg-ann-handle.is-move{left:-11px;bottom:-11px;cursor:move}
+.fmg-ann-zoom{position:absolute;right:12px;bottom:12px;z-index:7;display:flex;align-items:center;height:32px;padding:0 3px;border-radius:10px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.08));box-shadow:0 4px 14px rgba(0,0,0,.1);box-sizing:border-box}
+.fmg-ann-zoom .fmg-ann-ib{width:26px;height:26px;border-radius:7px}
+.fmg-ann-zoom-val{min-width:46px;height:26px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-label-primary,#1c2024);font:inherit;font-size:12px;cursor:pointer;font-variant-numeric:tabular-nums}
+.fmg-ann-zoom-val:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
+.fmg-ann-toast{position:absolute;left:50%;bottom:54px;transform:translateX(-50%);z-index:9;max-width:calc(100% - 32px);padding:7px 12px;border-radius:9px;background:#1c2024;color:#fff;font-size:12px;line-height:17px;box-shadow:0 6px 18px rgba(0,0,0,.2);pointer-events:none;box-sizing:border-box}
+.fmg-ann-toast.is-error{background:#e5484d}
+.fmg-ann-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px 14px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px}
 .fmg-ann-thumbs{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:100%}
 .fmg-ann-thumbs button{padding:0;border:0;background:transparent;cursor:pointer;line-height:0;border-radius:6px;overflow:hidden}
 .fmg-ann-thumbs img{width:56px;height:56px;object-fit:cover;border-radius:6px;display:block}
-.fmg-ann-drop{position:absolute;inset:8px;display:flex;align-items:center;justify-content:center;border:1.5px dashed var(--dsw-alias-state-business-primary,#4c78ff);border-radius:12px;background:rgba(76,120,255,.06);color:var(--dsw-alias-state-business-primary,#4c78ff);font-size:13px;z-index:10;pointer-events:none}
+.fmg-ann-drop{position:absolute;inset:8px;display:flex;align-items:center;justify-content:center;border:1.5px dashed #3e63dd;border-radius:12px;background:rgba(62,99,221,.06);color:#3e63dd;font-size:13px;z-index:10;pointer-events:none}
 `;
     const zh = {
       nav: 'Fmage 生图', title: 'Fmage 生图',
@@ -186,11 +217,13 @@ window.__ModuleLoader__.load({
       annModeMarkupHint: '把透明标注层作为 markup 单独发送；原图不变，标记由模型抹除。',
       annModeFlattenHint: '把标注烧进图片再发；标记可能残留在结果里。',
       annModeUnsupported: '当前模型不是 GPT Image 2.5/2.6，只能用合成。',
-      annComment: '评论', annCommentPlaceholder: '这条标注要改什么？',
+      annComment: '评论', annCommentPlaceholder: '添加评论…',
+      annToolSelect: '选择', annDone: '完成', annSend: '发送', annRotate: '旋转', annMove: '移动', annDeleteText: '删除文字',
+      annZoomIn: '放大', annZoomOut: '缩小', annZoomFit: '适应窗口', annNothing: '还没有标注或评论。',
       annExport: '保存', annExporting: '保存中…',
       annAnnotate: '标注', annBack: '返回', annStroke: '粗细', annAddComment: '添加评论', annResize: '缩放文字',
       annToolEraser: '橡皮', annCancel: '取消', annSaveComment: '保存',
-      annTextPrompt: '标注文字',
+      annTextPrompt: '输入文字',
       annRemoveComment: '删除这条评论',
       annLoadFailed: '图片读取失败。', annFailed: '操作失败', annRestored: '已恢复上次的标注。',
       showPill: '在输入栏显示生图胶囊', showPillHint: '关闭后仍可在下方列表切换默认提供商；改动在下一次请求生效。',
@@ -237,13 +270,15 @@ window.__ModuleLoader__.load({
       annModeMarkupHint: 'Send the transparent layer as markup; the target image stays untouched and the model removes the marks.',
       annModeFlattenHint: 'Burn the marks into the image first; they may survive into the result.',
       annModeUnsupported: 'This model is not GPT Image 2.5/2.6, so only flatten is available.',
-      annComment: 'Comments', annCommentPlaceholder: 'What should change here?',
+      annComment: 'Comment', annCommentPlaceholder: 'Add a comment…',
+      annToolSelect: 'Select', annDone: 'Done', annSend: 'Send', annRotate: 'Rotate', annMove: 'Move', annDeleteText: 'Delete text',
+      annZoomIn: 'Zoom in', annZoomOut: 'Zoom out', annZoomFit: 'Fit to view', annNothing: 'Nothing to save yet.',
       annExport: 'Save', annExporting: 'Saving…',
       annAnnotate: 'Annotate', annBack: 'Back', annStroke: 'Stroke width', annAddComment: 'Add a comment', annResize: 'Resize text',
       annToolEraser: 'Eraser', annCancel: 'Cancel', annSaveComment: 'Save',
       annExported: 'Saved; the comments were inserted into the composer.', annExportedCopy: 'Saved; the comments were copied.',
       annExportedSilent: 'Saved; there were no comments to insert.',
-      annTextPrompt: 'Annotation text',
+      annTextPrompt: 'Type text',
       annRemoveComment: 'Remove this comment',
       annLoadFailed: 'The image could not be read.', annFailed: 'The operation failed', annRestored: 'Restored the previous annotation.',
       showPill: 'Show the image provider pill in the composer', showPillHint: 'Turning it off keeps the list below and the saved default; changes apply to the next request.',
@@ -728,7 +763,8 @@ window.__ModuleLoader__.load({
     const ANN_TAB_ID = 'dsh-fmage/annotation';
     const ANN_MODEL = /gpt[-_\s]+image[-_\s]+2\.[56](?:\.[0-9]+)*(?=$|[^a-z0-9.])/i;
     const ANN_COLORS = ['#e5484d', '#f5a524', '#12a594', '#4c78ff'];
-    const ANN_STORE = 'dsh-fmage/annotation/v1';
+    // v2: comments carry their own position and text boxes are top-left anchored.
+    const ANN_STORE = 'dsh-fmage/annotation/v2';
     let annText = key => key;
 
     function isMarkupModel(model) { return ANN_MODEL.test(String(model || '')); }
@@ -790,60 +826,85 @@ window.__ModuleLoader__.load({
       ].join(' ');
     }
 
-    function shapeGeometry(shape) {
-      if (shape.type === 'rect' || shape.type === 'ellipse') {
-        return {
-          x: Math.min(shape.x1, shape.x2), y: Math.min(shape.y1, shape.y2),
-          width: Math.abs(shape.x2 - shape.x1), height: Math.abs(shape.y2 - shape.y1),
-        };
+    // Shapes live in source pixels so the exported layer matches the image
+    // exactly. Text boxes are measured with a canvas so CJK and Latin glyphs
+    // get real widths, and the same numbers drive the SVG, the export and the
+    // selection box.
+    const ANN_LINE = 1.25;
+    // Baseline within a 1.25em line, matching where a textarea draws it.
+    const ANN_ASCENT = 1.0;
+    const ANN_FONT = '"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif';
+    let annMeasure;
+    function measureLines(text, size) {
+      if (annMeasure === undefined) {
+        try {
+          const canvas = document.createElement('canvas');
+          annMeasure = canvas && typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
+        } catch { annMeasure = null; }
       }
-      return null;
+      const lines = String(text || '').split('\n');
+      let width = 0;
+      lines.forEach(line => {
+        let w = line.length * size * 0.6;
+        if (annMeasure) {
+          annMeasure.font = `${size}px ${ANN_FONT}`;
+          w = annMeasure.measureText(line).width;
+        }
+        width = Math.max(width, w);
+      });
+      return { lines, width: Math.max(size * 0.5, width), height: lines.length * size * ANN_LINE };
     }
 
-    function renderShape(shape, size) {
-      const head = shape.width * 3;
-      const stroke = { stroke: shape.color, strokeWidth: shape.width, fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' };
+    function textBox(shape) {
+      const measured = measureLines(shape.text, shape.size);
+      return { x: shape.x, y: shape.y, width: measured.width, height: measured.height, lines: measured.lines };
+    }
+
+    function boxOf(shape) {
+      return {
+        x: Math.min(shape.x1, shape.x2), y: Math.min(shape.y1, shape.y2),
+        width: Math.abs(shape.x2 - shape.x1), height: Math.abs(shape.y2 - shape.y1),
+      };
+    }
+
+    const polyPoints = points => (points || []).map(point => `${point.x},${point.y}`).join(' ');
+
+    function renderShape(shape) {
+      const stroke = {
+        stroke: shape.color, strokeWidth: shape.width, fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round',
+      };
       if (shape.type === 'arrow') {
         return h('g', { key: shape.id },
           h('line', { ...stroke, x1: shape.x1, y1: shape.y1, x2: shape.x2, y2: shape.y2 }),
-          h('polygon', { fill: shape.color, points: arrowHead({ x: shape.x1, y: shape.y1 }, { x: shape.x2, y: shape.y2 }, head) }));
+          h('polygon', {
+            fill: shape.color, stroke: shape.color, strokeWidth: shape.width * 0.5, strokeLinejoin: 'round',
+            points: arrowHead({ x: shape.x1, y: shape.y1 }, { x: shape.x2, y: shape.y2 }, shape.width * 3.2),
+          }));
       }
-      if (shape.type === 'rect' || shape.type === 'ellipse') {
-        const box = shapeGeometry(shape);
-        return shape.type === 'rect'
-          ? h('rect', { key: shape.id, ...stroke, ...box })
-          : h('ellipse', {
-            key: shape.id, ...stroke,
-            cx: box.x + box.width / 2, cy: box.y + box.height / 2, rx: box.width / 2, ry: box.height / 2,
-          });
-      }
-      if (shape.type === 'pen') {
-        return h('polyline', {
+      if (shape.type === 'rect') return h('rect', { key: shape.id, ...stroke, ...boxOf(shape) });
+      if (shape.type === 'ellipse') {
+        const box = boxOf(shape);
+        return h('ellipse', {
           key: shape.id, ...stroke,
-          points: (shape.points || []).map(point => `${point.x},${point.y}`).join(' '),
+          cx: box.x + box.width / 2, cy: box.y + box.height / 2, rx: box.width / 2, ry: box.height / 2,
         });
       }
+      if (shape.type === 'pen') return h('polyline', { key: shape.id, ...stroke, points: polyPoints(shape.points) });
       if (shape.type === 'text') {
-        const fontSize = shape.size || Math.max(16, Math.round(Math.min(size.width, size.height) * 0.055));
+        const box = textBox(shape);
+        const cx = box.x + box.width / 2;
+        const cy = box.y + box.height / 2;
         return h('text', {
-          key: shape.id, x: shape.x, y: shape.y, fill: shape.color,
-          fontSize, fontFamily: 'sans-serif', style: { userSelect: 'none' }, xmlSpace: 'preserve',
-        }, shape.text);
-      }
-      if (shape.type === 'marker') {
-        // Pins keep their own size: they mark a position, not a stroke.
-        const radius = Math.max(9, Math.min(size.width, size.height) * 0.018);
-        return h('g', { key: shape.id },
-          h('circle', { cx: shape.x, cy: shape.y, r: radius, fill: '#4c78ff' }),
-          h('text', {
-            x: shape.x, y: shape.y + radius * 0.36, textAnchor: 'middle', fill: '#fff',
-            fontSize: radius * 1.2, fontFamily: 'sans-serif', style: { userSelect: 'none' },
-          }, String(shape.n)));
+          key: shape.id, fill: shape.color, fontSize: shape.size, fontFamily: ANN_FONT, xmlSpace: 'preserve',
+          transform: shape.rotation ? `rotate(${shape.rotation} ${cx} ${cy})` : undefined,
+        }, box.lines.map((line, index) => h('tspan', {
+          key: index, x: shape.x, y: shape.y + shape.size * (ANN_ASCENT + index * ANN_LINE),
+        }, line || ' ')));
       }
       return null;
     }
 
-    function drawShape(ctx, shape, size) {
+    function drawShape(ctx, shape) {
       ctx.save();
       ctx.strokeStyle = shape.color;
       ctx.fillStyle = shape.color;
@@ -851,7 +912,7 @@ window.__ModuleLoader__.load({
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       if (shape.type === 'arrow') {
-        const head = shape.width * 3;
+        const head = shape.width * 3.2;
         const angle = Math.atan2(shape.y2 - shape.y1, shape.x2 - shape.x1);
         ctx.beginPath();
         ctx.moveTo(shape.x1, shape.y1);
@@ -862,9 +923,11 @@ window.__ModuleLoader__.load({
         ctx.lineTo(shape.x2 - head * Math.cos(angle - 0.42), shape.y2 - head * Math.sin(angle - 0.42));
         ctx.lineTo(shape.x2 - head * Math.cos(angle + 0.42), shape.y2 - head * Math.sin(angle + 0.42));
         ctx.closePath();
+        ctx.lineWidth = shape.width * 0.5;
         ctx.fill();
+        ctx.stroke();
       } else if (shape.type === 'rect' || shape.type === 'ellipse') {
-        const box = shapeGeometry(shape);
+        const box = boxOf(shape);
         ctx.beginPath();
         if (shape.type === 'rect') ctx.rect(box.x, box.y, box.width, box.height);
         else ctx.ellipse(box.x + box.width / 2, box.y + box.height / 2, box.width / 2, box.height / 2, 0, 0, Math.PI * 2);
@@ -877,28 +940,24 @@ window.__ModuleLoader__.load({
         });
         ctx.stroke();
       } else if (shape.type === 'text') {
-        const fontSize = shape.size || Math.max(16, Math.round(Math.min(size.width, size.height) * 0.055));
-        ctx.font = `${fontSize}px sans-serif`;
+        const box = textBox(shape);
+        const cx = box.x + box.width / 2;
+        const cy = box.y + box.height / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate(((shape.rotation || 0) * Math.PI) / 180);
+        ctx.translate(-cx, -cy);
+        ctx.font = `${shape.size}px ${ANN_FONT}`;
         ctx.textBaseline = 'alphabetic';
-        ctx.fillText(shape.text, shape.x, shape.y);
-      } else if (shape.type === 'marker') {
-        const radius = Math.max(9, Math.min(size.width, size.height) * 0.018);
-        ctx.beginPath();
-        ctx.arc(shape.x, shape.y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = '#4c78ff';
-        ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.font = `${radius * 1.2}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(String(shape.n), shape.x, shape.y);
+        box.lines.forEach((line, index) => {
+          ctx.fillText(line, shape.x, shape.y + shape.size * (ANN_ASCENT + index * ANN_LINE));
+        });
       }
       ctx.restore();
     }
 
     /** Paint every shape, then punch the eraser strokes out of the result. */
-    function drawShapes(ctx, shapes, size) {
-      shapes.filter(shape => shape.type !== 'erase').forEach(shape => drawShape(ctx, shape, size));
+    function drawShapes(ctx, shapes) {
+      shapes.filter(shape => shape.type !== 'erase').forEach(shape => drawShape(ctx, shape));
       const erase = shapes.filter(shape => shape.type === 'erase');
       if (!erase.length) return;
       ctx.save();
@@ -913,97 +972,122 @@ window.__ModuleLoader__.load({
           if (index === 0) ctx.moveTo(point.x, point.y);
           else ctx.lineTo(point.x, point.y);
         });
+        if (shape.points.length === 1) ctx.lineTo(shape.points[0].x + 0.01, shape.points[0].y);
         ctx.stroke();
       });
       ctx.restore();
     }
 
-
-    function annGlyph(path, size) {
+    function annGlyph(paths, size) {
       return h('svg', {
-        width: size || 17, height: size || 17, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
-        strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
-      }, h('path', { d: path }));
+        width: size || 16, height: size || 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+        strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
+      }, (Array.isArray(paths) ? paths : [paths]).map((d, index) => h('path', { key: index, d })));
     }
 
     const ANN_ICONS = {
-      arrow: 'M7 17 17 7M17 7H9M17 7v8',
-      pen: 'M3 21l4-1L20 7l-3-3L4 17z',
-      rect: 'M3 5h18v14H3z',
-      ellipse: 'M12 4a8 8 0 0 1 0 16 8 8 0 0 1 0-16z',
-      text: 'M4 6h16M12 6v13M9 19h6',
-      comment: 'M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z',
-      eraser: 'M7 21h13M4 15l7-7 5 5-7 7H6z',
-      undo: 'M9 14 4 9l5-5M4 9h9a6 6 0 0 1 0 12h-3',
-      redo: 'M15 14l5-5-5-5M20 9h-9a6 6 0 0 0 0 12h3',
-      trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
-      check: 'M5 13l4 4L19 7',
-      close: 'M6 6l12 12M18 6 6 18',
+      annotate: ['M4 20c3-1 4.5-4 6-7s3-6 6-7', 'M14.5 4.5l5 5', 'M17 7l-9.5 9.5L5 19l2.5-2.5'],
+      comment: ['M20 11.5a7.5 7.5 0 0 1-11 6.6L4 19.5l1.4-4.6A7.5 7.5 0 1 1 20 11.5z', 'M9 11.5h6', 'M12 8.5v6'],
+      layers: ['M12 3 3 8l9 5 9-5-9-5z', 'M3 13l9 5 9-5'],
+      save: ['M5 12.5l4.5 4.5L19 7.5'],
+      select: ['M5 3.5l13 6.2-5.6 1.7-1.7 5.6z', 'M12.4 11.4 18 17'],
+      arrow: ['M5 19 19 5', 'M10 5h9v9'],
+      pen: ['M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z', 'M14.5 6.5l3 3'],
+      rect: ['M4.5 5.5h15v13h-15z'],
+      ellipse: ['M12 5c4.4 0 8 3.1 8 7s-3.6 7-8 7-8-3.1-8-7 3.6-7 8-7z'],
+      text: ['M5 6V4.5h14V6', 'M12 4.5v15', 'M9 19.5h6'],
+      eraser: ['M15.5 4.5l4 4a1.8 1.8 0 0 1 0 2.5L11 19.5H7.2L4.5 16.8a1.8 1.8 0 0 1 0-2.5l8.5-9.8a1.8 1.8 0 0 1 2.5 0z', 'M9 10l5.5 5.5', 'M11 19.5h8.5'],
+      undo: ['M9 14 4.5 9.5 9 5', 'M4.5 9.5h10a5 5 0 0 1 0 10H11'],
+      redo: ['M15 14l4.5-4.5L15 5', 'M19.5 9.5h-10a5 5 0 0 0 0 10H13'],
+      trash: ['M4.5 7h15', 'M9.5 7V4.5h5V7', 'M6.5 7l.9 12.5h9.2L17.5 7', 'M10.2 10.5v6', 'M13.8 10.5v6'],
+      check: ['M5 12.5l4.5 4.5L19 7.5'],
+      close: ['M7 7l10 10', 'M17 7 7 17'],
+      send: ['M12 18.5v-13', 'M6.5 11 12 5.5l5.5 5.5'],
+      rotate: ['M19 12a7 7 0 1 1-2.1-5', 'M19 4.5V9h-4.5'],
+      resize: ['M8 16l8-8', 'M11 8h5v5', 'M13 16H8v-5'],
+      move: ['M12 3.5v17', 'M3.5 12h17', 'M9.5 6 12 3.5 14.5 6', 'M9.5 18l2.5 2.5 2.5-2.5', 'M6 9.5 3.5 12 6 14.5', 'M18 9.5l2.5 2.5-2.5 2.5'],
+      minus: ['M6 12h12'],
+      plus: ['M6 12h12', 'M12 6v12'],
     };
 
     const ANN_DRAW_TOOLS = [
-      ['arrow', 'annToolArrow'], ['pen', 'annToolPen'], ['rect', 'annToolRect'],
-      ['ellipse', 'annToolEllipse'], ['text', 'annToolText'], ['eraser', 'annToolEraser'],
+      ['select', 'annToolSelect'], ['pen', 'annToolPen'], ['arrow', 'annToolArrow'],
+      ['rect', 'annToolRect'], ['ellipse', 'annToolEllipse'], ['text', 'annToolText'],
     ];
+    // Tools whose size is the stroke slider; only these show it.
+    const ANN_STROKE_TOOLS = ['pen', 'arrow', 'rect', 'ellipse', 'eraser'];
+    // Tools that show the brush circle instead of a cursor.
+    const ANN_PIP_TOOLS = ['pen', 'arrow', 'eraser'];
+    const ANN_STROKE_MIN = 2;
+    const ANN_STROKE_MAX = 40;
+    const ANN_ZOOM_MIN = 0.25;
+    const ANN_ZOOM_MAX = 8;
+    const ANN_PAD = { top: 62, right: 16, bottom: 16, left: 16 };
+    const annId = () => `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
-    function distanceToSegment(point, from, to) {
-      const dx = to.x - from.x;
-      const dy = to.y - from.y;
-      const length = dx * dx + dy * dy;
-      if (length === 0) return Math.hypot(point.x - from.x, point.y - from.y);
-      let t = ((point.x - from.x) * dx + (point.y - from.y) * dy) / length;
-      t = Math.max(0, Math.min(1, t));
-      return Math.hypot(point.x - (from.x + t * dx), point.y - (from.y + t * dy));
-    }
-
-    // Codex-style workbench: one floating bar, tools behind "标注", comments in
-    // place, text typed on the image, and a real eraser that removes pixels
-    // rather than whole shapes. `initialSource`/`initialMenu` exist so a render
-    // test can cover both layouts; the slot never passes them.
+    // Codex-style workbench. The bar's first level is 标注 / 添加评论 / 分层·合成
+    // / 保存; drawing tools sit behind 标注 and return with ✓. The image is laid
+    // out in JS (fit × zoom, plus pan) so every overlay (pins, cards, text
+    // editor, handles, brush circle) is positioned in screen pixels and keeps
+    // its size at any zoom. `initialSource`/`initialMenu` exist for the render
+    // test; the slot never passes them.
     function AnnotationPanel({ inputActions, initialSource, initialMenu }) {
       const t = annText;
       const [source, setSource] = useState(initialSource || null);
       const [shapes, setShapes] = useState([]);
-      const [redo, setRedo] = useState([]);
-      const [tool, setTool] = useState('arrow');
-      const [color, setColor] = useState(ANN_COLORS[0]);
-      const [stroke, setStroke] = useState(4);
       const [comments, setComments] = useState([]);
+      const [past, setPast] = useState([]);
+      const [future, setFuture] = useState([]);
+      const [menu, setMenu] = useState(initialMenu === 'draw' || initialMenu === 'comment' ? initialMenu : 'main');
+      const [tool, setTool] = useState('pen');
+      const [color, setColor] = useState(ANN_COLORS[0]);
+      const [palette, setPalette] = useState(false);
+      const [stroke, setStroke] = useState(6);
+      const [sliding, setSliding] = useState(false);
       const [mode, setMode] = useState('flatten');
       const [capable, setCapable] = useState(false);
       const [manualMode, setManualMode] = useState(false);
       const [busy, setBusy] = useState(false);
-      const [error, setError] = useState('');
-      const [notice, setNotice] = useState('');
-      const [savedId, setSavedId] = useState('');
-      const [menu, setMenu] = useState(initialMenu === 'draw' ? 'draw' : 'main');
-      const [drafting, setDrafting] = useState(null);
-      const [zoom, setZoom] = useState(1);
-      const [pan, setPan] = useState({ x: 0, y: 0 });
+      const [toast, setToast] = useState(null);
+      const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
+      const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
       const [editing, setEditing] = useState(null);
       const [textEdit, setTextEdit] = useState(null);
       const [selected, setSelected] = useState(null);
-      const [pointer, setPointer] = useState(null);
+      const [hover, setHover] = useState(null);
       const [spaceHeld, setSpaceHeld] = useState(false);
+      const [panning, setPanning] = useState(false);
       const [drafts, setDrafts] = useState([]);
       const [dragging, setDragging] = useState(false);
-      const svgRef = useRef(null);
-      const frameRef = useRef(null);
+      const rootRef = useRef(null);
       const stageRef = useRef(null);
-      const panRef = useRef(null);
-      const resizeRef = useRef(null);
+      const sliderRef = useRef(null);
+      const dragRef = useRef(null);
+      const wheelRef = useRef(null);
+      const textLive = useRef(null);
+      const commentLive = useRef(null);
+      textLive.current = textEdit;
+      commentLive.current = editing;
+
+      const notify = (text, error) => setToast(text ? { text, error: Boolean(error), at: Date.now() } : null);
+
+      useEffect(() => {
+        if (!toast) return undefined;
+        const timer = setTimeout(() => setToast(null), toast.error ? 6000 : 3200);
+        return () => clearTimeout(timer);
+      }, [toast]);
 
       useEffect(() => {
         let alive = true;
         const sync = () => {
-          request(ROUTE).then(view => {
+          request(ROUTE).then(config => {
             if (!alive) return;
-            const providers = Array.isArray(view.providers) ? view.providers : [];
-            const active = providers.find(item => item.name === view.default_provider && item.enabled)
+            const providers = Array.isArray(config.providers) ? config.providers : [];
+            const active = providers.find(item => item.name === config.default_provider && item.enabled)
               || providers.find(item => item.enabled) || null;
             const supported = Boolean(active) && active.transport === 'openai-images' && isMarkupModel(active.model);
             setCapable(supported);
-            setMode(current => (manualMode ? current : supported ? 'markup' : 'flatten'));
+            setMode(current => (manualMode ? (supported ? current : 'flatten') : supported ? 'markup' : 'flatten'));
           }).catch(() => { /* config unavailable: keep the current mode */ });
         };
         sync();
@@ -1011,39 +1095,59 @@ window.__ModuleLoader__.load({
         return () => { alive = false; window.removeEventListener('focus', sync); };
       }, [manualMode]);
 
+      // Stage size drives the fit scale.
       useEffect(() => {
-        const down = event => { if (event.code === 'Space') setSpaceHeld(true); };
-        const up = event => { if (event.code === 'Space') setSpaceHeld(false); };
-        window.addEventListener('keydown', down);
-        window.addEventListener('keyup', up);
-        return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
-      }, []);
+        const element = stageRef.current;
+        if (!element) return undefined;
+        const measure = () => setStageSize({ width: element.clientWidth, height: element.clientHeight });
+        measure();
+        if (typeof ResizeObserver !== 'function') {
+          window.addEventListener('resize', measure);
+          return () => window.removeEventListener('resize', measure);
+        }
+        const observer = new ResizeObserver(measure);
+        observer.observe(element);
+        return () => observer.disconnect();
+      }, [source]);
 
-      // React registers wheel listeners as passive, so preventDefault there does
-      // nothing. Bind it natively to keep the pane from scrolling while zooming.
+      // React's wheel listener is passive, so preventDefault there is ignored
+      // and the pane would scroll. Bind natively and read the latest handler.
       useEffect(() => {
         const element = stageRef.current;
         if (!element) return undefined;
         const onWheel = event => {
           event.preventDefault();
-          const step = event.deltaY < 0 ? 1.1 : 1 / 1.1;
-          setZoom(value => Math.min(6, Math.max(0.25, Number((value * step).toFixed(3)))));
+          if (wheelRef.current) wheelRef.current(event);
         };
         element.addEventListener('wheel', onWheel, { passive: false });
         return () => element.removeEventListener('wheel', onWheel);
       }, [source]);
 
       useEffect(() => {
+        const reset = () => { setSpaceHeld(false); };
+        window.addEventListener('blur', reset);
+        return () => window.removeEventListener('blur', reset);
+      }, []);
+
+      useEffect(() => {
         if (!source) return;
         const stored = readAnnotation(annotationKey(source));
-        setShapes(Array.isArray(stored && stored.shapes) ? stored.shapes : []);
-        setComments(Array.isArray(stored && stored.comments) ? stored.comments : []);
-        setRedo([]);
-        setSavedId('');
+        // localStorage is user-editable; drop entries that would break rendering.
+        const finite = value => Number.isFinite(value);
+        const shapeOk = item => item && typeof item === 'object' && (
+          (item.type === 'pen' || item.type === 'erase') ? Array.isArray(item.points) && item.points.length && item.points.every(p => p && finite(p.x) && finite(p.y))
+            : item.type === 'text' ? typeof item.text === 'string' && finite(item.x) && finite(item.y) && finite(item.size)
+              : ['arrow', 'rect', 'ellipse'].includes(item.type) && [item.x1, item.y1, item.x2, item.y2].every(finite));
+        const commentOk = item => item && typeof item.text === 'string' && finite(item.x) && finite(item.y);
+        setShapes(Array.isArray(stored && stored.shapes) ? stored.shapes.filter(shapeOk) : []);
+        setComments(Array.isArray(stored && stored.comments) ? stored.comments.filter(commentOk) : []);
+        setPast([]);
+        setFuture([]);
         setEditing(null);
         setTextEdit(null);
         setSelected(null);
-        setNotice(stored ? t('annRestored') : '');
+        setView({ zoom: 1, x: 0, y: 0 });
+        if (stored && ((stored.shapes || []).length || (stored.comments || []).length)) notify(t('annRestored'));
       }, [source, t]);
 
       useEffect(() => {
@@ -1061,12 +1165,9 @@ window.__ModuleLoader__.load({
             width: image.naturalWidth,
             height: image.naturalHeight,
           });
-          setZoom(1);
-          setPan({ x: 0, y: 0 });
-          setError('');
           setMenu('main');
         } catch {
-          setError(t('annLoadFailed'));
+          notify(t('annLoadFailed'), true);
         }
       };
 
@@ -1082,278 +1183,424 @@ window.__ModuleLoader__.load({
         return () => window.removeEventListener('focus', bind);
       }, [source]);
 
+      // ---- layout ---------------------------------------------------------
+      const availWidth = Math.max(1, stageSize.width - ANN_PAD.left - ANN_PAD.right);
+      const availHeight = Math.max(1, stageSize.height - ANN_PAD.top - ANN_PAD.bottom);
+      const fit = source && stageSize.width
+        ? Math.min(1, availWidth / source.width, availHeight / source.height)
+        : 1;
+      const layoutFor = state => {
+        const scale = fit * state.zoom;
+        const width = source.width * scale;
+        const height = source.height * scale;
+        return {
+          scale, width, height,
+          left: ANN_PAD.left + (availWidth - width) / 2 + state.x,
+          top: ANN_PAD.top + (availHeight - height) / 2 + state.y,
+        };
+      };
+      const frame = source ? layoutFor(view) : null;
+      const scale = frame ? frame.scale : 1;
+      const toScreen = (x, y) => ({ left: frame.left + x * scale, top: frame.top + y * scale });
+      const stagePoint = event => {
+        const rect = stageRef.current.getBoundingClientRect();
+        return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      };
       const pointOf = event => {
-        const svg = svgRef.current;
-        if (!svg || !source) return null;
-        const rect = svg.getBoundingClientRect();
-        if (!rect.width || !rect.height) return null;
-        return {
-          x: (event.clientX - rect.left) * source.width / rect.width,
-          y: (event.clientY - rect.top) * source.height / rect.height,
-        };
+        const at = stagePoint(event);
+        return { x: (at.x - frame.left) / scale, y: (at.y - frame.top) / scale };
+      };
+      const insideImage = point => point.x >= 0 && point.y >= 0 && point.x <= source.width && point.y <= source.height;
+
+      // Zoom about a stage point so the pixel under the pointer stays put.
+      const zoomTo = (nextZoom, anchor) => {
+        if (!source) return;
+        setView(current => {
+          const zoom = Math.min(ANN_ZOOM_MAX, Math.max(ANN_ZOOM_MIN, nextZoom(current.zoom)));
+          const at = anchor || { x: ANN_PAD.left + availWidth / 2, y: ANN_PAD.top + availHeight / 2 };
+          const before = layoutFor(current);
+          const px = (at.x - before.left) / before.scale;
+          const py = (at.y - before.top) / before.scale;
+          const after = layoutFor({ zoom, x: 0, y: 0 });
+          return { zoom, x: at.x - px * after.scale - after.left, y: at.y - py * after.scale - after.top };
+        });
+      };
+      wheelRef.current = event => {
+        if (!source || !stageRef.current) return;
+        const delta = Math.max(-60, Math.min(60, event.deltaY));
+        zoomTo(zoom => zoom * Math.exp(-delta * 0.006), stagePoint(event));
       };
 
-      const displayScale = () => {
-        const rect = svgRef.current && svgRef.current.getBoundingClientRect();
-        return rect && source ? rect.width / source.width : 1;
+      // ---- history --------------------------------------------------------
+      const snapshot = () => ({ shapes, comments });
+      const remember = (state = snapshot()) => {
+        setPast(list => [...list.slice(-79), state]);
+        setFuture([]);
+      };
+      const closeEditors = () => { setEditing(null); setTextEdit(null); setSelected(null); };
+      const undo = () => {
+        if (!past.length) return;
+        const previous = past[past.length - 1];
+        setPast(past.slice(0, -1));
+        setFuture([...future, snapshot()]);
+        setShapes(previous.shapes);
+        setComments(previous.comments);
+        closeEditors();
+      };
+      const redoLast = () => {
+        if (!future.length) return;
+        const next = future[future.length - 1];
+        setFuture(future.slice(0, -1));
+        setPast([...past, snapshot()]);
+        setShapes(next.shapes);
+        setComments(next.comments);
+        closeEditors();
       };
 
-      const tolerance = () => Math.max(10, stroke * 2, Math.min(source.width, source.height) / 120);
-      const markerRadius = () => Math.max(9, Math.min(source.width, source.height) * 0.018);
-      const defaultTextSize = () => Math.max(16, Math.round(Math.min(source.width, source.height) * 0.055));
-
-      const textBox = shape => {
-        const size = shape.size || defaultTextSize();
-        return {
-          x: shape.x,
-          y: shape.y - size,
-          width: Math.max(size * 0.8, shape.text.length * size * 0.62),
-          height: size * 1.24,
-        };
-      };
-
-      const hitShape = point => {
-        const tolerance_ = tolerance();
+      // ---- text -----------------------------------------------------------
+      const hitText = point => {
+        const slack = 6 / scale;
         for (let index = shapes.length - 1; index >= 0; index -= 1) {
           const shape = shapes[index];
-          if (shape.type === 'pen' || shape.type === 'erase') {
-            if ((shape.points || []).some(item => Math.hypot(item.x - point.x, item.y - point.y) < tolerance_)) return shape;
-          } else if (shape.type === 'arrow') {
-            if (distanceToSegment(point, { x: shape.x1, y: shape.y1 }, { x: shape.x2, y: shape.y2 }) < tolerance_) return shape;
-          } else if (shape.type === 'rect' || shape.type === 'ellipse') {
-            const box = shapeGeometry(shape);
-            if (point.x >= box.x - tolerance_ && point.x <= box.x + box.width + tolerance_
-              && point.y >= box.y - tolerance_ && point.y <= box.y + box.height + tolerance_) return shape;
-          } else if (shape.type === 'text') {
-            const box = textBox(shape);
-            if (point.x >= box.x && point.x <= box.x + box.width
-              && point.y >= box.y && point.y <= box.y + box.height) return shape;
-          } else if (shape.type === 'marker') {
-            if (Math.hypot(shape.x - point.x, shape.y - point.y) < markerRadius() * 1.4) return shape;
-          }
+          if (shape.type !== 'text') continue;
+          const box = textBox(shape);
+          const cx = box.x + box.width / 2;
+          const cy = box.y + box.height / 2;
+          const angle = (-(shape.rotation || 0) * Math.PI) / 180;
+          const dx = point.x - cx;
+          const dy = point.y - cy;
+          const lx = dx * Math.cos(angle) - dy * Math.sin(angle);
+          const ly = dx * Math.sin(angle) + dy * Math.cos(angle);
+          if (Math.abs(lx) <= box.width / 2 + slack && Math.abs(ly) <= box.height / 2 + slack) return shape;
         }
         return null;
       };
 
-      const dropShape = shape => {
-        setShapes(list => list.filter(item => item.id !== shape.id));
-        if (shape.type === 'marker') {
-          setComments(list => list.filter(item => item.id !== `c-${shape.id}`));
-          setEditing(current => (current && current.id === `c-${shape.id}` ? null : current));
-        }
-        setSelected(current => (current === shape.id ? null : current));
+      const beginTextEdit = shape => {
+        setSelected(null);
+        setTextEdit({
+          id: shape.id, isNew: false, x: shape.x, y: shape.y, size: shape.size,
+          rotation: shape.rotation || 0, color: shape.color, value: shape.text,
+        });
       };
 
-      const openComment = id => {
-        const found = comments.find(item => item.id === id);
-        if (found) setEditing({ id, text: found.text, isNew: false });
-      };
+      // The editor unmounts on commit; return focus to the panel so Delete,
+      // Space and Ctrl+Z keep working without another click.
+      const refocus = () => window.requestAnimationFrame(() => {
+        const root = rootRef.current;
+        // Only reclaim focus that was dropped; never steal it from elsewhere.
+        const active = document.activeElement;
+        if (root && typeof root.focus === 'function' && (!active || active === document.body)) root.focus({ preventScroll: true });
+      });
 
-      const addComment = point => {
-        const id = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const commentId = `c-${id}`;
-        const n = comments.length + 1;
-        setShapes(list => [...list, { id, type: 'marker', x: point.x, y: point.y, n }]);
-        setComments(list => [...list, {
-          id: commentId,
-          text: '',
-          x: Number((point.x / source.width).toFixed(4)),
-          y: Number((point.y / source.height).toFixed(4)),
-        }]);
-        setEditing({ id: commentId, text: '', isNew: true });
-        setError('');
-      };
-
-      const commitComment = () => {
-        if (!editing) return;
-        const value = editing.text.trim();
-        if (value) {
-          setComments(list => list.map(item => (item.id === editing.id ? { ...item, text: value } : item)));
-        } else {
-          const shapeId = editing.id.replace(/^c-/, '');
-          setShapes(list => list.filter(item => item.id !== shapeId));
-          setComments(list => list.filter(item => item.id !== editing.id));
-        }
-        setEditing(null);
-      };
-
-      const cancelComment = () => {
-        if (!editing) return;
-        if (editing.isNew) {
-          const shapeId = editing.id.replace(/^c-/, '');
-          setShapes(list => list.filter(item => item.id !== shapeId));
-          setComments(list => list.filter(item => item.id !== editing.id));
-        }
-        setEditing(null);
-      };
-
+      // Idempotent: blur and an outside click may both commit the same edit,
+      // so the live ref is cleared before React re-renders.
       const commitText = () => {
-        if (!textEdit) return;
-        const value = textEdit.value.trim();
-        if (!value) {
-          if (textEdit.id) setShapes(list => list.filter(item => item.id !== textEdit.id));
-        } else if (textEdit.id) {
-          setShapes(list => list.map(item => (item.id === textEdit.id
-            ? { ...item, text: value, x: textEdit.x, y: textEdit.y, size: textEdit.size }
-            : item)));
-        } else {
-          setShapes(list => [...list, {
-            id: `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            type: 'text', color, text: value, size: textEdit.size, x: textEdit.x, y: textEdit.y,
-          }]);
-        }
+        const edit = textLive.current;
+        if (!edit) return;
+        textLive.current = null;
         setTextEdit(null);
-      };
-
-      const startShape = event => {
-        if (!source) return;
-        if (spaceHeld || event.button === 1) {
-          event.preventDefault();
-          panRef.current = { x: pan.x, y: pan.y, startX: event.clientX, startY: event.clientY };
+        refocus();
+        const value = edit.value.replace(/\s+$/, '');
+        const existing = shapes.find(item => item.id === edit.id);
+        if (!value.trim()) {
+          if (existing) { remember(); setShapes(list => list.filter(item => item.id !== edit.id)); }
           return;
         }
+        if (existing) {
+          if (existing.text === value) return;
+          remember();
+          setShapes(list => list.map(item => (item.id === edit.id ? { ...item, text: value } : item)));
+        } else {
+          remember();
+          setShapes(list => (list.some(item => item.id === edit.id) ? list : [...list, {
+            id: edit.id, type: 'text', color: edit.color, text: value, size: edit.size,
+            rotation: edit.rotation, x: edit.x, y: edit.y,
+          }]));
+        }
+        setSelected(edit.id);
+      };
+
+      // ---- comments -------------------------------------------------------
+      const openComment = comment => {
+        setTextEdit(null);
+        setSelected(null);
+        setEditing({ id: comment.id, x: comment.x, y: comment.y, text: comment.text, isNew: false });
+      };
+
+      // A new comment exists only in the editor until it has text, so an empty
+      // one never leaves a pin behind.
+      const commitComment = () => {
+        const edit = commentLive.current;
+        if (!edit) return;
+        commentLive.current = null;
+        setEditing(null);
+        refocus();
+        const value = edit.text.trim();
+        const existing = comments.find(item => item.id === edit.id);
+        if (!value) {
+          if (existing) { remember(); setComments(list => list.filter(item => item.id !== edit.id)); }
+          return;
+        }
+        if (existing) {
+          if (existing.text === value) return;
+          remember();
+          setComments(list => list.map(item => (item.id === edit.id ? { ...item, text: value } : item)));
+        } else {
+          remember();
+          setComments(list => (list.some(item => item.id === edit.id) ? list
+            : [...list, { id: edit.id, x: edit.x, y: edit.y, text: value }]));
+        }
+      };
+
+      const removeComment = id => {
+        setEditing(null);
+        if (!comments.some(item => item.id === id)) return;
+        remember();
+        setComments(list => list.filter(item => item.id !== id));
+      };
+
+      // ---- pointer --------------------------------------------------------
+      const capture = event => {
+        try { stageRef.current.setPointerCapture(event.pointerId); } catch { /* pointer already gone */ }
+      };
+
+      const startPan = event => {
+        dragRef.current = { kind: 'pan', startX: event.clientX, startY: event.clientY, x: view.x, y: view.y };
+        setPanning(true);
+        capture(event);
+      };
+
+      // Handle drags (move, rotate, resize) start from the overlay but are
+      // captured by the stage so they keep tracking outside the handle.
+      const startHandle = (kind, shape) => event => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const box = textBox(shape);
+        const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        const point = pointOf(event);
+        dragRef.current = {
+          kind, id: shape.id, snapshot: snapshot(), changed: false, center, start: point,
+          origin: { x: shape.x, y: shape.y, size: shape.size, rotation: shape.rotation || 0 },
+          startAngle: Math.atan2(point.y - center.y, point.x - center.x),
+          startDistance: Math.max(1, Math.hypot(point.x - center.x, point.y - center.y)),
+        };
+        setSelected(shape.id);
+        capture(event);
+      };
+
+      const onPointerDown = event => {
+        if (!source) return;
+        if (palette) setPalette(false);
+        // Clicking away commits an open editor and does nothing else.
+        if (textLive.current) { event.preventDefault(); commitText(); return; }
+        if (commentLive.current) { event.preventDefault(); commitComment(); return; }
+        // Keyboard shortcuts (space-pan, undo, delete) need focus in the panel.
+        if (rootRef.current && typeof rootRef.current.focus === 'function') rootRef.current.focus({ preventScroll: true });
+        if (event.button === 1 || (event.button === 0 && spaceHeld)) { event.preventDefault(); startPan(event); return; }
         if (event.button !== 0) return;
         const point = pointOf(event);
-        if (!point) return;
-        if (editing) { commitComment(); return; }
-        if (textEdit) { commitText(); return; }
+        const inside = insideImage(point);
+
+        if (menu === 'comment') {
+          event.preventDefault();
+          if (!inside) return;
+          setEditing({ id: annId(), x: point.x, y: point.y, text: '', isNew: true });
+          return;
+        }
+        if (menu !== 'draw') { event.preventDefault(); startPan(event); return; }
+
+        if (tool === 'select' || tool === 'text') {
+          const hit = hitText(point);
+          if (hit && tool === 'text') { event.preventDefault(); beginTextEdit(hit); return; }
+          if (hit) { startHandle('move', hit)(event); return; }
+          setSelected(null);
+          if (tool === 'select' || !inside) { event.preventDefault(); startPan(event); return; }
+          event.preventDefault();
+          const size = Math.max(6, Math.round(18 / scale));
+          setTextEdit({
+            id: annId(), isNew: true, x: point.x, y: point.y - size * 0.62, size, rotation: 0, color, value: '',
+          });
+          return;
+        }
+
         setSelected(null);
-        if (tool === 'comment') { event.preventDefault(); addComment(point); return; }
-        if (tool === 'eraser') {
-          event.preventDefault();
-          const id = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-          const shape = { id, type: 'erase', width: stroke, points: [point] };
-          setDrafting(shape);
-          setShapes(list => [...list, shape]);
-          setRedo([]);
-          return;
-        }
-        if (tool === 'text') {
-          event.preventDefault();
-          const hit = hitShape(point);
-          if (hit && hit.type === 'text') {
-            setTextEdit({ id: hit.id, x: hit.x, y: hit.y, size: hit.size || defaultTextSize(), value: hit.text });
-          } else {
-            setTextEdit({ x: point.x, y: point.y, size: defaultTextSize(), value: '' });
-          }
-          return;
-        }
-        const hit = hitShape(point);
-        if (hit && hit.type === 'marker') { event.preventDefault(); openComment(`c-${hit.id}`); return; }
-        if (hit && hit.type === 'text') { event.preventDefault(); setSelected(hit.id); return; }
+        if (!inside) { event.preventDefault(); startPan(event); return; }
         event.preventDefault();
-        const id = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const shape = { id, type: tool, color, width: stroke, x1: point.x, y1: point.y, x2: point.x, y2: point.y };
-        if (tool === 'pen') shape.points = [point];
-        setDrafting(shape);
-        setShapes(list => [...list, shape]);
-        setRedo([]);
+        const width = Number((stroke / scale).toFixed(2));
+        const id = annId();
+        const shape = tool === 'pen' || tool === 'eraser'
+          ? { id, type: tool === 'eraser' ? 'erase' : 'pen', color, width, points: [point] }
+          : { id, type: tool, color, width, x1: point.x, y1: point.y, x2: point.x, y2: point.y };
+        dragRef.current = { kind: 'draw', id, snapshot: snapshot(), changed: false };
+        // An eraser tap still erases a dot; other tools wait for movement.
+        if (tool === 'eraser') { remember(); dragRef.current.changed = true; setShapes(list => [...list, shape]); }
+        else dragRef.current.pending = shape;
+        capture(event);
       };
 
-      const extendShape = event => {
+      const onPointerMove = event => {
+        if (!source || !stageRef.current) return;
+        setHover(stagePoint(event));
+        const drag = dragRef.current;
+        if (!drag) return;
+        if (drag.kind === 'pan') {
+          setView(current => ({ ...current, x: drag.x + event.clientX - drag.startX, y: drag.y + event.clientY - drag.startY }));
+          return;
+        }
         const point = pointOf(event);
-        if (resizeRef.current) {
-          const { id, size, startX } = resizeRef.current;
-          const rect = svgRef.current.getBoundingClientRect();
-          const delta = (event.clientX - startX) * (source.width / rect.width);
-          const next = Math.max(8, Math.round(size + delta));
-          resizeRef.current.next = next;
-          setShapes(list => list.map(item => (item.id === id ? { ...item, size: next } : item)));
-          return;
-        }
-        if (panRef.current) {
-          setPan({ x: panRef.current.x + event.clientX - panRef.current.startX, y: panRef.current.y + event.clientY - panRef.current.startY });
-          return;
-        }
-        if (!point) return;
-        setPointer(point);
-        if (!drafting) return;
-        setShapes(list => list.map(item => {
-          if (item.id !== drafting.id) return item;
-          if (item.type === 'pen' || item.type === 'erase') {
-            const last = item.points[item.points.length - 1];
-            if (last && Math.hypot(last.x - point.x, last.y - point.y) < 2) return item;
-            return { ...item, points: [...item.points, point] };
+        const touch = () => {
+          if (drag.changed) return;
+          drag.changed = true;
+          remember(drag.snapshot);
+          if (drag.pending) {
+            const pending = drag.pending;
+            drag.pending = null;
+            setShapes(list => [...list, pending]);
           }
-          return { ...item, x2: point.x, y2: point.y };
-        }));
+        };
+        if (drag.kind === 'draw') {
+          touch();
+          setShapes(list => list.map(item => {
+            if (item.id !== drag.id) return item;
+            if (item.type === 'pen' || item.type === 'erase') {
+              const last = item.points[item.points.length - 1];
+              if (last && Math.hypot(last.x - point.x, last.y - point.y) * scale < 1.5) return item;
+              return { ...item, points: [...item.points, point] };
+            }
+            return { ...item, x2: point.x, y2: point.y };
+          }));
+          return;
+        }
+        const update = patch => {
+          touch();
+          setShapes(list => list.map(item => (item.id === drag.id ? { ...item, ...patch } : item)));
+        };
+        if (drag.kind === 'move') {
+          const dx = point.x - drag.start.x;
+          const dy = point.y - drag.start.y;
+          if (!drag.changed && Math.hypot(dx, dy) * scale < 2) return;
+          update({ x: drag.origin.x + dx, y: drag.origin.y + dy });
+        } else if (drag.kind === 'rotate') {
+          let rotation = drag.origin.rotation
+            + ((Math.atan2(point.y - drag.center.y, point.x - drag.center.x) - drag.startAngle) * 180) / Math.PI;
+          rotation = ((rotation % 360) + 540) % 360 - 180;
+          if (event.shiftKey) rotation = Math.round(rotation / 15) * 15;
+          else if (Math.abs(rotation % 90) < 3) rotation = Math.round(rotation / 90) * 90;
+          update({ rotation: Number(rotation.toFixed(1)) });
+        } else if (drag.kind === 'resize') {
+          // Scale about the box center so the text grows in place.
+          const ratio = Math.hypot(point.x - drag.center.x, point.y - drag.center.y) / drag.startDistance;
+          const size = Math.max(4, Math.round(drag.origin.size * ratio));
+          const target = shapes.find(item => item.id === drag.id);
+          if (!target || size === target.size) return;
+          const after = measureLines(target.text, size);
+          update({ size, x: drag.center.x - after.width / 2, y: drag.center.y - after.height / 2 });
+        }
       };
 
-      const endShape = () => {
-        panRef.current = null;
-        if (resizeRef.current) { resizeRef.current = null; return; }
-        if (!drafting) return;
-        setShapes(list => list.filter(item => {
-          if (item.id !== drafting.id) return true;
-          if (item.type === 'pen' || item.type === 'erase') return item.points.length > 1;
-          return Math.abs(item.x2 - item.x1) + Math.abs(item.y2 - item.y1) > 4;
-        }));
-        setDrafting(null);
+      const onPointerUp = () => {
+        const drag = dragRef.current;
+        dragRef.current = null;
+        setPanning(false);
+        if (!drag || drag.kind !== 'draw' || !drag.changed) return;
+        // Drop a shape too small to see, and its history entry with it.
+        const shape = shapes.find(item => item.id === drag.id);
+        if (!shape || shape.type === 'erase') return;
+        const tiny = shape.type === 'pen'
+          ? shape.points.length < 2
+          : Math.hypot(shape.x2 - shape.x1, shape.y2 - shape.y1) * scale < 4;
+        if (!tiny) return;
+        setPast(entries => entries.slice(0, -1));
+        setShapes(list => list.filter(item => item.id !== drag.id));
       };
 
-      const undo = () => {
-        if (!shapes.length) return;
-        const last = shapes[shapes.length - 1];
-        setShapes(shapes.slice(0, -1));
-        setRedo([...redo, last]);
-        if (last.type === 'marker') setComments(comments.filter(item => item.id !== `c-${last.id}`));
+      const onDoubleClick = event => {
+        if (!source) return;
+        const hit = hitText(pointOf(event));
+        if (!hit) return;
+        event.preventDefault();
+        setMenu('draw');
+        beginTextEdit(hit);
       };
 
-      const redoLast = () => {
-        if (!redo.length) return;
-        const last = redo[redo.length - 1];
-        setShapes([...shapes, last]);
-        setRedo(redo.slice(0, -1));
-        if (last.type === 'marker') setComments([...comments, { id: `c-${last.id}`, text: '' }]);
+      const onKeyDown = event => {
+        const typing = event.target instanceof Element && event.target.closest('input,textarea,[contenteditable="true"]');
+        if (typing) return;
+        const mod = event.ctrlKey || event.metaKey;
+        if (event.code === 'Space') { event.preventDefault(); setSpaceHeld(true); return; }
+        if (mod && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redoLast(); else undo(); return; }
+        if (mod && event.key.toLowerCase() === 'y') { event.preventDefault(); redoLast(); return; }
+        if ((event.key === 'Delete' || event.key === 'Backspace') && selected) {
+          event.preventDefault();
+          remember();
+          setShapes(list => list.filter(item => item.id !== selected));
+          setSelected(null);
+          return;
+        }
+        if (event.key === 'Escape') {
+          if (selected) setSelected(null);
+          else if (menu !== 'main') setMenu('main');
+        }
       };
 
-      const commentText = () => {
-        const kept = comments.filter(entry => entry.text.trim());
-        if (!kept.length) return '';
-        const lines = kept.map((entry, index) => {
-          const at = Number.isFinite(entry.x) && Number.isFinite(entry.y)
-            ? `(x: ${(entry.x * 100).toFixed(1)}%, y: ${(entry.y * 100).toFixed(1)}%) `
-            : '';
-          return `${index + 1}. ${at}${entry.text.trim()}`;
-        });
+      // ---- export ---------------------------------------------------------
+      const normalizedComments = list => list.filter(entry => entry.text.trim()).map((entry, index) => ({
+        id: index + 1,
+        text: entry.text.trim(),
+        x: Number((entry.x / source.width).toFixed(4)),
+        y: Number((entry.y / source.height).toFixed(4)),
+      }));
+
+      const commentText = list => {
+        if (!list.length) return '';
+        const lines = list.map(entry => `${entry.id}. (x: ${(entry.x * 100).toFixed(1)}%, y: ${(entry.y * 100).toFixed(1)}%) ${entry.text}`);
         return `图像 ${(source.draftIndex ?? 0) + 1}：\n${lines.join('\n')}\n`;
       };
 
       const exportAnnotation = async () => {
         if (!source || busy) return;
-        if (editing) { commitComment(); return; }
-        if (textEdit) { commitText(); return; }
-        if (source.draftIndex === null) { setError(t('annNeedsComposerImage')); return; }
+        if (source.draftIndex === null) { notify(t('annNeedsComposerImage'), true); return; }
         if (mode === 'markup' && source.draftIndex !== 0) {
-          setError(t('annMustBeFirst', { n: String(source.draftIndex + 1) }));
+          notify(t('annMustBeFirst', { n: String(source.draftIndex + 1) }), true);
           return;
         }
         if (!composerImages().some(item => item.url === source.url)) {
-          setError(t('annSourceGone'));
+          notify(t('annSourceGone'), true);
           setSource(null);
           return;
         }
+        // A comment still open in its editor counts: commit it and export it.
+        let list = comments;
+        const open = commentLive.current;
+        if (open) {
+          const value = open.text.trim();
+          list = comments.some(item => item.id === open.id)
+            ? comments.map(item => (item.id === open.id ? { ...item, text: value } : item)).filter(item => item.text)
+            : value ? [...comments, { id: open.id, x: open.x, y: open.y, text: value }] : comments;
+          commitComment();
+        }
+        const kept = normalizedComments(list);
+        if (!shapes.some(shape => shape.type !== 'erase') && !kept.length) { notify(t('annNothing'), true); return; }
         setBusy(true);
-        setError('');
-        setNotice('');
+        notify('');
         try {
           const layer = document.createElement('canvas');
           layer.width = source.width;
           layer.height = source.height;
-          const layerCtx = layer.getContext('2d');
-          drawShapes(layerCtx, shapes, source);
+          drawShapes(layer.getContext('2d'), shapes);
           const layerData = await blobToDataUrl(await pngBlobOf(layer));
-          const kept = comments.filter(entry => entry.text.trim());
-          const saved = await request(ANN_ROUTE, {
+          await request(ANN_ROUTE, {
             method: 'POST',
             body: JSON.stringify({
               mode, layer: layerData, width: source.width, height: source.height,
               comments: kept, sourceName: source.name,
             }),
           });
-          const text = commentText();
+          const text = commentText(kept);
           if (!text) {
-            setNotice(t('annExportedSilent'));
+            notify(t('annExportedSilent'));
           } else {
             let inserted = false;
             if (inputActions) {
@@ -1362,233 +1609,323 @@ window.__ModuleLoader__.load({
             if (!inserted) {
               try { await navigator.clipboard.writeText(text); } catch { /* no clipboard */ }
             }
-            setNotice(inserted ? t('annExported') : t('annExportedCopy'));
+            notify(inserted ? t('annExported') : t('annExportedCopy'));
           }
-          setSavedId(saved.id || '');
         } catch (failure) {
-          setError(`${t('annFailed')}: ${failure && failure.message ? failure.message : ''}`);
+          notify(`${t('annFailed')}: ${failure && failure.message ? failure.message : ''}`, true);
         } finally {
           setBusy(false);
         }
       };
 
-      const setStrokeFromEvent = event => {
-        const track = event.currentTarget.getBoundingClientRect();
-        const fromTop = Math.min(1, Math.max(0, (event.clientY - track.top) / track.height));
-        setStroke(Math.round(1 + (1 - fromTop) * 39));
-      };
+      // ---- controls -------------------------------------------------------
+      const stopUi = event => { event.stopPropagation(); };
 
+      const strokeFromPointer = event => {
+        const rect = sliderRef.current.getBoundingClientRect();
+        const rail = { top: rect.top + 16, height: Math.max(1, rect.height - 32) };
+        const fromTop = Math.min(1, Math.max(0, (event.clientY - rail.top) / rail.height));
+        setStroke(Math.round(ANN_STROKE_MIN + (1 - fromTop) * (ANN_STROKE_MAX - ANN_STROKE_MIN)));
+      };
+      const strokeRatio = (stroke - ANN_STROKE_MIN) / (ANN_STROKE_MAX - ANN_STROKE_MIN);
+
+      // The slider captures its own pointer, so the knob follows the drag
+      // anywhere on screen, not only while the pointer is over the rail.
       const slider = h('div', {
-        className: 'fmg-ann-slider',
-        title: t('annStroke'),
-        'aria-label': t('annStroke'),
+        ref: sliderRef,
+        className: `fmg-ann-slider${sliding ? ' is-sliding' : ''}`,
+        role: 'slider', tabIndex: 0, title: t('annStroke'), 'aria-label': t('annStroke'),
+        'aria-valuemin': ANN_STROKE_MIN, 'aria-valuemax': ANN_STROKE_MAX, 'aria-valuenow': stroke,
         onPointerDown: event => {
+          if (event.button !== 0) return;
           event.preventDefault();
           event.stopPropagation();
-          setStrokeFromEvent(event);
-          const move = move => setStrokeFromEvent(move);
-          const up = () => {
-            window.removeEventListener('pointermove', move);
-            window.removeEventListener('pointerup', up);
-          };
-          window.addEventListener('pointermove', move);
-          window.addEventListener('pointerup', up);
+          try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+          setSliding(true);
+          strokeFromPointer(event);
         },
-      }, h('span', {
-        className: 'fmg-ann-knob',
-        style: { top: `${100 - ((stroke - 1) / 39) * 100}%` },
-      }));
+        onPointerMove: event => {
+          event.stopPropagation();
+          setHover(null);
+          if (sliding) strokeFromPointer(event);
+        },
+        onPointerUp: event => { event.stopPropagation(); setSliding(false); },
+        onLostPointerCapture: () => setSliding(false),
+        onKeyDown: event => {
+          const step = event.key === 'ArrowUp' || event.key === 'ArrowRight' ? 1
+            : event.key === 'ArrowDown' || event.key === 'ArrowLeft' ? -1 : 0;
+          if (!step) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setStroke(value => Math.min(ANN_STROKE_MAX, Math.max(ANN_STROKE_MIN, value + step)));
+        },
+      },
+        h('span', { className: 'fmg-ann-track', 'aria-hidden': true }),
+        h('span', {
+          className: 'fmg-ann-knob',
+          style: { top: `calc(16px + ${(1 - strokeRatio).toFixed(4)} * (100% - 32px))` },
+        }, sliding
+          ? h('span', { className: 'fmg-ann-bubble' },
+            h('i', { style: { width: Math.min(stroke, 22), height: Math.min(stroke, 22), background: tool === 'eraser' ? '#fff' : color } }),
+            `${stroke}px`)
+          : null));
 
-      const mainBar = h('div', { className: 'fmg-ann-bar' },
-        h('button', {
-          type: 'button', className: 'fmg-ann-text',
-          onClick: () => setMenu('draw'), disabled: !source,
-        }, t('annAnnotate')),
-        h('button', {
-          type: 'button', className: 'fmg-ann-text', 'aria-pressed': tool === 'comment',
-          onClick: () => { setTool('comment'); setMenu('main'); },
-        }, t('annAddComment')),
-        h('button', {
-          type: 'button', className: 'fmg-ann-text', 'aria-pressed': mode === 'markup',
-          disabled: !capable && mode === 'flatten',
-          title: capable
-            ? (mode === 'markup' ? t('annModeMarkupHint') : t('annModeFlattenHint'))
-            : t('annModeUnsupported'),
-          onClick: () => { setManualMode(true); setMode(current => (current === 'markup' ? 'flatten' : 'markup')); },
-        }, mode === 'markup' ? t('annModeMarkup') : t('annModeFlatten')),
-        h('button', {
-          type: 'button', className: 'fmg-ann-save', disabled: !source || busy,
-          onClick: () => { void exportAnnotation(); },
-        }, busy ? t('annExporting') : t('annExport')));
+      const iconButton = (name, label, props) => h('button', {
+        type: 'button', className: 'fmg-ann-ib', title: label, 'aria-label': label, ...props,
+      }, annGlyph(ANN_ICONS[name], 18));
 
-      const drawBar = h('div', { className: 'fmg-ann-bar' },
+      const textButton = (name, label, props, className) => h('button', {
+        type: 'button', className: className || 'fmg-ann-tb', ...props,
+      }, annGlyph(ANN_ICONS[name]), h('span', null, label));
+
+      const modeTitle = !capable ? t('annModeUnsupported')
+        : mode === 'markup' ? t('annModeMarkupHint') : t('annModeFlattenHint');
+
+      const mainBar = h('div', { className: 'fmg-ann-bar', role: 'toolbar', onPointerDown: stopUi },
+        textButton('annotate', t('annAnnotate'), { onClick: () => { setMenu('draw'); setEditing(null); } }),
+        textButton('comment', t('annAddComment'), { onClick: () => { setMenu('comment'); setSelected(null); } }),
+        h('button', {
+          type: 'button', className: 'fmg-ann-tb fmg-ann-mode', title: modeTitle,
+          'aria-label': `${t('annModeMarkup')}/${t('annModeFlatten')}`,
+          // Not `disabled`: a disabled button shows no tooltip, and the user
+          // should learn why 分层 is unavailable.
+          'aria-disabled': !capable,
+          onClick: () => {
+            if (!capable) { notify(t('annModeUnsupported'), true); return; }
+            setManualMode(true);
+            setMode(current => (current === 'markup' ? 'flatten' : 'markup'));
+          },
+        },
+          annGlyph(ANN_ICONS.layers),
+          h('span', { className: mode === 'markup' ? 'is-on' : 'is-off' }, t('annModeMarkup')),
+          h('span', { className: 'is-slash', 'aria-hidden': true }, '/'),
+          h('span', { className: mode === 'flatten' ? 'is-on' : 'is-off' }, t('annModeFlatten'))),
+        h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
+        textButton('save', busy ? t('annExporting') : t('annExport'), {
+          disabled: busy, onClick: () => { void exportAnnotation(); },
+        }, 'fmg-ann-save'));
+
+      const drawBar = h('div', { className: 'fmg-ann-bar', role: 'toolbar', onPointerDown: stopUi },
         ANN_DRAW_TOOLS.map(([name, labelKey]) => h('button', {
           key: name, type: 'button', className: 'fmg-ann-ib', title: t(labelKey), 'aria-label': t(labelKey),
-          'aria-pressed': tool === name, onClick: () => setTool(name),
-        }, annGlyph(ANN_ICONS[name]))),
-        h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
+          'aria-pressed': tool === name, onClick: () => { setTool(name); if (name !== 'select' && name !== 'text') setSelected(null); },
+        }, annGlyph(ANN_ICONS[name], 18))),
         h('button', {
           type: 'button', className: 'fmg-ann-dot', title: t('annColor'), 'aria-label': t('annColor'),
-          onClick: () => setColor(ANN_COLORS[(ANN_COLORS.indexOf(color) + 1) % ANN_COLORS.length]),
+          'aria-expanded': palette, onClick: () => setPalette(open => !open),
         }, h('i', { style: { background: color } })),
+        iconButton('eraser', t('annToolEraser'), { 'aria-pressed': tool === 'eraser', onClick: () => { setTool('eraser'); setSelected(null); } }),
         h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
-        h('button', {
-          type: 'button', className: 'fmg-ann-ib', title: t('annUndo'), 'aria-label': t('annUndo'),
-          disabled: !shapes.length, onClick: undo,
-        }, annGlyph(ANN_ICONS.undo)),
-        h('button', {
-          type: 'button', className: 'fmg-ann-ib', title: t('annRedo'), 'aria-label': t('annRedo'),
-          disabled: !redo.length, onClick: redoLast,
-        }, annGlyph(ANN_ICONS.redo)),
-        h('button', {
-          type: 'button', className: 'fmg-ann-ib', title: t('annClear'), 'aria-label': t('annClear'),
+        iconButton('undo', t('annUndo'), { disabled: !past.length, onClick: undo }),
+        iconButton('redo', t('annRedo'), { disabled: !future.length, onClick: redoLast }),
+        iconButton('trash', t('annClear'), {
           disabled: !shapes.length,
-          onClick: () => { setShapes([]); setComments([]); setRedo([]); setEditing(null); setTextEdit(null); setSelected(null); },
-        }, annGlyph(ANN_ICONS.trash)),
-        h('button', {
-          type: 'button', className: 'fmg-ann-ib', title: t('annBack'), 'aria-label': t('annBack'),
-          onClick: () => setMenu('main'),
-        }, annGlyph(ANN_ICONS.check)));
+          onClick: () => { remember(); setShapes([]); setSelected(null); setTextEdit(null); },
+        }),
+        h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
+        iconButton('check', t('annDone'), { onClick: () => { if (textEdit) commitText(); setSelected(null); setMenu('main'); } }));
 
-      const anchor = (x, y) => ({ left: `${(x / source.width) * 100}%`, top: `${(y / source.height) * 100}%` });
+      const commentBar = h('div', { className: 'fmg-ann-bar', role: 'toolbar', onPointerDown: stopUi },
+        h('span', { className: 'fmg-ann-prompt' }, annGlyph(ANN_ICONS.comment), t('annCommentHint')),
+        textButton('check', t('annDone'), {
+          onClick: () => { if (editing) commitComment(); setMenu('main'); },
+        }, 'fmg-ann-save'));
 
-      const editingShape = editing
-        ? shapes.find(shape => shape.type === 'marker' && `c-${shape.id}` === editing.id)
-        : null;
-
-      const commentCard = editing && editingShape
-        ? h('div', { className: 'fmg-ann-pin', style: anchor(editingShape.x, editingShape.y) },
-          h('div', { className: 'fmg-ann-card' },
-            h('span', { className: 'fmg-ann-badge' }, String(editingShape.n)),
-            h('textarea', {
-              autoFocus: true,
-              value: editing.text,
-              placeholder: t('annCommentPlaceholder'),
-              'aria-label': t('annComment'),
-              onChange: event => {
-                const value = event.target.value;
-                setEditing(current => (current ? { ...current, text: value } : current));
-              },
-              onKeyDown: event => {
-                if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); commitComment(); }
-                if (event.key === 'Escape') { event.preventDefault(); cancelComment(); }
-              },
-            }),
-            h('div', { className: 'fmg-ann-card-actions' },
-              h('button', {
-                type: 'button', className: 'fmg-ann-ib', title: t('annRemoveComment'), 'aria-label': t('annRemoveComment'),
-                onClick: () => {
-                  const shapeId = editing.id.replace(/^c-/, '');
-                  setShapes(list => list.filter(item => item.id !== shapeId));
-                  setComments(list => list.filter(item => item.id !== editing.id));
-                  setEditing(null);
-                },
-              }, annGlyph(ANN_ICONS.trash)),
-              h('button', { type: 'button', className: 'fmg-ann-ghost', onClick: cancelComment }, t('annCancel')),
-              h('button', { type: 'button', className: 'fmg-ann-confirm', onClick: commitComment }, t('annSaveComment')))))
-        : null;
-
-      const selectedShape = selected ? shapes.find(shape => shape.id === selected && shape.type === 'text') : null;
-      const selectionBox = selectedShape
-        ? h('div', {
-          className: 'fmg-ann-sel',
-          style: {
-            left: `${(textBox(selectedShape).x / source.width) * 100}%`,
-            top: `${(textBox(selectedShape).y / source.height) * 100}%`,
-            width: `${(textBox(selectedShape).width / source.width) * 100}%`,
-            height: `${(textBox(selectedShape).height / source.height) * 100}%`,
-          },
-        },
-          h('button', {
-            type: 'button', className: 'fmg-ann-handle is-del', title: t('annRemoveComment'), 'aria-label': t('annRemoveComment'),
-            onClick: () => { setShapes(list => list.filter(item => item.id !== selectedShape.id)); setSelected(null); },
-          }, '×'),
-          h('button', {
-            type: 'button', className: 'fmg-ann-handle is-size', title: t('annResize'), 'aria-label': t('annResize'),
-            onPointerDown: event => {
-              event.preventDefault();
-              event.stopPropagation();
-              resizeRef.current = {
-                id: selectedShape.id,
-                size: selectedShape.size || defaultTextSize(),
-                startX: event.clientX,
-              };
+      const paletteMenu = palette && menu === 'draw'
+        ? h('div', { className: 'fmg-ann-palette', role: 'menu', onPointerDown: stopUi },
+          ANN_COLORS.map(value => h('button', {
+            key: value, type: 'button', 'aria-label': value, 'aria-pressed': value === color,
+            style: { background: value },
+            onClick: () => {
+              setColor(value);
+              setPalette(false);
+              if (selected) {
+                remember();
+                setShapes(list => list.map(item => (item.id === selected ? { ...item, color: value } : item)));
+              }
             },
-          }, '⤡'))
+          })))
         : null;
 
-      const textEditor = textEdit
-        ? h('textarea', {
-          className: 'fmg-ann-textin',
-          style: {
-            left: `${(textEdit.x / source.width) * 100}%`,
-            top: `${((textEdit.y - textEdit.size) / source.height) * 100}%`,
-            height: `${(textEdit.size * 1.3 / source.height) * 100}%`,
-            width: `${Math.max(textEdit.size * 0.9, (textEdit.value || '').length * textEdit.size * 0.62) / source.width * 100}%`,
-            fontSize: `${(textEdit.size / source.width) * 100}cqw`,
-            color,
-            lineHeight: 1.2,
-          },
-          autoFocus: true,
-          value: textEdit.value,
-          placeholder: t('annTextPrompt'),
-          'aria-label': t('annTextPrompt'),
-          onChange: event => {
+      // ---- overlays -------------------------------------------------------
+      const overlays = [];
+      if (source && frame) {
+        const pinList = comments.map((comment, index) => ({ comment, n: index + 1 }));
+        if (editing && editing.isNew) pinList.push({ comment: editing, n: comments.length + 1 });
+        pinList.forEach(({ comment, n }) => {
+          const at = toScreen(comment.x, comment.y);
+          overlays.push(h('button', {
+            // Near the right edge the badge flips to the tip's left so it stays visible.
+            key: `pin-${comment.id}`, type: 'button',
+            className: at.left + 26 > stageSize.width ? 'fmg-ann-pin is-flip' : 'fmg-ann-pin',
+            'aria-pressed': Boolean(editing && editing.id === comment.id),
+            'aria-label': `${t('annComment')} ${n}`, title: comment.text || undefined,
+            style: { left: at.left, top: at.top },
+            onPointerDown: stopUi,
+            onClick: () => { if (!editing || editing.id !== comment.id) { if (editing) commitComment(); openComment(comment); } },
+          }, String(n)));
+        });
+
+        if (editing) {
+          // The pin's tip is at `at`; its 24px badge sits above-right of it.
+          // Put the editor to the right of the badge, else to its left, else
+          // below it, so the pin being edited is never covered.
+          const at = toScreen(editing.x, editing.y);
+          const width = Math.min(editing.isNew ? 280 : 300, stageSize.width - 16);
+          const tall = editing.isNew ? 40 : 128;
+          let left = at.left + 32;
+          let top = at.top - 12;
+          if (left + width > stageSize.width - 8) left = at.left - 8 - width;
+          if (left < 8) {
+            left = Math.max(8, Math.min(at.left - width / 2, stageSize.width - width - 8));
+            top = at.top + 10 + tall / 2;
+          }
+          top = Math.max(60 + tall / 2, Math.min(top, stageSize.height - 8 - tall / 2));
+          const update = event => {
             const value = event.target.value;
-            setTextEdit(current => (current ? { ...current, value } : current));
-          },
-          onKeyDown: event => {
-            if (event.key === 'Escape') { event.preventDefault(); setTextEdit(null); }
-          },
-          onBlur: () => commitText(),
-          onFocus: event => {
-            const element = event.currentTarget;
-            element.style.width = `${Math.max(element.scrollWidth, 40)}px`;
-          },
-        })
-        : null;
+            setEditing(current => (current ? { ...current, text: value } : current));
+          };
+          const cancel = () => setEditing(null);
+          overlays.push(editing.isNew
+            ? h('div', { key: 'comment-editor', className: 'fmg-ann-pill', style: { left, top, width }, onPointerDown: stopUi },
+              h('input', {
+                autoFocus: true, value: editing.text, placeholder: t('annCommentPlaceholder'), 'aria-label': t('annComment'),
+                onChange: update,
+                onKeyDown: event => {
+                  if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); commitComment(); }
+                  if (event.key === 'Escape') { event.preventDefault(); cancel(); }
+                },
+              }),
+              h('button', {
+                type: 'button', className: 'fmg-ann-send', title: t('annSend'), 'aria-label': t('annSend'),
+                onClick: commitComment,
+              }, annGlyph(ANN_ICONS.send, 16)))
+            : h('div', { key: 'comment-editor', className: 'fmg-ann-card', style: { left, top, width }, onPointerDown: stopUi },
+              h('textarea', {
+                autoFocus: true, value: editing.text, placeholder: t('annCommentPlaceholder'), 'aria-label': t('annComment'),
+                onChange: update,
+                onFocus: event => { const end = event.target.value.length; event.target.setSelectionRange(end, end); },
+                onKeyDown: event => {
+                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); commitComment(); }
+                  if (event.key === 'Escape') { event.preventDefault(); cancel(); }
+                },
+              }),
+              h('div', { className: 'fmg-ann-card-foot' },
+                iconButton('trash', t('annRemoveComment'), { onClick: () => removeComment(editing.id) }),
+                h('button', { type: 'button', className: 'fmg-ann-ghost', onClick: cancel }, t('annCancel')),
+                h('button', { type: 'button', className: 'fmg-ann-confirm', onClick: commitComment }, t('annSaveComment')))));
+        }
 
-      const pip = source && tool !== 'comment' && tool !== 'text' && pointer && !spaceHeld
-        ? h('div', {
-          className: 'fmg-ann-pip',
-          style: {
-            left: `${(pointer.x / source.width) * 100}%`,
-            top: `${(pointer.y / source.height) * 100}%`,
-            width: `${Math.max(4, stroke * displayScale() * 2)}px`,
-            height: `${Math.max(4, stroke * displayScale() * 2)}px`,
+        const selectedShape = selected && !textEdit ? shapes.find(item => item.id === selected && item.type === 'text') : null;
+        if (selectedShape) {
+          const box = textBox(selectedShape);
+          const pad = 6;
+          const at = toScreen(box.x, box.y);
+          overlays.push(h('div', {
+            key: 'selection', className: 'fmg-ann-sel',
+            style: {
+              left: at.left - pad, top: at.top - pad,
+              width: box.width * scale + pad * 2, height: box.height * scale + pad * 2,
+              transform: selectedShape.rotation ? `rotate(${selectedShape.rotation}deg)` : undefined,
+            },
+            onPointerDown: startHandle('move', selectedShape),
+            onDoubleClick: event => { event.stopPropagation(); beginTextEdit(selectedShape); },
           },
-        })
-        : null;
+            h('span', {
+              className: 'fmg-ann-handle is-rotate', title: t('annRotate'), 'aria-label': t('annRotate'), role: 'button',
+              onPointerDown: startHandle('rotate', selectedShape),
+            }, annGlyph(ANN_ICONS.rotate, 13)),
+            h('button', {
+              type: 'button', className: 'fmg-ann-handle is-del', title: t('annDeleteText'), 'aria-label': t('annDeleteText'),
+              onPointerDown: stopUi,
+              onClick: () => { remember(); setShapes(list => list.filter(item => item.id !== selectedShape.id)); setSelected(null); },
+            }, annGlyph(ANN_ICONS.close, 13)),
+            h('span', {
+              className: 'fmg-ann-handle is-size', title: t('annResize'), 'aria-label': t('annResize'), role: 'button',
+              onPointerDown: startHandle('resize', selectedShape),
+            }, annGlyph(ANN_ICONS.resize, 13)),
+            h('span', {
+              className: 'fmg-ann-handle is-move', title: t('annMove'), 'aria-label': t('annMove'), role: 'button',
+              onPointerDown: startHandle('move', selectedShape),
+            }, annGlyph(ANN_ICONS.move, 13))));
+        }
 
-      const stage = source
+        if (textEdit) {
+          const measured = measureLines(textEdit.value || t('annTextPrompt'), textEdit.size);
+          const at = toScreen(textEdit.x, textEdit.y);
+          overlays.push(h('textarea', {
+            key: `text-${textEdit.id}`, className: 'fmg-ann-textin',
+            autoFocus: true, value: textEdit.value, placeholder: t('annTextPrompt'), 'aria-label': t('annTextPrompt'),
+            spellCheck: false, wrap: 'off',
+            style: {
+              left: at.left, top: at.top,
+              width: measured.width * scale + 6, height: measured.height * scale,
+              fontSize: textEdit.size * scale, fontFamily: ANN_FONT, color: textEdit.color,
+              transform: textEdit.rotation ? `rotate(${textEdit.rotation}deg)` : undefined,
+              transformOrigin: 'center center',
+            },
+            onPointerDown: stopUi,
+            onFocus: event => { const end = event.target.value.length; event.target.setSelectionRange(end, end); },
+            onChange: event => {
+              const value = event.target.value;
+              setTextEdit(current => (current ? { ...current, value } : current));
+            },
+            onKeyDown: event => {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); commitText(); }
+              if (event.key === 'Escape') { event.preventDefault(); setTextEdit(null); }
+            },
+            onBlur: () => commitText(),
+          }));
+        }
+
+        const overImage = hover && hover.x >= frame.left && hover.x <= frame.left + frame.width
+          && hover.y >= frame.top && hover.y <= frame.top + frame.height;
+        if (menu === 'draw' && ANN_PIP_TOOLS.includes(tool) && overImage && !spaceHeld && !panning && !sliding && !textEdit) {
+          overlays.push(h('div', {
+            key: 'pip', className: 'fmg-ann-pip',
+            style: {
+              left: hover.x, top: hover.y, width: Math.max(4, stroke), height: Math.max(4, stroke),
+              background: tool === 'eraser' ? 'rgba(255,255,255,.35)' : `${color}55`,
+            },
+          }));
+        }
+      }
+
+      const drawCursor = () => {
+        if (panning) return 'grabbing';
+        if (spaceHeld || menu === 'main') return 'grab';
+        if (menu === 'comment') return 'crosshair';
+        if (tool === 'text') return 'text';
+        if (tool === 'select') return 'default';
+        if (ANN_PIP_TOOLS.includes(tool)) return 'none';
+        return 'crosshair';
+      };
+
+      const hiddenText = textEdit ? textEdit.id : null;
+      const stage = source && frame
         ? h('div', {
           ref: stageRef,
           className: 'fmg-ann-stage',
-          onPointerMove: event => {
-            if (spaceHeld || panRef.current) {
-              if (panRef.current) {
-                setPan({
-                  x: panRef.current.x + event.clientX - panRef.current.startX,
-                  y: panRef.current.y + event.clientY - panRef.current.startY,
-                });
-              }
-              return;
-            }
-            const point = pointOf(event);
-            if (point) setPointer(point);
+          style: { cursor: drawCursor() },
+          onPointerDown, onPointerMove, onPointerUp,
+          // Stop the browser from moving focus or selecting text on a canvas
+          // press; editors would otherwise blur the instant they open.
+          onMouseDown: event => {
+            if (!(event.target instanceof Element && event.target.closest('input,textarea'))) event.preventDefault();
           },
-          onPointerLeave: () => setPointer(null),
+          onPointerCancel: onPointerUp,
+          onLostPointerCapture: onPointerUp,
+          onPointerLeave: () => setHover(null),
+          onDoubleClick,
+          onContextMenu: event => event.preventDefault(),
         },
           h('div', {
-            ref: frameRef,
             className: 'fmg-ann-frame',
-            style: { transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, cursor: spaceHeld ? 'grab' : undefined },
+            style: { left: frame.left, top: frame.top, width: frame.width, height: frame.height },
           },
             h('img', { src: source.url, alt: source.name, draggable: false }),
             h('svg', {
-              ref: svgRef, className: 'fmg-ann-svg', viewBox: `0 0 ${source.width} ${source.height}`,
-              style: { cursor: tool === 'comment' ? 'copy' : 'crosshair' },
-              onPointerDown: startShape, onPointerMove: extendShape, onPointerUp: endShape, onPointerLeave: endShape,
+              className: 'fmg-ann-svg', viewBox: `0 0 ${source.width} ${source.height}`, preserveAspectRatio: 'none',
             },
               h('defs', null,
                 h('mask', {
@@ -1597,19 +1934,23 @@ window.__ModuleLoader__.load({
                 },
                   h('rect', { x: 0, y: 0, width: source.width, height: source.height, fill: '#fff' }),
                   shapes.filter(shape => shape.type === 'erase').map(shape => h('polyline', {
-                    key: shape.id,
-                    points: shape.points.map(item => `${item.x},${item.y}`).join(' '),
-                    fill: 'none', stroke: '#000', strokeWidth: shape.width,
-                    strokeLinecap: 'round', strokeLinejoin: 'round',
+                    key: shape.id, points: polyPoints(shape.points.length === 1
+                      ? [shape.points[0], { x: shape.points[0].x + 0.01, y: shape.points[0].y }]
+                      : shape.points),
+                    fill: 'none', stroke: '#000', strokeWidth: shape.width, strokeLinecap: 'round', strokeLinejoin: 'round',
                   })))),
               h('g', { mask: 'url(#fmg-ann-erase)' },
-                shapes.filter(shape => shape.type !== 'erase').map(shape => renderShape(shape, source)))),
-            selectionBox,
-            commentCard,
-            textEditor,
-            pip),
-          slider)
-        : h('div', { className: 'fmg-ann-stage' },
+                shapes.filter(shape => shape.type !== 'erase' && shape.id !== hiddenText).map(renderShape)))),
+          h('div', { className: 'fmg-ann-layer' }, overlays),
+          menu === 'draw' && ANN_STROKE_TOOLS.includes(tool) ? slider : null,
+          h('div', { className: 'fmg-ann-zoom', onPointerDown: stopUi },
+            iconButton('minus', t('annZoomOut'), { onClick: () => zoomTo(zoom => zoom / 1.25) }),
+            h('button', {
+              type: 'button', className: 'fmg-ann-zoom-val', title: t('annZoomFit'),
+              onClick: () => setView({ zoom: 1, x: 0, y: 0 }),
+            }, `${Math.round(scale * 100)}%`),
+            iconButton('plus', t('annZoomIn'), { onClick: () => zoomTo(zoom => zoom * 1.25) })))
+        : h('div', { ref: stageRef, className: 'fmg-ann-stage' },
           h('div', { className: 'fmg-ann-empty' },
             h('p', null, t('annEmpty')),
             drafts.length
@@ -1619,22 +1960,20 @@ window.__ModuleLoader__.load({
               }, h('img', { src: item.url, alt: item.name }))))
               : null));
 
-      const status = error
-        ? h('div', { className: 'fmg-ann-hint', role: 'alert' }, error)
-        : tool === 'comment'
-          ? h('div', { className: 'fmg-ann-hint' }, t('annCommentHint'))
-          : notice
-            ? h('div', { className: 'fmg-ann-hint', role: 'status' }, savedId ? `${notice} #${savedId}` : notice)
-            : null;
-
       const acceptsDrop = event => {
         const types = event.dataTransfer ? Array.from(event.dataTransfer.types || []) : [];
         return types.includes('text/uri-list') || types.includes('text/plain');
       };
 
+      const bar = !source ? null : menu === 'draw' ? drawBar : menu === 'comment' ? commentBar : mainBar;
+
       return h('section', {
+        ref: rootRef,
         className: 'fmg-ann',
+        tabIndex: -1,
         'aria-label': t('annTitle'),
+        onKeyDown,
+        onKeyUp: event => { if (event.code === 'Space') setSpaceHeld(false); },
         onDragOver: event => {
           if (!acceptsDrop(event)) return;
           event.preventDefault();
@@ -1649,15 +1988,16 @@ window.__ModuleLoader__.load({
           setDragging(false);
           const uri = (event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain') || '')
             .split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith('#'));
-          if (!uri) { setError(t('annDropUnsupported')); return; }
+          if (!uri) { notify(t('annDropUnsupported'), true); return; }
           const known = composerImages().find(item => item.url === uri);
-          if (!known) { setError(t('annNeedsComposerImage')); return; }
+          if (!known) { notify(t('annNeedsComposerImage'), true); return; }
           await openSource({ ...known, draftIndex: known.index });
         },
       },
-        source ? (menu === 'draw' ? drawBar : mainBar) : null,
-        source ? status : null,
+        bar,
+        paletteMenu,
         stage,
+        toast ? h('div', { className: `fmg-ann-toast${toast.error ? ' is-error' : ''}`, role: toast.error ? 'alert' : 'status' }, toast.text) : null,
         dragging ? h('div', { className: 'fmg-ann-drop' }, t('annDropHere')) : null);
     }
 

@@ -125,28 +125,37 @@ test('the sidebar tab body only appears when the right sidebar services resolve'
   assert.match(html, /fmg-ann/);
   assert.match(html, /fmg-ann-empty/);
 
-  // Loaded layout: one bar with four labelled entries, plus the stroke slider.
-  const loaded = renderToString(requireReact('react').createElement(tabBody.component, {
+  const render = initialMenu => renderToString(requireReact('react').createElement(tabBody.component, {
     inputActions: { insertText: () => false, captureInsertion: () => ({}) },
     initialSource: { url: 'about:blank', name: 'cat.png', draftIndex: 0, width: 640, height: 480 },
+    initialMenu,
   }));
-  assert.equal((loaded.match(/fmg-ann-bar/g) || []).length, 1, 'exactly one toolbar');
+  const bars = html => (html.match(/class="fmg-ann-bar"/g) || []).length;
+
+  // Main bar: icon + label for 标注 / 添加评论 / 分层·合成 / 保存, no slider.
+  const loaded = render();
+  assert.equal(bars(loaded), 1, 'exactly one toolbar');
   assert.match(loaded, /viewBox="0 0 640 480"/);
-  for (const label of ['标注', '添加评论', '合成', '保存']) {
-    assert.match(loaded, new RegExp(`>${label}<`), `main bar shows ${label}`);
+  for (const label of ['标注', '添加评论', '分层', '保存']) {
+    assert.match(loaded, new RegExp(`<svg[^>]*>(?:<path[^>]*>(?:</path>)?)+</svg><span[^>]*>${label}<`), `${label} carries an icon`);
   }
-  assert.match(loaded, /fmg-ann-slider/, 'the stroke slider sits on the image');
+  assert.match(loaded, /<span class="is-on">合成<\/span>/, 'the toggle highlights the active half');
+  assert.match(loaded, /class="fmg-ann-sep"[^>]*><\/span><button[^>]*class="fmg-ann-save"/, 'a separator keeps 保存 apart');
+  assert.doesNotMatch(loaded, /fmg-ann-slider/, 'the stroke slider belongs to the draw menu');
   assert.match(loaded, /mask id="fmg-ann-erase"/, 'eraser strokes are a real mask');
   assert.doesNotMatch(loaded, /aria-label="画笔"/, 'tools are behind the submenu');
 
-  const draw = renderToString(requireReact('react').createElement(tabBody.component, {
-    inputActions: { insertText: () => false, captureInsertion: () => ({}) },
-    initialSource: { url: 'about:blank', name: 'cat.png', draftIndex: 0, width: 640, height: 480 },
-    initialMenu: 'draw',
-  }));
-  assert.equal((draw.match(/fmg-ann-bar/g) || []).length, 1, 'the submenu replaces the bar, never adds one');
-  assert.match(draw, /aria-label="画笔"/);
-  assert.match(draw, /aria-label="橡皮"/);
-  assert.match(draw, /aria-label="返回"/);
+  const draw = render('draw');
+  assert.equal(bars(draw), 1, 'the submenu replaces the bar, never adds one');
+  for (const label of ['选择', '画笔', '箭头', '文字', '换颜色', '橡皮', '撤销', '重做', '完成']) {
+    assert.match(draw, new RegExp(`aria-label="${label}"`), `draw bar has ${label}`);
+  }
+  assert.match(draw, /role="slider"[^>]*aria-valuenow="6"/, 'the slider shows with the pen');
   assert.doesNotMatch(draw, />保存</, 'saving lives on the main bar');
+
+  const comment = render('comment');
+  assert.equal(bars(comment), 1);
+  assert.match(comment, />点击图像以添加评论</);
+  assert.match(comment, />完成</);
+  assert.doesNotMatch(comment, /fmg-ann-slider/);
 });

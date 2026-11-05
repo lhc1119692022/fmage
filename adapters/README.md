@@ -17,7 +17,7 @@ Codex 使用原生 `.codex-plugin/plugin.json`；DeepSeek Desktop 由 `scripts/h
 `annotation-api.mjs`（标注工作台的文件落盘与回读）和 `client.js`
 （浏览器半，经 `window.__ModuleLoader__.load` 注册，向 `settings.section` 插槽贡献「Fmage 生图」页，
 向 `conversation.input.right` 插槽贡献输入栏生图胶囊，
-并在右侧栏「开始」页注册一张「图像标注」卡片、向 `sidebar.right.pane.tab` 注册其正文）。胶囊与设置页共用同一个读取、摘要校验和写入路径，
+并在右侧栏「开始」页注册一张「Fmage 工作台」卡片、向 `sidebar.right.pane.tab` 注册其正文）。胶囊与设置页共用同一个读取、摘要校验和写入路径，
 只写 `default_provider`；没有该插槽的宿主不会挂载它，行为退回配置顺序和显式 `provider` 参数。
 包清单声明 `dsh.client.platform = web` 与 `exports["./client"]`，由宿主的 client 模块扫描器加载。
 浏览器半只 `require` 宿主共享的 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`，无需构建步骤。
@@ -39,6 +39,10 @@ MCP 侧在 `edit_image` 发请求前取“最新且未被使用”的那一层�
 `--markup`，其它模型走 `--flatten-markup`（本地把层合成进第一张图再发）。因此对话里不再出现任何
 路径；评论按 `图像 1： 1. (x: 22.1%, y: 26%) …` 的普通文字插入输入框，由模型自然读入提示词。
 用过的层会写 `consumedAt` 退休，失败的请求不动它。
+
+工作台顶部一条浮动栏：「标注」进入画笔、箭头、方框、椭圆、文字和橡皮（粗细滑块只在这里出现），
+「添加评论」在图上落编号评论，「分层 / 合成」切换上述两种发送方式（非 2.5/2.6 模型只能合成），「保存」写出图层。
+画布支持滚轮缩放、空格或中键拖动平移；文字在图上直接输入，可重新编辑、拖动、旋转和缩放；橡皮会把层上对应区域真正擦成透明。
 `--check` 另外在隔离 profile 中启动真实 Cordis 服务，要求 client 模块图里有 `dsh-fmage` → `client.js` 这一行，
 因此“页面被宿主发现”是每次刷新都会复验的，而不是只看文件是否在包里。
 
