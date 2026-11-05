@@ -16,8 +16,8 @@ Codex 使用原生 `.codex-plugin/plugin.json`；DeepSeek Desktop 由 `scripts/h
 `config-api.mjs`（`providers.json` 的读写、校验、掩码、备份与原子替换）、
 `annotation-api.mjs`（标注工作台的文件落盘与回读）和 `client.js`
 （浏览器半，经 `window.__ModuleLoader__.load` 注册，向 `settings.section` 插槽贡献「Fmage 生图」页，
-向 `conversation.input.right` 插槽贡献输入栏生图胶囊与「标注」入口，
-并向 `sidebar.right.pane.tab` 注册标注工作台正文）。胶囊与设置页共用同一个读取、摘要校验和写入路径，
+向 `conversation.input.right` 插槽贡献输入栏生图胶囊，
+并在右侧栏「开始」页注册一张「图像标注」卡片、向 `sidebar.right.pane.tab` 注册其正文）。胶囊与设置页共用同一个读取、摘要校验和写入路径，
 只写 `default_provider`；没有该插槽的宿主不会挂载它，行为退回配置顺序和显式 `provider` 参数。
 包清单声明 `dsh.client.platform = web` 与 `exports["./client"]`，由宿主的 client 模块扫描器加载。
 浏览器半只 `require` 宿主共享的 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`，无需构建步骤。

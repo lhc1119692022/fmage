@@ -233,9 +233,11 @@ as `markup` (a local path); `generate_image` and both batch tools do not accept 
 - Omitting `markup` appends no flag and writes no multipart part, so a flattened edit cannot
   carry a stray empty layer.
 
-The Desktop sidebar adds an annotation workbench (`annotate` beside the image provider pill).
-It reads a composer thumbnail read-only, draws arrows, boxes, ellipses, pen strokes, text and
-numbered pins, and writes the result through `POST /api/fmage.annotation`:
+The Desktop sidebar adds an annotation workbench. It registers as a card on the right sidebar's
+start page (next to other tools' cards), not as a composer button, so the input rows stay as they
+were. It reads a composer thumbnail read-only and draws over it with a floating toolbar: arrows,
+boxes, ellipses, pen strokes, text, and numbered comment pins with an inline comment field.
+Results are written through `POST /api/fmage.annotation`:
 
 - **markup**: only the transparent layer is written, because the target image is already in the
   message. The tab requires that image to be the first one attached, matching what the API does.

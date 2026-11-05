@@ -53,16 +53,14 @@ test('client registers the Fmage settings section and renders its loading state'
     injectOwner: null,
   };
   plugin.apply(ctx);
-  assert.deepEqual(injected, ['settings.section', 'conversation.input.right', 'conversation.input.right']);
-  assert.equal(JSON.stringify(injects), JSON.stringify([['sidebarRightTabs', 'sidebarRight']]));
+  assert.deepEqual(injected, ['settings.section', 'conversation.input.right']);
+  assert.equal(JSON.stringify(injects), JSON.stringify([['sidebarRightTabs']]));
   assert.equal(registration.id, 'fmage');
   assert.equal(registration.locale, 'settings.fmage');
   assert.equal(registration.label(), 'Fmage 生图');
-  assert.deepEqual(pills.map(entry => entry.options.id), ['fmage-provider', 'fmage-annotate']);
+  assert.deepEqual(pills.map(entry => entry.options.id), ['fmage-provider']);
   assert.equal(pills[0].options.label(), '生图');
-  assert.equal(pills[1].options.label(), '标注');
   assert.equal(typeof pills[0].component, 'function');
-  assert.equal(typeof pills[1].component, 'function');
   assert.equal(tabBodies.length, 0, 'tab body only registers once the sidebar services resolve');
   assert.deepEqual([...Object.keys(dictionaries.dicts.zh)].sort(), [...Object.keys(dictionaries.dicts.en)].sort());
   // Fixed frame: the section fills the host's options column, the title/tabs
@@ -83,19 +81,17 @@ test('the sidebar tab body only appears when the right sidebar services resolve'
   let dictionaries;
   let registration;
   let tabBody;
-  let opened = null;
   const calls = [];
   const owner = {
     get: name => (name === 'sidebarRightTabs'
       ? { register: definition => { registration = definition; return () => {}; } }
-      : { openTab: kind => { opened = kind; return undefined; } }),
+      : undefined),
     effect: fn => { calls.push('effect'); fn(); },
     slots: {
       inject: (name, cb) => { calls.push(name); cb(); },
       register: (options, component) => { if (options.name === 'sidebar.right.pane.tab') tabBody = { options, component }; return () => {}; },
     },
   };
-  let annotate;
   const ctx = {
     effect: fn => { fn(); },
     inject: (names, cb) => { if (names.includes('sidebarRightTabs')) cb(owner); },
@@ -104,32 +100,41 @@ test('the sidebar tab body only appears when the right sidebar services resolve'
       inject: (name, cb) => {
         if (name === 'settings.section' || name === 'conversation.input.right') cb();
       },
-      register: (options, component) => {
-        if (options.id === 'fmage-annotate') annotate = component;
-        return () => {};
-      },
+      register: () => () => {},
     },
   };
   plugin.apply(ctx);
   assert.equal(registration.id, 'dsh-fmage/annotation');
   assert.equal(registration.kind, 'fmage-annotation');
   assert.equal(registration.priority, 'extension');
-  assert.equal(registration.guide, undefined, 'no guide entry: the sidebar default page is left alone');
+  // The start page lists the workbench as a card; the composer row stays clean.
+  assert.equal(Array.isArray(registration.guide), true);
+  assert.equal(registration.guide.length, 1);
+  assert.equal(registration.guide[0].id, 'annotation');
+  assert.equal(registration.guide[0].order, 90);
+  assert.equal(registration.guide[0].title(), '图像标注');
   assert.ok(tabBody);
   assert.equal(tabBody.options.key, 'dsh-fmage/annotation');
   assert.equal(typeof tabBody.component, 'function');
-
-  // The composer entry must open the registered kind, not a guessed one.
-  assert.equal(typeof annotate, 'function');
-  const entry = annotate();
-  entry.props.onClick();
-  assert.equal(opened, 'fmage-annotation');
 
   const { renderToString } = requireReact('react-dom/server');
   const html = renderToString(requireReact('react').createElement(tabBody.component, {
     inputActions: { insertText: () => false, captureInsertion: () => ({}) },
   }));
-  assert.match(html, /标注工作台/);
+  assert.match(html, /fmg-ann/);
   assert.match(html, /从输入框选图/);
-  assert.match(html, /标记层/);
+
+  // Loaded layout: the floating toolbar, the mode switch and the save action.
+  const loaded = renderToString(requireReact('react').createElement(tabBody.component, {
+    inputActions: { insertText: () => false, captureInsertion: () => ({}) },
+    initialSource: { url: 'about:blank', name: 'cat.png', draftIndex: 0, width: 640, height: 480 },
+  }));
+  assert.match(loaded, /fmg-ann-tools/);
+  assert.match(loaded, /箭头/);
+  assert.match(loaded, /评论/);
+  assert.match(loaded, /标记层/);
+  assert.match(loaded, /合成到原图/);
+  assert.match(loaded, /保存并插入/);
+  assert.match(loaded, /viewBox="0 0 640 480"/);
+  assert.doesNotMatch(loaded, /从输入框选图/, 'the empty-state buttons give way to the toolbar');
 });
