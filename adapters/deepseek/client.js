@@ -171,6 +171,7 @@ window.__ModuleLoader__.load({
       annExport: '保存并插入', annExporting: '写入中…', annCopy: '复制路径', annCopied: '已复制',
       annExported: '已保存，路径已插入输入框。', annExportedCopy: '已保存，路径已复制。',
       annTextPrompt: '标注文字', annNeedSelection: '先在图上画一处标注。',
+      annZoomIn: '放大', annZoomOut: '缩小', annZoomReset: '恢复适应窗口',
       annLoadFailed: '图片读取失败。', annFailed: '操作失败', annRestored: '已恢复上次的标注。',
       showPill: '在输入栏显示生图胶囊', showPillHint: '关闭后仍可在下方列表切换默认提供商；改动在下一次请求生效。',
       orderHint: '拖动只改变回退顺序；默认提供商由星标决定。',
@@ -219,6 +220,7 @@ window.__ModuleLoader__.load({
       annExport: 'Save and insert', annExporting: 'Writing…', annCopy: 'Copy path', annCopied: 'Copied',
       annExported: 'Saved; the path was inserted into the composer.', annExportedCopy: 'Saved; the path was copied.',
       annTextPrompt: 'Annotation text', annNeedSelection: 'Draw one annotation first.',
+      annZoomIn: 'Zoom in', annZoomOut: 'Zoom out', annZoomReset: 'Fit to window',
       annLoadFailed: 'The image could not be read.', annFailed: 'The operation failed', annRestored: 'Restored the previous annotation.',
       showPill: 'Show the image provider pill in the composer', showPillHint: 'Turning it off keeps the list below and the saved default; changes apply to the next request.',
       orderHint: 'Dragging only changes the fallback order; the star sets the default provider.',
@@ -891,6 +893,7 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState('');
       const [manifest, setManifest] = useState('');
       const [drafting, setDrafting] = useState(null);
+      const [zoom, setZoom] = useState(1);
       const svgRef = useRef(null);
       const fileRef = useRef(null);
 
@@ -1091,7 +1094,19 @@ window.__ModuleLoader__.load({
         h('button', {
           type: 'button', className: 'fmg-ann-tool', disabled: !shapes.length,
           onClick: () => { setShapes([]); setComments([]); setRedo([]); },
-        }, t('annClear')));
+        }, t('annClear')),
+        h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
+        h('button', {
+          type: 'button', className: 'fmg-ann-tool', disabled: zoom <= 1,
+          title: t('annZoomOut'), onClick: () => setZoom(value => Math.max(1, Number((value - 0.25).toFixed(2)))),
+        }, '−'),
+        h('button', {
+          type: 'button', className: 'fmg-ann-tool', title: t('annZoomReset'), onClick: () => setZoom(1),
+        }, `${Math.round(zoom * 100)}%`),
+        h('button', {
+          type: 'button', className: 'fmg-ann-tool', disabled: zoom >= 4,
+          title: t('annZoomIn'), onClick: () => setZoom(value => Math.min(4, Number((value + 0.25).toFixed(2)))),
+        }, '+'));
 
       const modeBar = h('div', { className: 'fmg-ann-mode' },
         h('span', { className: 'fmg-ann-note' }, t('annMode')),
@@ -1127,9 +1142,20 @@ window.__ModuleLoader__.load({
           }, t('annAddComment'))));
 
       const stage = source
-        ? h('div', { className: 'fmg-ann-stage' },
-          h('div', { className: 'fmg-ann-frame' },
-            h('img', { src: source.url, alt: source.name }),
+        ? h('div', {
+          className: 'fmg-ann-stage',
+          // Ctrl/Cmd + wheel zooms; a plain wheel keeps scrolling the pane.
+          onWheel: event => {
+            if (!event.ctrlKey && !event.metaKey) return;
+            event.preventDefault();
+            setZoom(value => Math.min(4, Math.max(1, Number((value + (event.deltaY < 0 ? 0.25 : -0.25)).toFixed(2)))));
+          },
+        },
+          h('div', {
+            className: 'fmg-ann-frame',
+            style: zoom === 1 ? undefined : { width: `${zoom * 100}%`, maxWidth: 'none', maxHeight: 'none' },
+          },
+            h('img', { src: source.url, alt: source.name, draggable: false }),
             h('svg', {
               ref: svgRef, className: 'fmg-ann-svg', viewBox: `0 0 ${source.width} ${source.height}`,
               onPointerDown: startShape, onPointerMove: extendShape, onPointerUp: endShape, onPointerLeave: endShape,
