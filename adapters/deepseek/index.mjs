@@ -8,6 +8,7 @@ import { BUNDLED_SKILL_RANK } from '@deepseek-ai/dsh-skill';
 import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
 
 import { createConfigApi, registerConfigRoutes } from './config-api.mjs';
+import { createAnnotationApi, registerAnnotationRoutes } from './annotation-api.mjs';
 
 export const name = 'fmage';
 export const inject = ['skills', 'tools'];
@@ -52,7 +53,10 @@ export async function apply(ctx) {
     reconnect: { enabled: false },
   });
   // Settings page routes; optional so a Host without the Web/Desktop carrier still loads skills and tools.
-  ctx.inject(['connection'], scope => registerConfigRoutes(scope, createConfigApi(configPath)));
+  ctx.inject(['connection'], scope => {
+    registerConfigRoutes(scope, createConfigApi(configPath));
+    registerAnnotationRoutes(scope, createAnnotationApi(dataHome));
+  });
   const { version, sha256 } = JSON.parse(readFileSync(join(root, '.fmage-build.json'), 'utf8'));
   const receipt = join(root, '.fmage-runtime.json');
   const loadedAt = new Date().toISOString();

@@ -113,6 +113,36 @@ window.__ModuleLoader__.load({
 .fmg-pill-check{display:grid;place-items:center;flex:0 0 16px;color:var(--dsw-alias-label-primary)}
 .fmg-pill-check svg{width:16px;height:16px}
 .fmg-pill-error{margin:4px;padding:6px 7px;border-radius:8px;background:rgba(239,68,68,.08);color:#ef4444;font-size:11px;line-height:16px;word-break:break-all}
+/* Sidebar annotation workbench. */
+.fmg-ann{display:flex;flex-direction:column;height:100%;min-height:0;gap:8px;color:var(--dsw-alias-label-primary);font-size:13px}
+.fmg-ann-bar{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:0}
+.fmg-ann-tool{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 7px;border:.5px solid transparent;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer}
+.fmg-ann-tool:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
+.fmg-ann-tool[aria-pressed=true]{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}
+.fmg-ann-tool:disabled{opacity:.4;cursor:default}
+.fmg-ann-sep{width:1px;height:18px;margin:0 3px;background:var(--dsw-alias-border-l2)}
+.fmg-ann-swatches{display:inline-flex;gap:3px;align-items:center}
+.fmg-ann-swatch{width:16px;height:16px;padding:0;border-radius:50%;border:2px solid transparent;cursor:pointer}
+.fmg-ann-swatch[aria-pressed=true]{border-color:var(--dsw-alias-label-primary)}
+.fmg-ann-mode{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 8px;border:.5px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
+.fmg-ann-chip{padding:1px 7px;border-radius:999px;font-size:11px;background:rgba(76,120,255,.12);color:var(--dsw-alias-state-business-primary,#4c78ff)}
+.fmg-ann-note{color:var(--dsw-alias-label-tertiary);font-size:11.5px;line-height:16px}
+.fmg-ann-stage{flex:1 1 0;min-height:120px;display:flex;align-items:center;justify-content:center;overflow:auto;border:.5px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-1);padding:8px}
+.fmg-ann-frame{position:relative;display:inline-block;max-width:100%;max-height:100%;line-height:0}
+.fmg-ann-frame img{display:block;max-width:100%;max-height:100%;user-select:none;-webkit-user-drag:none}
+.fmg-ann-svg{position:absolute;left:0;top:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
+.fmg-ann-empty{display:flex;flex-direction:column;align-items:center;gap:10px;padding:20px 12px;text-align:center;color:var(--dsw-alias-label-tertiary)}
+.fmg-ann-comments{flex:none;display:flex;flex-direction:column;gap:6px;max-height:170px;overflow:auto}
+.fmg-ann-comment{display:flex;align-items:flex-start;gap:6px}
+.fmg-ann-comment-no{flex:none;width:18px;height:18px;border-radius:50%;background:var(--dsw-alias-state-business-primary,#4c78ff);color:#fff;font-size:11px;line-height:18px;text-align:center}
+.fmg-ann-comment input{flex:1;min-width:0;font:inherit;font-size:12px;padding:4px 7px;border:.5px solid var(--dsw-alias-border-l4);border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:inherit}
+.fmg-ann-foot{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.fmg-ann-path{flex:1 1 100%;font-family:var(--dsw-font-mono,monospace);font-size:11px;word-break:break-all;color:var(--dsw-alias-label-tertiary)}
+.fmg-ann-err{flex:1 1 100%;color:var(--dsw-alias-state-danger-primary,#d33);font-size:11.5px}
+.fmg-ann-btn{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border:.5px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer}
+.fmg-ann-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
+.fmg-ann-btn:disabled{opacity:.45;cursor:default}
+.fmg-ann-btn.is-primary{background:var(--dsw-alias-state-business-primary,#4c78ff);border-color:transparent;color:#fff}
 `;
     const zh = {
       nav: 'Fmage 生图', title: 'Fmage 生图',
@@ -125,6 +155,23 @@ window.__ModuleLoader__.load({
       enable: '启用 {name}', remove: '移除', show: '显示密钥', hide: '隐藏密钥',
       pill: '生图', pillTitle: '生图提供商', pillKeySet: 'Key 已配置', pillKeyMissing: '未配置 Key',
       pillSwitchFailed: '切换失败',
+      annOpen: '标注', annTitle: '标注工作台',
+      annEmpty: '还没有图片。从输入框选一张，或选择本地图片。',
+      annFromComposer: '从输入框选图', annPickFile: '选择图片', annNoDraft: '输入框里没有图片。',
+      annToolArrow: '箭头', annToolRect: '方框', annToolEllipse: '椭圆', annToolPen: '画笔',
+      annToolText: '文字', annToolMarker: '编号',
+      annUndo: '撤销', annRedo: '重做', annClear: '清空',
+      annMode: '模式', annModeMarkup: '标记层', annModeFlatten: '合成到原图',
+      annModeMarkupHint: '把透明标注层作为 markup 单独发送；原图不变，标记由模型抹除。',
+      annModeFlattenHint: '把标注烧进图片再发；标记可能残留在结果里。',
+      annModeUnsupported: '当前模型不是 GPT Image 2.5/2.6，只能用合成。',
+      annMustBeFirst: '标记层只能作用于第一张输入图；这张是第 {n} 张。换成第一张，或改用合成。',
+      annComment: '评论', annAddComment: '加一条评论', annCommentPlaceholder: '这条标注要改什么？',
+      annCommentEmpty: '评论不能为空。',
+      annExport: '保存并插入', annExporting: '写入中…', annCopy: '复制路径', annCopied: '已复制',
+      annExported: '已保存，路径已插入输入框。', annExportedCopy: '已保存，路径已复制。',
+      annTextPrompt: '标注文字', annNeedSelection: '先在图上画一处标注。',
+      annLoadFailed: '图片读取失败。', annFailed: '操作失败', annRestored: '已恢复上次的标注。',
       showPill: '在输入栏显示生图胶囊', showPillHint: '关闭后仍可在下方列表切换默认提供商；改动在下一次请求生效。',
       orderHint: '拖动只改变回退顺序；默认提供商由星标决定。',
       advanced: '高级：排序与回退',
@@ -156,6 +203,23 @@ window.__ModuleLoader__.load({
       enable: 'Enable {name}', remove: 'Remove', show: 'Show key', hide: 'Hide key',
       pill: 'Image', pillTitle: 'Image provider', pillKeySet: 'Key configured', pillKeyMissing: 'No key',
       pillSwitchFailed: 'Switch failed',
+      annOpen: 'Annotate', annTitle: 'Annotation workbench',
+      annEmpty: 'No image yet. Take one from the composer, or pick a local image.',
+      annFromComposer: 'Take from composer', annPickFile: 'Pick image', annNoDraft: 'The composer has no image.',
+      annToolArrow: 'Arrow', annToolRect: 'Box', annToolEllipse: 'Ellipse', annToolPen: 'Pen',
+      annToolText: 'Text', annToolMarker: 'Pin',
+      annUndo: 'Undo', annRedo: 'Redo', annClear: 'Clear',
+      annMode: 'Mode', annModeMarkup: 'Markup layer', annModeFlatten: 'Flatten',
+      annModeMarkupHint: 'Send the transparent layer as markup; the target image stays untouched and the model removes the marks.',
+      annModeFlattenHint: 'Burn the marks into the image first; they may survive into the result.',
+      annModeUnsupported: 'This model is not GPT Image 2.5/2.6, so only flatten is available.',
+      annMustBeFirst: 'The markup layer applies only to the first input image; this is image {n}. Use the first one, or flatten instead.',
+      annComment: 'Comments', annAddComment: 'Add a comment', annCommentPlaceholder: 'What should change here?',
+      annCommentEmpty: 'A comment cannot be empty.',
+      annExport: 'Save and insert', annExporting: 'Writing…', annCopy: 'Copy path', annCopied: 'Copied',
+      annExported: 'Saved; the path was inserted into the composer.', annExportedCopy: 'Saved; the path was copied.',
+      annTextPrompt: 'Annotation text', annNeedSelection: 'Draw one annotation first.',
+      annLoadFailed: 'The image could not be read.', annFailed: 'The operation failed', annRestored: 'Restored the previous annotation.',
       showPill: 'Show the image provider pill in the composer', showPillHint: 'Turning it off keeps the list below and the saved default; changes apply to the next request.',
       orderHint: 'Dragging only changes the fallback order; the star sets the default provider.',
       advanced: 'Advanced: order and fallback',
@@ -628,9 +692,503 @@ window.__ModuleLoader__.load({
           h(Button, { size: 'sm', variant: 'primary', disabled: busy || !dirty, onClick: () => save() }, busy ? t('saving') : t('save'))));
     }
 
+    // ---- Sidebar annotation workbench -------------------------------------
+    // The panel never touches draft attachments. It reads a composer
+    // thumbnail's blob URL (or a local file), draws a layer, and writes the
+    // result through the Host route; the only thing it adds to the draft is a
+    // plain text path.
+    const ANN_ROUTE = 'api/fmage.annotation';
+    const ANN_KIND = 'fmage-annotation';
+    const ANN_TAB_ID = 'dsh-fmage/annotation';
+    const ANN_MODEL = /gpt[-_\s]+image[-_\s]+2\.[56](?:\.[0-9]+)*(?=$|[^a-z0-9.])/i;
+    const ANN_COLORS = ['#e5484d', '#f5a524', '#12a594', '#4c78ff'];
+    const ANN_TOOLS = [['arrow', 'annToolArrow'], ['rect', 'annToolRect'], ['ellipse', 'annToolEllipse'],
+      ['pen', 'annToolPen'], ['text', 'annToolText'], ['marker', 'annToolMarker']];
+    const ANN_STORE = 'dsh-fmage/annotation/v1';
+    let annText = key => key;
+    // Replaced once the sidebar services resolve; the composer entry degrades to
+    // a no-op when no right sidebar exists.
+    let annotationOpen = () => {};
+
+    function isMarkupModel(model) { return ANN_MODEL.test(String(model || '')); }
+
+    // Draft images keep their browser object URL, so the rail is the only place
+    // the bytes are reachable before send. Read-only: no state is touched.
+    function composerImages() {
+      const card = document.querySelector('[data-composer-card]');
+      if (!card) return [];
+      return Array.from(card.querySelectorAll('img[src^="blob:"]')).map((img, index) => ({
+        index, url: img.src, name: img.getAttribute('alt') || `image-${index + 1}`,
+      }));
+    }
+
+    function loadImageElement(url) {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('image decode failed'));
+        image.src = url;
+      });
+    }
+
+    function blobToDataUrl(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error || new Error('read failed'));
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    function pngBlobOf(canvas) {
+      return new Promise(resolve => { canvas.toBlob(blob => resolve(blob), 'image/png'); });
+    }
+
+    function annotationKey(source) {
+      return `${ANN_STORE}/${source.name}/${source.width}x${source.height}`;
+    }
+
+    function readAnnotation(key) {
+      try {
+        const raw = window.localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+      } catch { return null; }
+    }
+
+    function writeAnnotation(key, value) {
+      try { window.localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota or privacy mode */ }
+    }
+
+    function arrowHead(from, to, size) {
+      const angle = Math.atan2(to.y - from.y, to.x - from.x);
+      const spread = 0.42;
+      return [
+        `${to.x},${to.y}`,
+        `${to.x - size * Math.cos(angle - spread)},${to.y - size * Math.sin(angle - spread)}`,
+        `${to.x - size * Math.cos(angle + spread)},${to.y - size * Math.sin(angle + spread)}`,
+      ].join(' ');
+    }
+
+    function shapeGeometry(shape) {
+      if (shape.type === 'rect' || shape.type === 'ellipse') {
+        return {
+          x: Math.min(shape.x1, shape.x2), y: Math.min(shape.y1, shape.y2),
+          width: Math.abs(shape.x2 - shape.x1), height: Math.abs(shape.y2 - shape.y1),
+        };
+      }
+      return null;
+    }
+
+    function renderShape(shape) {
+      const size = shape.width * 3;
+      const stroke = { stroke: shape.color, strokeWidth: shape.width, fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' };
+      if (shape.type === 'arrow') {
+        return h('g', { key: shape.id },
+          h('line', { ...stroke, x1: shape.x1, y1: shape.y1, x2: shape.x2, y2: shape.y2 }),
+          h('polygon', { fill: shape.color, points: arrowHead({ x: shape.x1, y: shape.y1 }, { x: shape.x2, y: shape.y2 }, size) }));
+      }
+      if (shape.type === 'rect' || shape.type === 'ellipse') {
+        const box = shapeGeometry(shape);
+        return shape.type === 'rect'
+          ? h('rect', { key: shape.id, ...stroke, ...box })
+          : h('ellipse', {
+            key: shape.id, ...stroke,
+            cx: box.x + box.width / 2, cy: box.y + box.height / 2, rx: box.width / 2, ry: box.height / 2,
+          });
+      }
+      if (shape.type === 'pen') {
+        return h('polyline', {
+          key: shape.id, ...stroke,
+          points: (shape.points || []).map(point => `${point.x},${point.y}`).join(' '),
+        });
+      }
+      if (shape.type === 'text') {
+        return h('text', {
+          key: shape.id, x: shape.x, y: shape.y, fill: shape.color,
+          fontSize: shape.width * 8, fontFamily: 'sans-serif', style: { userSelect: 'none' },
+        }, shape.text);
+      }
+      if (shape.type === 'marker') {
+        const radius = Math.max(10, shape.width * 6);
+        return h('g', { key: shape.id },
+          h('circle', { cx: shape.x, cy: shape.y, r: radius, fill: shape.color }),
+          h('text', {
+            x: shape.x, y: shape.y + radius * 0.36, textAnchor: 'middle', fill: '#fff',
+            fontSize: radius * 1.2, fontFamily: 'sans-serif', style: { userSelect: 'none' },
+          }, String(shape.n)));
+      }
+      return null;
+    }
+
+    function drawShape(ctx, shape) {
+      ctx.save();
+      ctx.strokeStyle = shape.color;
+      ctx.fillStyle = shape.color;
+      ctx.lineWidth = shape.width;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      if (shape.type === 'arrow') {
+        const head = shape.width * 3;
+        const angle = Math.atan2(shape.y2 - shape.y1, shape.x2 - shape.x1);
+        ctx.beginPath();
+        ctx.moveTo(shape.x1, shape.y1);
+        ctx.lineTo(shape.x2, shape.y2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(shape.x2, shape.y2);
+        ctx.lineTo(shape.x2 - head * Math.cos(angle - 0.42), shape.y2 - head * Math.sin(angle - 0.42));
+        ctx.lineTo(shape.x2 - head * Math.cos(angle + 0.42), shape.y2 - head * Math.sin(angle + 0.42));
+        ctx.closePath();
+        ctx.fill();
+      } else if (shape.type === 'rect' || shape.type === 'ellipse') {
+        const box = shapeGeometry(shape);
+        ctx.beginPath();
+        if (shape.type === 'rect') ctx.rect(box.x, box.y, box.width, box.height);
+        else ctx.ellipse(box.x + box.width / 2, box.y + box.height / 2, box.width / 2, box.height / 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (shape.type === 'pen') {
+        ctx.beginPath();
+        (shape.points || []).forEach((point, index) => {
+          if (index === 0) ctx.moveTo(point.x, point.y);
+          else ctx.lineTo(point.x, point.y);
+        });
+        ctx.stroke();
+      } else if (shape.type === 'text') {
+        ctx.font = `${shape.width * 8}px sans-serif`;
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(shape.text, shape.x, shape.y);
+      } else if (shape.type === 'marker') {
+        const radius = Math.max(10, shape.width * 6);
+        ctx.beginPath();
+        ctx.arc(shape.x, shape.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = `${radius * 1.2}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(shape.n), shape.x, shape.y);
+      }
+      ctx.restore();
+    }
+
+
     // Composer pill: reads the same config route as the settings page and writes
     // only `default_provider`, so the two surfaces cannot disagree.
     let pillText = key => key;
+
+    function AnnotationPanel({ inputActions }) {
+      const t = annText;
+      const [source, setSource] = useState(null);
+      const [shapes, setShapes] = useState([]);
+      const [redo, setRedo] = useState([]);
+      const [tool, setTool] = useState('arrow');
+      const [color, setColor] = useState(ANN_COLORS[0]);
+      const [comments, setComments] = useState([]);
+      const [mode, setMode] = useState('flatten');
+      const [capable, setCapable] = useState(false);
+      const [busy, setBusy] = useState(false);
+      const [error, setError] = useState('');
+      const [notice, setNotice] = useState('');
+      const [manifest, setManifest] = useState('');
+      const [drafting, setDrafting] = useState(null);
+      const svgRef = useRef(null);
+      const fileRef = useRef(null);
+
+      useEffect(() => {
+        let alive = true;
+        request(ROUTE).then(view => {
+          if (!alive) return undefined;
+          const providers = Array.isArray(view.providers) ? view.providers : [];
+          const active = providers.find(item => item.name === view.default_provider && item.enabled)
+            || providers.find(item => item.enabled) || null;
+          const supported = Boolean(active) && active.transport === 'openai-images' && isMarkupModel(active.model);
+          setCapable(supported);
+          setMode(supported ? 'markup' : 'flatten');
+          return undefined;
+        }).catch(() => { /* config unavailable: flatten stays the default */ });
+        return () => { alive = false; };
+      }, []);
+
+      // Restore the layer whenever the source changes; the key is the image's
+      // own identity, so reopening the same attachment resumes the same marks.
+      useEffect(() => {
+        if (!source) return;
+        const stored = readAnnotation(annotationKey(source));
+        setShapes(Array.isArray(stored && stored.shapes) ? stored.shapes : []);
+        setComments(Array.isArray(stored && stored.comments) ? stored.comments : []);
+        setRedo([]);
+        setManifest('');
+        setNotice(stored ? t('annRestored') : '');
+      }, [source, t]);
+
+      useEffect(() => {
+        if (!source) return;
+        writeAnnotation(annotationKey(source), { shapes, comments, mode });
+      }, [source, shapes, comments, mode]);
+
+      const openDraftImage = async index => {
+        setError('');
+        const candidates = composerImages();
+        const picked = candidates.find(item => item.index === index) || candidates[0];
+        if (!picked) { setError(t('annNoDraft')); return; }
+        await openSource({ url: picked.url, name: picked.name, draftIndex: picked.index });
+      };
+
+      const openSource = async candidate => {
+        try {
+          const image = await loadImageElement(candidate.url);
+          setSource({
+            url: candidate.url,
+            name: candidate.name,
+            draftIndex: candidate.draftIndex ?? null,
+            width: image.naturalWidth,
+            height: image.naturalHeight,
+          });
+          setError('');
+        } catch {
+          setError(t('annLoadFailed'));
+        }
+      };
+
+      const openFile = async file => {
+        if (!file) return;
+        const url = URL.createObjectURL(file);
+        await openSource({ url, name: file.name || 'image', draftIndex: null });
+      };
+
+      const pointOf = event => {
+        const svg = svgRef.current;
+        if (!svg || !source) return null;
+        const rect = svg.getBoundingClientRect();
+        if (!rect.width || !rect.height) return null;
+        return {
+          x: (event.clientX - rect.left) * source.width / rect.width,
+          y: (event.clientY - rect.top) * source.height / rect.height,
+        };
+      };
+
+      const startShape = event => {
+        if (!source) return;
+        event.preventDefault();
+        const point = pointOf(event);
+        if (!point) return;
+        const id = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const width = Math.max(2, Math.round(Math.min(source.width, source.height) / 220));
+        if (tool === 'text') {
+          const value = window.prompt(t('annTextPrompt'), '');
+          if (!value) return;
+          setShapes(list => [...list, { id, type: 'text', color, width, x: point.x, y: point.y, text: value }]);
+          setRedo([]);
+          return;
+        }
+        if (tool === 'marker') {
+          setComments(list => {
+            const n = list.length + 1;
+            setShapes(previous => [...previous, { id, type: 'marker', color, width, x: point.x, y: point.y, n }]);
+            return [...list, { id: `c-${id}`, text: '' }];
+          });
+          setRedo([]);
+          return;
+        }
+        const shape = { id, type: tool, color, width, x1: point.x, y1: point.y, x2: point.x, y2: point.y };
+        if (tool === 'pen') shape.points = [point];
+        setDrafting(shape);
+        setShapes(list => [...list, shape]);
+        setRedo([]);
+      };
+
+      const extendShape = event => {
+        if (!drafting) return;
+        const point = pointOf(event);
+        if (!point) return;
+        setShapes(list => list.map(item => {
+          if (item.id !== drafting.id) return item;
+          if (item.type === 'pen') return { ...item, points: [...item.points, point] };
+          return { ...item, x2: point.x, y2: point.y };
+        }));
+      };
+
+      const endShape = () => {
+        if (!drafting) return;
+        setShapes(list => list.filter(item => {
+          if (item.id !== drafting.id) return true;
+          if (item.type === 'pen') return item.points.length > 1;
+          return Math.abs(item.x2 - item.x1) + Math.abs(item.y2 - item.y1) > 4;
+        }));
+        setDrafting(null);
+      };
+
+      const undo = () => {
+        setShapes(list => {
+          if (!list.length) return list;
+          const last = list[list.length - 1];
+          setRedo(steps => [...steps, last]);
+          if (last.type === 'marker') setComments(entries => entries.slice(0, -1));
+          return list.slice(0, -1);
+        });
+      };
+
+      const redoLast = () => {
+        setRedo(steps => {
+          if (!steps.length) return steps;
+          const last = steps[steps.length - 1];
+          setShapes(list => [...list, last]);
+          if (last.type === 'marker') setComments(entries => [...entries, { id: `c-${last.id}`, text: '' }]);
+          return steps.slice(0, -1);
+        });
+      };
+
+      const exportAnnotation = async () => {
+        if (!source || busy) return;
+        const markup = mode === 'markup';
+        if (markup && source.draftIndex !== 0) {
+          setError(t('annMustBeFirst', { n: String((source.draftIndex ?? 0) + 1) }));
+          return;
+        }
+        setBusy(true);
+        setError('');
+        setNotice('');
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = source.width;
+          canvas.height = source.height;
+          const ctx = canvas.getContext('2d');
+          if (!markup) {
+            const image = await loadImageElement(source.url);
+            ctx.drawImage(image, 0, 0, source.width, source.height);
+          }
+          shapes.forEach(shape => drawShape(ctx, shape));
+          const data = await blobToDataUrl(await pngBlobOf(canvas));
+          const payload = markup
+            ? { mode: 'markup', markup: data, comments, sourceName: source.name }
+            : { mode: 'flatten', image: data, comments, sourceName: source.name };
+          const saved = await request(ANN_ROUTE, { method: 'POST', body: JSON.stringify(payload) });
+          setManifest(saved.manifest || '');
+          let inserted = false;
+          if (inputActions && saved.manifest) {
+            try {
+              inserted = inputActions.insertText(` @${saved.manifest} `, inputActions.captureInsertion());
+            } catch { inserted = false; }
+          }
+          if (!inserted && saved.manifest) {
+            try { await navigator.clipboard.writeText(`@${saved.manifest}`); } catch { /* no clipboard */ }
+          }
+          setNotice(inserted ? t('annExported') : t('annExportedCopy'));
+        } catch (failure) {
+          setError(`${t('annFailed')}: ${failure && failure.message ? failure.message : ''}`);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const tools = h('div', { className: 'fmg-ann-bar' },
+        ANN_TOOLS.map(([id, label]) => h('button', {
+          key: id, type: 'button', className: 'fmg-ann-tool', 'aria-pressed': tool === id,
+          title: t(label), onClick: () => setTool(id),
+        }, t(label))),
+        h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
+        h('div', { className: 'fmg-ann-swatches' }, ANN_COLORS.map(value => h('button', {
+          key: value, type: 'button', className: 'fmg-ann-swatch', 'aria-pressed': color === value,
+          'aria-label': value, style: { background: value }, onClick: () => setColor(value),
+        }))),
+        h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
+        h('button', { type: 'button', className: 'fmg-ann-tool', disabled: !shapes.length, onClick: undo }, t('annUndo')),
+        h('button', { type: 'button', className: 'fmg-ann-tool', disabled: !redo.length, onClick: redoLast }, t('annRedo')),
+        h('button', {
+          type: 'button', className: 'fmg-ann-tool', disabled: !shapes.length,
+          onClick: () => { setShapes([]); setComments([]); setRedo([]); },
+        }, t('annClear')));
+
+      const modeBar = h('div', { className: 'fmg-ann-mode' },
+        h('span', { className: 'fmg-ann-note' }, t('annMode')),
+        h('button', {
+          type: 'button', className: 'fmg-ann-tool', 'aria-pressed': mode === 'markup',
+          disabled: !capable,
+          onClick: () => setMode('markup'),
+        }, t('annModeMarkup')),
+        h('button', {
+          type: 'button', className: 'fmg-ann-tool', 'aria-pressed': mode === 'flatten',
+          onClick: () => setMode('flatten'),
+        }, t('annModeFlatten')),
+        h('span', { className: 'fmg-ann-chip' }, mode === 'markup' ? 'markup' : 'flatten'),
+        h('span', { className: 'fmg-ann-note' },
+          capable ? t(mode === 'markup' ? 'annModeMarkupHint' : 'annModeFlattenHint') : t('annModeUnsupported')));
+
+      const commentBar = h('div', { className: 'fmg-ann-comments' },
+        comments.map((entry, index) => h('div', { key: entry.id, className: 'fmg-ann-comment' },
+          h('span', { className: 'fmg-ann-comment-no' }, String(index + 1)),
+          h('input', {
+            value: entry.text,
+            'aria-label': `${t('annComment')} ${index + 1}`,
+            placeholder: t('annCommentPlaceholder'),
+            onChange: event => {
+              const value = event.target.value;
+              setComments(list => list.map(item => (item.id === entry.id ? { ...item, text: value } : item)));
+            },
+          }))),
+        h('div', { className: 'fmg-ann-foot' },
+          h('button', {
+            type: 'button', className: 'fmg-ann-btn',
+            onClick: () => setComments(list => [...list, { id: `c-${Date.now()}`, text: '' }]),
+          }, t('annAddComment'))));
+
+      const stage = source
+        ? h('div', { className: 'fmg-ann-stage' },
+          h('div', { className: 'fmg-ann-frame' },
+            h('img', { src: source.url, alt: source.name }),
+            h('svg', {
+              ref: svgRef, className: 'fmg-ann-svg', viewBox: `0 0 ${source.width} ${source.height}`,
+              onPointerDown: startShape, onPointerMove: extendShape, onPointerUp: endShape, onPointerLeave: endShape,
+            }, shapes.map(renderShape))))
+        : h('div', { className: 'fmg-ann-stage' }, h('div', { className: 'fmg-ann-empty' },
+          h('p', null, t('annEmpty')),
+          h('div', { className: 'fmg-ann-bar' },
+            h('button', {
+              type: 'button', className: 'fmg-ann-btn', onClick: () => openDraftImage(0),
+            }, t('annFromComposer')),
+            h('button', {
+              type: 'button', className: 'fmg-ann-btn', onClick: () => fileRef.current && fileRef.current.click(),
+            }, t('annPickFile')))));
+
+      return h('section', { className: 'fmg-ann', 'aria-label': t('annTitle') },
+        h('input', {
+          ref: fileRef, type: 'file', accept: 'image/png,image/jpeg,image/webp', style: { display: 'none' },
+          onChange: event => { void openFile(event.target.files && event.target.files[0]); },
+        }),
+        tools,
+        modeBar,
+        stage,
+        source ? commentBar : null,
+        h('div', { className: 'fmg-ann-foot' },
+          h('button', {
+            type: 'button', className: 'fmg-ann-btn', disabled: !source || busy,
+            onClick: () => { void openDraftImage(0); },
+          }, t('annFromComposer')),
+          h('button', {
+            type: 'button', className: 'fmg-ann-btn', disabled: !source || busy,
+            onClick: () => fileRef.current && fileRef.current.click(),
+          }, t('annPickFile')),
+          h('button', {
+            type: 'button', className: 'fmg-ann-btn is-primary', disabled: !source || busy || !shapes.length,
+            onClick: () => { void exportAnnotation(); },
+          }, busy ? t('annExporting') : t('annExport')),
+          manifest ? h('span', { className: 'fmg-ann-path' }, manifest) : null,
+          error ? h('span', { className: 'fmg-ann-err', role: 'alert' }, error) : null,
+          notice ? h('span', { className: 'fmg-ann-note', role: 'status' }, notice) : null));
+    }
+
+    // Entry point in the composer tool row; opens the sidebar tab, never the
+    // draft itself.
+    function AnnotationEntry() {
+      const t = annText;
+      return h('button', {
+        type: 'button', className: 'fmg-pill-button', title: t('annTitle'),
+        onClick: () => {
+          try { annotationOpen(); } catch { /* no sidebar on this host */ }
+        },
+      }, t('annOpen'));
+    }
+
     function ProviderPill() {
       const [view, setView] = useState(null);
       const [open, setOpen] = useState(false);
@@ -744,6 +1302,7 @@ window.__ModuleLoader__.load({
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'fmage: settings dictionaries');
         const t = ctx.locale.bind(NS);
         pillText = t;
+        annText = t;
         ctx.slots.inject('settings.section', () => ctx.slots.register({
           name: 'settings.section', id: 'fmage', order: 18, label: () => t('nav'), locale: NS,
         }, FmageSection));
@@ -752,6 +1311,33 @@ window.__ModuleLoader__.load({
         ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
           name: 'conversation.input.right', id: 'fmage-provider', order: 20, label: () => t('pill'),
         }, ProviderPill));
+        ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+          name: 'conversation.input.right', id: 'fmage-annotate', order: 21, label: () => t('annOpen'),
+        }, AnnotationEntry));
+        // Deferred so a host without the right sidebar keeps the rest of the
+        // plugin: the tab type registers, the body lands under its id, and the
+        // composer entry opens it. No guide entry, so the sidebar's default
+        // page is left to whoever owned it.
+        if (typeof ctx.inject !== 'function') return;
+        ctx.inject(['sidebarRightTabs', 'sidebarRight'], owner => {
+          const tabs = owner.get('sidebarRightTabs');
+          const sidebar = owner.get('sidebarRight');
+          if (!tabs || typeof tabs.register !== 'function') return;
+          owner.effect(() => tabs.register({
+            id: ANN_TAB_ID,
+            kind: ANN_KIND,
+            priority: 'extension',
+            title: () => t('annTitle'),
+          }), 'fmage: annotation tab type');
+          owner.slots.inject('sidebar.right.pane.tab', () => owner.slots.register({
+            name: 'sidebar.right.pane.tab',
+            key: ANN_TAB_ID,
+          }, AnnotationPanel));
+          annotationOpen = () => {
+            if (!sidebar || typeof sidebar.openTab !== 'function') return;
+            sidebar.openTab(ANN_KIND);
+          };
+        });
       },
     };
   },

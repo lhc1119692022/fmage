@@ -29,28 +29,41 @@ test('client registers the Fmage settings section and renders its loading state'
   const requireReact = createRequire(join(reactDom, 'package.json'));
   const { plugin, style } = loadClient(id => requireReact(id));
   assert.deepEqual([...plugin.inject], ['slots', 'locale']);
-  let dictionaries; let registration; let component; let pillRegistration; let pillComponent;
+  let dictionaries; let registration; let component;
+  const pills = [];
   const injected = [];
   const effects = [];
+  const tabTypes = [];
+  const tabBodies = [];
+  const injects = [];
   const ctx = {
     effect: fn => effects.push(fn()),
+    inject: (names, cb) => { injects.push(names); },
+    get: () => undefined,
     locale: { register: (ns, dicts) => { dictionaries = { ns, dicts }; return () => {}; }, bind: () => key => dictionaries.dicts.zh[key] ?? key },
     slots: {
       inject: (name, cb) => { injected.push(name); cb(); },
       register: (options, c) => {
         if (options.name === 'settings.section') { registration = options; component = c; }
-        else { pillRegistration = options; pillComponent = c; }
+        else if (options.name === 'sidebar.right.pane.tab') tabBodies.push({ options, component: c });
+        else pills.push({ options, component: c });
       },
     },
+    // The sidebar services resolve through ctx.inject; simulate the owner side.
+    injectOwner: null,
   };
   plugin.apply(ctx);
-  assert.deepEqual(injected, ['settings.section', 'conversation.input.right']);
+  assert.deepEqual(injected, ['settings.section', 'conversation.input.right', 'conversation.input.right']);
+  assert.deepEqual(injects, [['sidebarRightTabs', 'sidebarRight']]);
   assert.equal(registration.id, 'fmage');
   assert.equal(registration.locale, 'settings.fmage');
   assert.equal(registration.label(), 'Fmage 生图');
-  assert.equal(pillRegistration.id, 'fmage-provider');
-  assert.equal(pillRegistration.label(), '生图');
-  assert.equal(typeof pillComponent, 'function');
+  assert.deepEqual(pills.map(entry => entry.options.id), ['fmage-provider', 'fmage-annotate']);
+  assert.equal(pills[0].options.label(), '生图');
+  assert.equal(pills[1].options.label(), '标注');
+  assert.equal(typeof pills[0].component, 'function');
+  assert.equal(typeof pills[1].component, 'function');
+  assert.equal(tabBodies.length, 0, 'tab body only registers once the sidebar services resolve');
   assert.deepEqual([...Object.keys(dictionaries.dicts.zh)].sort(), [...Object.keys(dictionaries.dicts.en)].sort());
   // Fixed frame: the section fills the host's options column, the title/tabs
   // and action bar stay out of the scroll region, and only the panel scrolls.
@@ -62,4 +75,44 @@ test('client registers the Fmage settings section and renders its loading state'
   const html = renderToString(requireReact('react').createElement(component, { t: key => dictionaries.dicts.zh[key], close() {} }));
   assert.match(html, /Fmage 生图/);
   assert.match(html, /读取中/);
+});
+
+test('the sidebar tab body only appears when the right sidebar services resolve', { skip: !available && 'DSH checkout not found' }, () => {
+  const requireReact = createRequire(join(reactDom, 'package.json'));
+  const { plugin } = loadClient(id => requireReact(id));
+  let dictionaries;
+  let registration;
+  let tabBody;
+  let opened = null;
+  const calls = [];
+  const owner = {
+    get: name => (name === 'sidebarRightTabs'
+      ? { register: definition => { registration = definition; return () => {}; } }
+      : { openTab: kind => { opened = kind; return undefined; } }),
+    effect: fn => { calls.push('effect'); fn(); },
+    slots: {
+      inject: (name, cb) => { calls.push(name); cb(); },
+      register: (options, component) => { if (options.name === 'sidebar.right.pane.tab') tabBody = { options, component }; return () => {}; },
+    },
+  };
+  const ctx = {
+    effect: () => {},
+    inject: (names, cb) => { if (names.includes('sidebarRightTabs')) cb(owner); },
+    locale: { register: (ns, dicts) => { dictionaries = dicts; return () => {}; }, bind: () => key => dictionaries.zh[key] ?? key },
+    slots: { inject: (name, cb) => { if (name === 'settings.section' || name === 'conversation.input.right') cb(); }, register: () => () => {} },
+  };
+  plugin.apply(ctx);
+  assert.equal(registration.id, 'dsh-fmage/annotation');
+  assert.equal(registration.kind, 'fmage-annotation');
+  assert.equal(registration.priority, 'extension');
+  assert.equal(registration.guide, undefined, 'no guide entry: the sidebar default page is left alone');
+  assert.ok(tabBody);
+  assert.equal(tabBody.options.key, 'dsh-fmage/annotation');
+  assert.equal(typeof tabBody.component, 'function');
+  const { renderToString } = requireReact('react-dom/server');
+  const html = renderToString(requireReact('react').createElement(tabBody.component, {
+    inputActions: { insertText: () => false, captureInsertion: () => ({}) },
+  }));
+  assert.match(html, /标注工作台/);
+  assert.match(html, /从输入框选图/);
 });

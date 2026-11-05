@@ -133,7 +133,7 @@ def payload() -> dict[str, bytes]:
         "peerDependencies": {"@deepseek-ai/dsh-skill": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/dsh-mcp-client": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/cordis": "~4.0.4"},
     })
     files["cordis.patch.yml"] = b'- insert:\n    - id: fmage\n      name: dsh-fmage\n'
-    for name in ("index.mjs", "config-api.mjs", "client.js"):
+    for name in ("index.mjs", "config-api.mjs", "annotation-api.mjs", "client.js"):
         files[name] = (ROOT / "adapters/deepseek" / name).read_bytes()
     files["catalog.json"] = json_bytes(catalog)
     files["mcp/launch.mjs"] = (ROOT / "adapters/launch.mjs").read_bytes()

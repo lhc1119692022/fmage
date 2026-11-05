@@ -217,6 +217,35 @@ confirmed for the 2.5 and 2.6 series (Sunburst and Flare, including dated snapsh
 Version boundaries distinguish 2.5 from 2.50 and 2.6 from 2.60; this is family recognition,
 not typo correction or automatic provider/model switching.
 
+### Markup annotations (gpt-image-2.5 / 2.6)
+
+GPT Image 2.5 and 2.6 accept a separate transparent PNG as the `markup` field of
+`/images/edits`. The target image is sent untouched and the annotations arrive as their own
+layer, so the model removes the marks instead of reproducing them. `edit_image` exposes this
+as `markup` (a local path); `generate_image` and both batch tools do not accept it.
+
+- The layer and the first input image must share one canvas. Fmage plans the reference fit once
+  and applies it to both: an extension leaves the layer's added bars transparent, and a crop
+  cuts both files with the same box.
+- Rejected before any provider request: models outside 2.5/2.6, transports other than
+  `openai-images`, `output_format` gif or svg, `primary_image_index` other than 0, a layer that
+  is not a transparent PNG, mismatched dimensions, and the 16,777,216-pixel / 50 MB caps.
+- Omitting `markup` appends no flag and writes no multipart part, so a flattened edit cannot
+  carry a stray empty layer.
+
+The Desktop sidebar adds an annotation workbench (`annotate` beside the image provider pill).
+It reads a composer thumbnail read-only, draws arrows, boxes, ellipses, pen strokes, text and
+numbered pins, and writes the result through `POST /api/fmage.annotation`:
+
+- **markup**: only the transparent layer is written, because the target image is already in the
+  message. The tab requires that image to be the first one attached, matching what the API does.
+- **flatten**: the composited image is written instead, and no layer is sent at all.
+
+Both modes leave the draft alone. The path of the written `annotation.json` is inserted into the
+composer, so the assistant reads the mode and comments from it rather than guessing. Files live
+under `<DSH_HOME>/fmage/annotations/<id>/` and each save gets a new id, so an edit that already
+read a layer never sees it replaced.
+
 ### SVG and GIF output
 
 `generate_svg` and `generate_gif` are separate tools so the standard `generate_image`,

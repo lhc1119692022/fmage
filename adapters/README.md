@@ -12,10 +12,12 @@ Codex 使用原生 `.codex-plugin/plugin.json`；DeepSeek Desktop 由 `scripts/h
 
 ## DeepSeek 设置页
 
-`adapters/deepseek/` 包含三部分：`index.mjs`（Host 半：技能、MCP、运行心跳与配置路由）、
-`config-api.mjs`（`providers.json` 的读写、校验、掩码、备份与原子替换）和 `client.js`
+`adapters/deepseek/` 包含四部分：`index.mjs`（Host 半：技能、MCP、运行心跳与配置路由）、
+`config-api.mjs`（`providers.json` 的读写、校验、掩码、备份与原子替换）、
+`annotation-api.mjs`（标注工作台的文件落盘与回读）和 `client.js`
 （浏览器半，经 `window.__ModuleLoader__.load` 注册，向 `settings.section` 插槽贡献「Fmage 生图」页，
-并向 `conversation.input.right` 插槽贡献输入栏生图胶囊）。胶囊与设置页共用同一个读取、摘要校验和写入路径，
+向 `conversation.input.right` 插槽贡献输入栏生图胶囊与「标注」入口，
+并向 `sidebar.right.pane.tab` 注册标注工作台正文）。胶囊与设置页共用同一个读取、摘要校验和写入路径，
 只写 `default_provider`；没有该插槽的宿主不会挂载它，行为退回配置顺序和显式 `provider` 参数。
 包清单声明 `dsh.client.platform = web` 与 `exports["./client"]`，由宿主的 client 模块扫描器加载。
 浏览器半只 `require` 宿主共享的 `react` 与 `@deepseek-ai/dsh-client-ui-primitives`，无需构建步骤。
@@ -27,6 +29,11 @@ Host 半在 `connection` 服务可用时注册精确路由：`GET/PUT /api/fmage
 Host 使用已存条目或 `api_key_env` 指向的环境变量，且不会把密钥回传给浏览器。保存要求携带读取时的
 文件摘要，避免覆盖其他进程（如 `workflow_image set_default`）的并发修改。`tests/deepseek_config_api.test.mjs`
 与 `tests/deepseek_settings_client.test.mjs` 覆盖接口与页面注册；后者需要本机 DSH 源码的 React。
+
+同一组路由里还有 `GET` / `POST /api/fmage.annotation`，服务侧栏标注工作台：保存时校验 PNG 签名、
+模式与层文件是否配套，按 `<id>` 建目录并写 `annotation.json`、`image.png` / `markup.png`，回读按 id
+取清单。每次保存生成新 id，已发出的请求引用过的层不会被覆盖。写入目录固定在
+`<DSH_HOME>/fmage/annotations/`，路径全部服务端生成，不接受调用方给出的目录。
 `--check` 另外在隔离 profile 中启动真实 Cordis 服务，要求 client 模块图里有 `dsh-fmage` → `client.js` 这一行，
 因此“页面被宿主发现”是每次刷新都会复验的，而不是只看文件是否在包里。
 
