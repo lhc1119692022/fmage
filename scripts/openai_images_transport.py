@@ -102,6 +102,24 @@ def is_gpt_image_model(model: str | None) -> bool:
     return bool(GPT_IMAGE_MODEL_PATTERNS["gpt-image"].search(model or ""))
 
 
+# Families whose edits accept a separate transparent `markup` layer. The API
+# guide covers "GPT Image 2.5 and 2.6 models", which is wider than the
+# generations-only complexity/format gate above, so this is deliberately its
+# own list instead of reusing is_image_2_6_model.
+MARKUP_FAMILIES = ("gpt-image-2.5", "gpt-image-2.6")
+
+
+def supports_markup(model: str | None) -> bool:
+    return any(GPT_IMAGE_MODEL_PATTERNS[family].search(model or "") for family in MARKUP_FAMILIES)
+
+
+# The annotation layer and the first input image are each capped at this pixel
+# count, and the overlay file is capped at 50 MB.
+MARKUP_MAX_PIXELS = 16_777_216
+MARKUP_MAX_BYTES = 50 * 1024 * 1024
+MARKUP_FIELD_NAME = "markup"
+
+
 # GPT Image 2.6 generations-only formats. SVG is static vector XML and GIF is an
 # animation, so neither has raster canvas sizing or dimension checks locally.
 SPECIAL_OUTPUT_FORMATS = {"svg", "gif"}
@@ -391,13 +409,11 @@ def has_crop_intent(prompt: str) -> bool:
     return False
 
 
-def crop_reference_to_canvas(
-    path: Path,
+def crop_geometry(
     dimensions: tuple[int, int],
     target: tuple[int, int],
-    output_dir: Path,
-) -> tuple[Path, list[str]]:
-    from PIL import Image
+) -> tuple[int, int, int, int]:
+    """Centered crop box that brings one ratio onto another."""
     width, height = dimensions
     target_width, target_height = target
     target_ratio = target_width / target_height
@@ -407,11 +423,37 @@ def crop_reference_to_canvas(
     else:
         crop_width = width
         crop_height = max(1, min(height, round(width / target_ratio)))
-    left = (width - crop_width) // 2
-    top = (height - crop_height) // 2
+    return (width - crop_width) // 2, (height - crop_height) // 2, crop_width, crop_height
+
+
+def extend_geometry(
+    dimensions: tuple[int, int],
+    target: tuple[int, int],
+) -> tuple[int, int, int, int, int, int]:
+    """Fit-inside scale plus the four bars that fill the rest of the canvas."""
+    width, height = dimensions
+    target_width, target_height = target
+    scale = min(target_width / width, target_height / height)
+    scaled_width = max(1, min(target_width, round(width * scale)))
+    scaled_height = max(1, min(target_height, round(height * scale)))
+    left = (target_width - scaled_width) // 2
+    top = (target_height - scaled_height) // 2
+    right = target_width - left - scaled_width
+    bottom = target_height - top - scaled_height
+    return scaled_width, scaled_height, left, top, right, bottom
+
+
+def crop_reference_to_canvas(
+    path: Path,
+    dimensions: tuple[int, int],
+    target: tuple[int, int],
+    output_dir: Path,
+) -> tuple[Path, list[str]]:
+    from PIL import Image
+    left, top, crop_width, crop_height = crop_geometry(dimensions, target)
     with Image.open(path) as source:
         cropped = source.convert("RGBA").crop((left, top, left + crop_width, top + crop_height))
-        cropped = cropped.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        cropped = cropped.resize(target, Image.Resampling.LANCZOS)
         output = output_dir / f"{path.stem}-cropped.png"
         cropped.save(output, format="PNG")
     return output, ["reference_center_cropped_to_requested_ratio"]
@@ -425,14 +467,7 @@ def extend_reference_to_canvas(
 ) -> tuple[Path, list[str]]:
     from PIL import Image
     width, height = dimensions
-    target_width, target_height = target
-    scale = min(target_width / width, target_height / height)
-    scaled_width = max(1, min(target_width, round(width * scale)))
-    scaled_height = max(1, min(target_height, round(height * scale)))
-    left = (target_width - scaled_width) // 2
-    top = (target_height - scaled_height) // 2
-    right = target_width - left - scaled_width
-    bottom = target_height - top - scaled_height
+    scaled_width, scaled_height, left, top, right, bottom = extend_geometry(dimensions, target)
     with Image.open(path) as source:
         image = source.convert("RGBA").resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
         # Opaque bars used to arrive back from the provider as black letterbox
@@ -440,7 +475,7 @@ def extend_reference_to_canvas(
         # base guarantees no transparent gap, and every edge region is then
         # overwritten with replicated border pixels so the canvas looks like a
         # plausible continuation the model can repaint.
-        canvas = image.resize((target_width, target_height), Image.Resampling.BILINEAR)
+        canvas = image.resize(target, Image.Resampling.BILINEAR)
         canvas.paste(image, (left, top))
         if left:
             canvas.paste(image.crop((0, 0, 1, scaled_height)).resize((left, scaled_height)), (0, top))
@@ -468,6 +503,62 @@ def extend_reference_to_canvas(
     return output, notes
 
 
+def harden_alpha(image):
+    """Snap a resampled annotation layer back to hard edges.
+
+    LANCZOS leaves partial alpha along every stroke, which reads as a grey halo
+    once the provider composites the layer. Thresholding at half coverage keeps
+    the strokes where the user drew them and leaves everything else fully
+    transparent, which is also what the API requires the layer to contain.
+    """
+    from PIL import Image
+
+    red, green, blue, alpha = image.convert("RGBA").split()
+    alpha = alpha.point(lambda value: 255 if value >= 128 else 0)
+    layer = Image.merge("RGB", (red, green, blue)).convert("RGBA")
+    layer.putalpha(alpha)
+    return layer
+
+
+def crop_overlay_to_canvas(
+    path: Path,
+    dimensions: tuple[int, int],
+    target: tuple[int, int],
+    output_dir: Path,
+) -> Path:
+    from PIL import Image
+    left, top, crop_width, crop_height = crop_geometry(dimensions, target)
+    with Image.open(path) as source:
+        layer = source.convert("RGBA").crop((left, top, left + crop_width, top + crop_height))
+        layer = layer.resize(target, Image.Resampling.LANCZOS)
+        output = output_dir / f"{path.stem}-cropped.png"
+        harden_alpha(layer).save(output, format="PNG")
+    return output
+
+
+def extend_overlay_to_canvas(
+    path: Path,
+    dimensions: tuple[int, int],
+    target: tuple[int, int],
+    output_dir: Path,
+) -> Path:
+    """Scale the layer exactly like the image; the added bars stay unpainted.
+
+    The reference fills its extension bars with replicated border pixels so the
+    provider has content to repaint. An annotation layer must not do that: the
+    bars mean "no marks here", which is transparent, not replicated strokes.
+    """
+    from PIL import Image
+    scaled_width, scaled_height, left, top, _, _ = extend_geometry(dimensions, target)
+    with Image.open(path) as source:
+        layer = source.convert("RGBA").resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
+        canvas = Image.new("RGBA", target, (0, 0, 0, 0))
+        canvas.paste(layer, (left, top))
+        output = output_dir / f"{path.stem}-extended.png"
+        harden_alpha(canvas).save(output, format="PNG")
+    return output
+
+
 # A canvas that only rounds the reference up to the transport's multiple, or
 # that matches its framing at another resolution, asks the model to redraw the
 # same composition. Rewriting the file for that resamples the source and can
@@ -489,18 +580,58 @@ def prepare_edit_reference(
 ) -> tuple[Path, list[str]]:
     dimensions = image_dimensions(path)
     target = parse_size(target_size)
+    action, notes = plan_reference_fit(dimensions, target, crop)
+    if action == "keep":
+        return path, notes
+    if action == "crop":
+        return crop_reference_to_canvas(path, dimensions, target, output_dir)
+    return extend_reference_to_canvas(path, dimensions, target, output_dir)
+
+
+def plan_reference_fit(
+    dimensions: tuple[int, int] | None,
+    target: tuple[int, int] | None,
+    crop: bool,
+) -> tuple[str, list[str]]:
+    """Choose keep / crop / extend for a reference so markup can follow the same one."""
     if not dimensions or not target or dimensions == target:
-        return path, []
+        return "keep", []
     if reference_aspect_delta(dimensions, target) <= REFERENCE_ASPECT_TOLERANCE:
         note = (
             "reference_crop_skipped_within_canvas_tolerance"
             if crop
             else "reference_image_kept_within_canvas_tolerance"
         )
-        return path, [note]
-    if crop:
-        return crop_reference_to_canvas(path, dimensions, target, output_dir)
-    return extend_reference_to_canvas(path, dimensions, target, output_dir)
+        return "keep", [note]
+    return ("crop" if crop else "extend"), []
+
+
+def prepare_edit_pair(
+    path: Path,
+    overlay: Path,
+    target_size: str,
+    output_dir: Path,
+    crop: bool = False,
+) -> tuple[Path, Path, list[str]]:
+    """Prepare an edit target and its markup layer with one shared geometry.
+
+    The provider requires the markup layer and the first input image to have
+    identical pixel dimensions, so every local crop, scale, or edge extension
+    has to reach both files. Extended regions carry no annotation, which is
+    what the layer's transparent padding says.
+    """
+    dimensions = image_dimensions(path)
+    target = parse_size(target_size)
+    action, notes = plan_reference_fit(dimensions, target, crop)
+    if action == "keep":
+        return path, overlay, notes
+    if action == "crop":
+        image_output, image_notes = crop_reference_to_canvas(path, dimensions, target, output_dir)
+        overlay_output = crop_overlay_to_canvas(overlay, dimensions, target, output_dir)
+        return image_output, overlay_output, notes + image_notes + ["markup_overlay_cropped_with_reference"]
+    image_output, image_notes = extend_reference_to_canvas(path, dimensions, target, output_dir)
+    overlay_output = extend_overlay_to_canvas(overlay, dimensions, target, output_dir)
+    return image_output, overlay_output, notes + image_notes + ["markup_overlay_extended_with_reference"]
 
 
 def aspect_keyword_pattern(keyword: str) -> re.Pattern[str]:
@@ -1028,6 +1159,7 @@ def write_manifest(
     notes: list[str],
     warnings: list[str],
     timing: dict[str, Any] | None = None,
+    markup: str | None = None,
 ) -> Path:
     if timing is None:
         timing = {}
@@ -1045,6 +1177,8 @@ def write_manifest(
         "notes": notes,
         "warnings": warnings,
     }
+    if markup is not None:
+        manifest["markup"] = markup
     manifest_path = run_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -1122,6 +1256,99 @@ def validate_common(args: argparse.Namespace) -> None:
     if frame_duration is not None and not GIF_MIN_FRAME_DURATION_MS <= frame_duration <= GIF_MAX_FRAME_DURATION_MS:
         raise ValueError(
             f"--frame-duration-ms must be between {GIF_MIN_FRAME_DURATION_MS} and {GIF_MAX_FRAME_DURATION_MS}."
+        )
+
+
+def markup_argument(args: argparse.Namespace) -> Path | None:
+    """The `--markup` path when one was supplied, otherwise None.
+
+    Absence, never an empty string, is how the whole chain says "no layer": the
+    MCP server omits the flag and no multipart part is written.
+    """
+    value = getattr(args, "markup", None)
+    if value is None:
+        return None
+    path = Path(value)
+    if not str(value).strip():
+        raise ValueError("--markup requires a file path.")
+    return path
+
+
+def markup_image_issues(path: Path) -> list[str]:
+    """Structural problems that would make the provider reject the layer."""
+    from PIL import Image
+
+    issues: list[str] = []
+    if path.suffix.lower() != ".png":
+        issues.append("the annotation layer must be a PNG")
+    if not path.exists():
+        return issues + [f"the annotation layer does not exist: {path}"]
+    if path.stat().st_size > MARKUP_MAX_BYTES:
+        issues.append(f"the annotation layer exceeds {MARKUP_MAX_BYTES} bytes")
+    try:
+        with Image.open(path) as layer:
+            if layer.format != "PNG":
+                issues.append("the annotation layer must be a PNG")
+            has_alpha = layer.mode in {"RGBA", "LA"} or "transparency" in layer.info
+            if not has_alpha:
+                issues.append("the annotation layer needs an alpha channel")
+            elif layer.convert("RGBA").getchannel("A").getextrema()[0] >= 255:
+                issues.append("the annotation layer has no transparent pixels")
+            if layer.width * layer.height > MARKUP_MAX_PIXELS:
+                issues.append(f"the annotation layer exceeds {MARKUP_MAX_PIXELS} pixels")
+    except OSError as error:
+        issues.append(f"the annotation layer could not be read: {error}")
+    return issues
+
+
+def validate_markup(
+    args: argparse.Namespace,
+    image_paths: list[Path],
+    primary_index: int,
+) -> None:
+    """Reject every combination the edits endpoint cannot express.
+
+    Everything here runs before a provider request, so an unusable annotation
+    costs nothing and the message can name the fix.
+    """
+    markup_path = markup_argument(args)
+    if markup_path is None:
+        return
+
+    if not supports_markup(args.model):
+        raise ValueError(
+            f"--markup is supported only for {' and '.join(MARKUP_FAMILIES)} series models; "
+            f"the configured model is {args.model or 'unset'}."
+        )
+    if args.output_format in SPECIAL_OUTPUT_FORMATS:
+        raise ValueError(f"--markup cannot be combined with --output-format {args.output_format}.")
+    if primary_index != 0:
+        raise ValueError(
+            f"--markup applies only to the first input image, but --primary-image-index is {primary_index}. "
+            "Move the annotated image to the first position, or fold the marks into the image instead."
+        )
+
+    issues = markup_image_issues(markup_path)
+    if issues:
+        raise ValueError("--markup was rejected: " + "; ".join(issues) + ".")
+
+    image_size = image_dimensions(image_paths[0])
+    if image_size is None:
+        raise ValueError(
+            "--markup needs a readable first input image so the layer can be matched to its canvas."
+        )
+    from PIL import Image
+
+    with Image.open(markup_path) as layer:
+        layer_size = layer.size
+    if layer_size != image_size:
+        raise ValueError(
+            f"--markup layer is {layer_size[0]}x{layer_size[1]} but the first input image is "
+            f"{image_size[0]}x{image_size[1]}; both must have identical width and height."
+        )
+    if image_size[0] * image_size[1] > MARKUP_MAX_PIXELS:
+        raise ValueError(
+            f"the first input image exceeds {MARKUP_MAX_PIXELS} pixels while --markup is set."
         )
 
 def api_key(args: argparse.Namespace) -> str:
@@ -1227,6 +1454,8 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     primary_index = getattr(args, "primary_image_index", 0)
     if primary_index < 0 or primary_index >= len(image_paths):
         raise ValueError("primary_image_index is outside the supplied image list.")
+    markup_path = markup_argument(args)
+    validate_markup(args, image_paths, primary_index)
     size, size_notes = resolve_size(args, image_paths, primary_index)
     payload = common_payload(args, prompt, size)
     image_field = resolve_image_field(args.image_field, len(image_paths))
@@ -1239,6 +1468,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
             "request": payload,
             "images": [str(path.resolve()) for path in image_paths],
             "image_field": image_field,
+            "markup": str(markup_path.resolve()) if markup_path else None,
             "notes": size_notes,
         }
 
@@ -1246,21 +1476,37 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     run_dir.mkdir(parents=True, exist_ok=True)
     timing["output_dir_created_at"] = iso_now()
     if not args.size and not args.aspect:
-        output, notes = prepare_edit_reference(
-            image_paths[primary_index],
-            size,
-            run_dir,
-            crop=has_crop_intent(prompt),
-        )
-        image_paths[primary_index] = output
+        if markup_path:
+            # The layer and the target must share one canvas, so the same fit
+            # has to reach both files; the reference-only path below cannot.
+            output, markup_output, notes = prepare_edit_pair(
+                image_paths[primary_index],
+                markup_path,
+                size,
+                run_dir,
+                crop=has_crop_intent(prompt),
+            )
+            image_paths[primary_index] = output
+            markup_path = markup_output
+        else:
+            output, notes = prepare_edit_reference(
+                image_paths[primary_index],
+                size,
+                run_dir,
+                crop=has_crop_intent(prompt),
+            )
+            image_paths[primary_index] = output
         size_notes.extend(notes)
 
     key = api_key(args)
     url = endpoint(args.base_url, "/images/edits")
+    if markup_path is not None:
+        size_notes.append("markup_layer_sent_with_edit_target")
 
     def call_with_field(field_name: str):
-        fields = {key_: value for key_, value in payload.items() if value is not None}
         files = [(field_name, path) for path in image_paths]
+        if markup_path is not None:
+            files.append((MARKUP_FIELD_NAME, markup_path))
         return lambda body: multipart_request(
             url,
             {key_: value for key_, value in body.items() if value is not None},
@@ -1304,12 +1550,14 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
         size_notes + retry_notes,
         warnings,
         timing,
+        markup=str(markup_path.resolve()) if markup_path else None,
     )
     return {
         "images": [str(path.resolve()) for path in images],
         "image_metadata": image_metadata,
         "requested_size": payload.get("size"),
         "manifest": str(manifest_path.resolve()),
+        "markup": str(markup_path.resolve()) if markup_path else None,
         "notes": size_notes + retry_notes,
         "warnings": warnings,
         "timing": timing,
@@ -1354,6 +1602,10 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--image", action="append", help="Reference image path. Repeat for multiple images.")
     edit.add_argument("--primary-image-index", type=int, default=0, help="Zero-based index of the image being edited.")
     edit.add_argument("--use-latest", action="store_true", help="Use latest image saved by this skill.")
+    edit.add_argument(
+        "--markup",
+        help="Transparent PNG annotation layer aligned with the first input image (GPT Image 2.5/2.6 edits).",
+    )
     edit.add_argument(
         "--image-field",
         choices=[IMAGE_FIELD_AUTO, "image", "image[]"],

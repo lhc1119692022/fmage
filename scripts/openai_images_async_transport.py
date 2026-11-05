@@ -468,6 +468,7 @@ def write_manifest(
     warnings: list[str],
     timing: dict[str, Any],
     remote_metadata: dict[str, Any] | None,
+    markup: str | None = None,
 ) -> Path:
     timing["manifest_written_at"] = openai.iso_now()
     manifest: dict[str, Any] = {
@@ -487,6 +488,8 @@ def write_manifest(
         "notes": notes,
         "warnings": warnings,
     }
+    if markup is not None:
+        manifest["markup"] = markup
     if remote_metadata:
         manifest.update(remote_metadata)
 
@@ -618,6 +621,8 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     primary_index = getattr(args, "primary_image_index", 0)
     if primary_index < 0 or primary_index >= len(image_paths):
         raise ValueError("primary_image_index is outside the supplied image list.")
+    markup_path = openai.markup_argument(args)
+    openai.validate_markup(args, image_paths, primary_index)
     size, size_notes = openai.resolve_size(args, image_paths, primary_index)
     payload = common_payload(args, prompt, size)
     image_field = openai.resolve_image_field(getattr(args, "image_field", "auto"), len(image_paths))
@@ -631,6 +636,7 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
             "request": payload,
             "images": [str(path.resolve()) for path in image_paths],
             "image_field": image_field,
+            "markup": str(markup_path.resolve()) if markup_path else None,
             "remote_async": dry_run_remote_async(args),
             "notes": size_notes,
         }
@@ -638,9 +644,31 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
     run_dir = root / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
     timing["output_dir_created_at"] = openai.iso_now()
+    if not args.size and not args.aspect:
+        if markup_path:
+            output, markup_output, notes = openai.prepare_edit_pair(
+                image_paths[primary_index],
+                markup_path,
+                size,
+                run_dir,
+                crop=openai.has_crop_intent(prompt),
+            )
+            image_paths[primary_index] = output
+            markup_path = markup_output
+        else:
+            output, notes = openai.prepare_edit_reference(
+                image_paths[primary_index],
+                size,
+                run_dir,
+                crop=openai.has_crop_intent(prompt),
+            )
+            image_paths[primary_index] = output
+        size_notes.extend(notes)
 
     key = openai.api_key(args)
     files = [(image_field, path) for path in image_paths]
+    if markup_path is not None:
+        files.append((openai.MARKUP_FIELD_NAME, markup_path))
 
     def call(body: dict[str, Any]) -> dict[str, Any]:
         return openai.multipart_request(
@@ -689,12 +717,14 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
         warnings,
         timing,
         remote_metadata,
+        markup=str(markup_path.resolve()) if markup_path else None,
     )
     return {
         "images": [str(path.resolve()) for path in images],
         "image_metadata": image_metadata,
         "requested_size": payload.get("size"),
         "manifest": str(manifest_path.resolve()),
+        "markup": str(markup_path.resolve()) if markup_path else None,
         "notes": notes,
         "warnings": warnings,
         "timing": timing,
@@ -768,6 +798,10 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--image", action="append", help="Reference image path. Repeat for multiple images.")
     edit.add_argument("--primary-image-index", type=int, default=0, help="Zero-based index of the image being edited.")
     edit.add_argument("--use-latest", action="store_true", help="Use latest image saved by this skill.")
+    edit.add_argument(
+        "--markup",
+        help="Transparent PNG annotation layer aligned with the first input image (GPT Image 2.5/2.6 edits).",
+    )
 
     recover = subparsers.add_parser("recover", help="Retrieve an existing remote task without generating again.")
     add_async_arguments(recover)

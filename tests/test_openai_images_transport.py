@@ -657,6 +657,208 @@ class ImageFieldSelectionTests(unittest.TestCase):
         self.assertEqual(transport.resolve_image_field("image", 3), "image")
 
 
+class MarkupTests(unittest.TestCase):
+    """The `markup` annotation layer is a separate transparent PNG."""
+
+    @staticmethod
+    def write_reference(path: Path, size: tuple[int, int] = (600, 200)) -> None:
+        Image.new("RGB", size, (40, 70, 100)).save(path)
+
+    @staticmethod
+    def write_overlay(path: Path, size: tuple[int, int] = (600, 200)) -> None:
+        from PIL import ImageDraw
+
+        layer = Image.new("RGBA", size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        draw.ellipse((20, 20, 120, 120), outline=(255, 0, 0, 255), width=6)
+        layer.save(path)
+
+    def parse(self, *argv: str) -> argparse.Namespace:
+        return transport.build_parser().parse_args(list(argv))
+
+    def test_capability_covers_2_5_and_2_6_but_not_older_families(self) -> None:
+        for model in ("gpt-image-2.5", "gpt-image-2.5-sunburst", "gpt-image-2.6-flare", "gpt-image-2.6"):
+            with self.subTest(model=model):
+                self.assertTrue(transport.supports_markup(model))
+        for model in ("gpt-image-2", "gpt-image-2.0", "gpt-image-2.50", "gpt-image-20", "gemini-3-pro-image-preview"):
+            with self.subTest(model=model):
+                self.assertFalse(transport.supports_markup(model))
+
+    def test_missing_flag_produces_no_layer_and_no_multipart_part(self) -> None:
+        args = self.parse("edit", "--prompt", "t", "--model", "gpt-image-2.6-flare")
+        self.assertIsNone(transport.markup_argument(args))
+        transport.validate_markup(args, [Path("missing.png")], 0)  # nothing to validate
+
+    def test_rejects_models_without_markup_support(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.png"
+            self.write_reference(reference)
+            self.write_overlay(overlay)
+            args = self.parse(
+                "edit", "--prompt", "t", "--model", "gpt-image-2", "--image", str(reference),
+                "--markup", str(overlay),
+            )
+            with self.assertRaisesRegex(ValueError, "gpt-image-2.5 and gpt-image-2.6"):
+                transport.validate_markup(args, [reference], 0)
+
+    def test_rejects_special_output_formats(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.png"
+            self.write_reference(reference)
+            self.write_overlay(overlay)
+            for fmt in ("gif", "svg"):
+                with self.subTest(fmt=fmt):
+                    args = self.parse(
+                        "edit", "--prompt", "t", "--model", "gpt-image-2.6-flare",
+                        "--image", str(reference), "--markup", str(overlay), "--output-format", fmt,
+                    )
+                    with self.assertRaisesRegex(ValueError, "cannot be combined"):
+                        transport.validate_markup(args, [reference], 0)
+
+    def test_rejects_a_primary_index_other_than_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.png"
+            self.write_reference(reference)
+            self.write_overlay(overlay)
+            args = self.parse(
+                "edit", "--prompt", "t", "--model", "gpt-image-2.6-flare",
+                "--image", str(reference), "--markup", str(overlay),
+            )
+            with self.assertRaisesRegex(ValueError, "applies only to the first input image"):
+                transport.validate_markup(args, [reference, reference], 1)
+
+    def test_rejects_a_layer_that_is_not_png(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.jpg"
+            self.write_reference(reference)
+            Image.new("RGB", (600, 200), (0, 0, 0)).save(overlay, format="JPEG")
+            args = self.parse(
+                "edit", "--prompt", "t", "--model", "gpt-image-2.6-flare",
+                "--image", str(reference), "--markup", str(overlay),
+            )
+            with self.assertRaisesRegex(ValueError, "must be a PNG"):
+                transport.validate_markup(args, [reference], 0)
+
+    def test_rejects_a_layer_without_transparent_pixels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.png"
+            self.write_reference(reference)
+            Image.new("RGBA", (600, 200), (255, 0, 0, 255)).save(overlay)
+            args = self.parse(
+                "edit", "--prompt", "t", "--model", "gpt-image-2.6-flare",
+                "--image", str(reference), "--markup", str(overlay),
+            )
+            with self.assertRaisesRegex(ValueError, "no transparent pixels"):
+                transport.validate_markup(args, [reference], 0)
+
+    def test_rejects_a_layer_whose_canvas_does_not_match(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.png"
+            self.write_reference(reference, (600, 200))
+            self.write_overlay(overlay, (600, 240))
+            args = self.parse(
+                "edit", "--prompt", "t", "--model", "gpt-image-2.6-flare",
+                "--image", str(reference), "--markup", str(overlay),
+            )
+            with self.assertRaisesRegex(ValueError, "both must have identical width and height"):
+                transport.validate_markup(args, [reference], 0)
+
+    def test_accepts_a_matching_layer_and_reports_it_in_a_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.png"
+            self.write_reference(reference)
+            self.write_overlay(overlay)
+            args = self.parse(
+                "edit", "--prompt", "t", "--model", "gpt-image-2.6-flare", "--base-url",
+                "https://api.openai.com/v1", "--image", str(reference),
+                "--markup", str(overlay), "--output-dir", temp_dir, "--dry-run",
+            )
+            transport.validate_markup(args, [reference], 0)
+            result = transport.run_edit(args)
+            self.assertTrue(result["dry_run"])
+            self.assertEqual(result["markup"], str(overlay.resolve()))
+            self.assertNotIn("markup", result["request"])
+
+    def test_multipart_carries_the_layer_after_the_images(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.png"
+            self.write_reference(reference)
+            self.write_overlay(overlay)
+            args = self.parse(
+                "edit", "--prompt", "t", "--model", "gpt-image-2.6-flare", "--base-url",
+                "https://api.openai.com/v1", "--image", str(reference),
+                "--markup", str(overlay), "--output-dir", temp_dir,
+            )
+            response = {"data": [{"b64_json": base64.b64encode(self.png_bytes()).decode("ascii")}]}
+            with (mock.patch.object(transport, "api_key", return_value="test-key"),
+                  mock.patch.object(transport, "multipart_request", return_value=response) as submit):
+                transport.run_edit(args)
+            files = submit.call_args.args[2]
+            self.assertEqual([name for name, _ in files], ["image", "markup"])
+            self.assertEqual(files[1][1].suffix, ".png")
+            self.assertTrue(files[1][1].exists())
+
+    def test_extend_keeps_the_layer_aligned_and_paints_no_bars(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.png"
+            self.write_reference(reference)
+            self.write_overlay(overlay)
+            image_out, layer_out, notes = transport.prepare_edit_pair(
+                reference, overlay, "320x240", Path(temp_dir)
+            )
+            with Image.open(image_out) as prepared, Image.open(layer_out) as layer:
+                self.assertEqual(prepared.size, (320, 240))
+                self.assertEqual(layer.size, (320, 240))
+                self.assertEqual(layer.getchannel("A").getextrema(), (0, 255))
+                self.assertEqual(layer.getpixel((160, 2))[3], 0)
+                self.assertEqual(layer.getpixel((160, 237))[3], 0)
+            self.assertIn("markup_overlay_extended_with_reference", notes)
+
+    def test_crop_keeps_the_layer_aligned(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.png"
+            self.write_reference(reference)
+            self.write_overlay(overlay)
+            image_out, layer_out, notes = transport.prepare_edit_pair(
+                reference, overlay, "320x240", Path(temp_dir), crop=True
+            )
+            with Image.open(image_out) as prepared, Image.open(layer_out) as layer:
+                self.assertEqual(prepared.size, (320, 240))
+                self.assertEqual(layer.size, (320, 240))
+                self.assertEqual(layer.getchannel("A").getextrema(), (0, 0))
+            self.assertIn("markup_overlay_cropped_with_reference", notes)
+
+    def test_tolerance_keeps_both_files_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.png"
+            self.write_reference(reference, (2095, 726))
+            self.write_overlay(overlay, (2095, 726))
+            image_out, layer_out, notes = transport.prepare_edit_pair(
+                reference, overlay, "2096x736", Path(temp_dir)
+            )
+            self.assertEqual(image_out, reference)
+            self.assertEqual(layer_out, overlay)
+            self.assertIn("reference_image_kept_within_canvas_tolerance", notes)
+            self.assertEqual(sorted(path.name for path in Path(temp_dir).glob("*.png")), ["layer.png", "ref.png"])
+
+    @staticmethod
+    def png_bytes(size: tuple[int, int] = (32, 32)) -> bytes:
+        buffer = BytesIO()
+        Image.new("RGB", size, (10, 20, 30)).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
 class ImageFieldRetryTests(unittest.TestCase):
     def test_retries_explicit_missing_image_parameter_error(self) -> None:
         error = transport.ApiError(

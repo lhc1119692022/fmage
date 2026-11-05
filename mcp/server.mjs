@@ -70,6 +70,9 @@ const GPT_IMAGE_MODEL_PATTERNS = Object.fromEntries(
 );
 // Families documented to accept quality xhigh and max; keep in sync with the Python transport.
 const GPT_IMAGE_EXTENDED_QUALITY_FAMILIES = ["gpt-image-2.5", "gpt-image-2.6"];
+// Families whose edits accept a separate transparent annotation layer; the API
+// guide covers GPT Image 2.5 and 2.6, which is wider than the 2.6-only formats.
+const GPT_IMAGE_MARKUP_FAMILIES = ["gpt-image-2.5", "gpt-image-2.6"];
 const ASYNC_DEFAULT_RESPONSE_FORMAT = "url";
 
 const TRANSPORTS = {
@@ -910,6 +913,9 @@ function appendEditArguments(argv, args, provider) {
     }
     appendOption(argv, mapping.primaryImageIndex, args.primary_image_index);
   }
+  // Absent markup appends nothing: the transport sees no flag and writes no
+  // multipart part, so a flattened edit can never carry a stray empty layer.
+  appendOption(argv, "--markup", args.markup);
 }
 
 function asyncImageArguments(args, promptFile, provider) {
@@ -1256,6 +1262,41 @@ function bananaModelCapability(provider) {
   return { canonicalModel, ...capability };
 }
 
+function enforceMarkupPolicy(args = {}, provider) {
+  const markup = nonEmptyString(args.markup);
+  if (!markup) return;
+  if (provider.transport !== TRANSPORT_OPENAI_IMAGES) {
+    throw new Error(
+      `The markup annotation layer is supported only on the openai-images transport; provider "${provider.name}" ` +
+        `uses "${provider.transport}". Remove markup or switch providers.`,
+    );
+  }
+  const supported = isMarkupCapableModel(provider.model);
+  if (!supported) {
+    throw new Error(
+      `The markup annotation layer requires a ${GPT_IMAGE_MARKUP_FAMILIES.join(" or ")} series model; ` +
+        `provider "${provider.name}" uses "${provider.model}". Switch models, or send the annotations ` +
+        "flattened into the image itself.",
+    );
+  }
+  const outputFormat = nonEmptyString(args.output_format)?.toLowerCase();
+  if (outputFormat === "gif" || outputFormat === "svg") {
+    throw new Error(`The markup annotation layer cannot be combined with output_format "${outputFormat}".`);
+  }
+  if (Number.isInteger(args.primary_image_index) && args.primary_image_index !== 0) {
+    throw new Error(
+      `The markup annotation layer applies only to the first input image, but primary_image_index is ` +
+        `${args.primary_image_index}. Move the annotated image to the first position, or flatten the ` +
+        "annotations into that image instead.",
+    );
+  }
+}
+
+function isMarkupCapableModel(model) {
+  const value = nonEmptyString(model) || "";
+  return GPT_IMAGE_MARKUP_FAMILIES.some((family) => GPT_IMAGE_MODEL_PATTERNS[family].test(value));
+}
+
 function enforceModelCapabilityPolicy(args = {}, provider) {
   const outputFormat = nonEmptyString(args.output_format)?.toLowerCase();
   if (SPECIAL_OUTPUT_FORMATS.includes(outputFormat) && args._special_output_tool !== outputFormat) {
@@ -1263,6 +1304,7 @@ function enforceModelCapabilityPolicy(args = {}, provider) {
       `output_format "${outputFormat}" is available only through the ${SPECIAL_FORMAT_TOOL_NAMES[outputFormat]} tool.`,
     );
   }
+  enforceMarkupPolicy(args, provider);
   if (provider.transport === TRANSPORT_MIDJOURNEY) {
     // MJ flags belong only to the opaque prompt. Never infer pixel tiers or JSON controls.
     const result = { ...args };
@@ -2356,6 +2398,12 @@ async function runImageCommand(command, args) {
 }
 
 async function runBatchImageCommand(command, args) {
+  // One markup layer binds to one first image, so a batch cannot carry it.
+  if (nonEmptyString(args.markup)) {
+    throw new Error(
+      "markup is supported only by edit_image; submit each annotated edit as its own call.",
+    );
+  }
   args = imageEntryArguments(args);
   const provider = await resolveProvider(args.provider, !args.dry_run);
   return submitBatchJobs(command, { ...args, provider: provider.name }, batchJobs(args, provider));
@@ -3268,6 +3316,13 @@ function toolDefinitions() {
           use_latest: {
             type: "boolean",
             description: "Use the latest output when no input image is supplied.",
+          },
+          markup: {
+            type: "string",
+            description:
+              "Transparent PNG annotation layer drawn over the first input image. Requires an openai-images " +
+              "provider on a gpt-image-2.5 or 2.6 model, primary_image_index 0, identical pixel dimensions, " +
+              "and no gif/svg output. Omit it to send annotations flattened into the image instead.",
           },
         },
         required: ["prompt"],
