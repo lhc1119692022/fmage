@@ -113,41 +113,43 @@ window.__ModuleLoader__.load({
 .fmg-pill-check{display:grid;place-items:center;flex:0 0 16px;color:var(--dsw-alias-label-primary)}
 .fmg-pill-check svg{width:16px;height:16px}
 .fmg-pill-error{margin:4px;padding:6px 7px;border-radius:8px;background:rgba(239,68,68,.08);color:#ef4444;font-size:11px;line-height:16px;word-break:break-all}
-/* Sidebar annotation workbench: Codex-style floating controls over the image. */
+/* Sidebar annotation workbench: one floating bar, Codex-style controls. */
 .fmg-ann{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-layer-1)}
-.fmg-ann-stage{flex:1 1 0;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;padding:56px 14px 64px}
-.fmg-ann-drop{position:absolute;inset:8px;display:flex;align-items:center;justify-content:center;border:1.5px dashed var(--dsw-alias-state-business-primary,#4c78ff);border-radius:12px;background:rgba(76,120,255,.06);color:var(--dsw-alias-state-business-primary,#4c78ff);font-size:13px;z-index:5;pointer-events:none}
+.fmg-ann-stage{flex:1 1 0;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;padding:64px 14px 24px}
 .fmg-ann-frame{position:relative;display:inline-block;max-width:100%;line-height:0}
 .fmg-ann-frame img{display:block;max-width:100%;max-height:100%;user-select:none;-webkit-user-drag:none;border-radius:6px}
 .fmg-ann-svg{position:absolute;left:0;top:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
-.fmg-ann-tools{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:1px;padding:4px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);box-shadow:0 8px 22px rgba(0,0,0,.12);z-index:3}
-.fmg-ann-ib{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#52525b);cursor:pointer;padding:0}
+.fmg-ann-bar{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;padding:4px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);box-shadow:0 8px 22px rgba(0,0,0,.12);z-index:6;max-width:calc(100% - 20px)}
+.fmg-ann-ib{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#52525b);cursor:pointer;padding:0;flex:none}
 .fmg-ann-ib:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06))}
 .fmg-ann-ib[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.09));color:var(--dsw-alias-label-primary,#18181b)}
 .fmg-ann-ib:disabled{opacity:.32;cursor:default}
-.fmg-ann-dot{width:30px;height:30px;display:grid;place-items:center;border:0;background:transparent;cursor:pointer;padding:0}
-.fmg-ann-dot i{width:14px;height:14px;border-radius:50%;display:block;box-shadow:0 0 0 2px rgba(0,0,0,.14)}
-.fmg-ann-hint{position:absolute;top:54px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:5px 6px 5px 12px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);color:var(--dsw-alias-label-primary,#18181b);font-size:12px;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.12);z-index:3}
-.fmg-ann-go{height:24px;padding:0 11px;border:0;border-radius:999px;background:#4c78ff;color:#fff;font:inherit;font-size:12px;cursor:pointer}
-.fmg-ann-go:disabled{opacity:.45;cursor:default}
-.fmg-ann-bar{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);color:var(--dsw-alias-label-primary,#18181b);box-shadow:0 8px 22px rgba(0,0,0,.12);max-width:calc(100% - 20px);z-index:3}
-.fmg-ann-seg{display:inline-flex;flex:none;background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));border-radius:999px;padding:2px}
-.fmg-ann-seg button{height:24px;padding:0 9px;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#52525b);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
-.fmg-ann-seg button[aria-pressed=true]{background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-primary,#18181b);box-shadow:0 1px 3px rgba(0,0,0,.12)}
-.fmg-ann-seg button:disabled{opacity:.4;cursor:default}
-.fmg-ann-save{flex:none;height:28px;padding:0 13px;border:0;border-radius:999px;background:#4c78ff;color:#fff;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.fmg-ann-mode{height:28px;padding:0 11px;border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:999px;background:transparent;color:var(--dsw-alias-label-primary,#18181b);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;flex:none}
+.fmg-ann-mode[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.07))}
+.fmg-ann-mode:disabled{opacity:.45;cursor:default}
+.fmg-ann-save{height:28px;padding:0 13px;border:0;border-radius:999px;background:#4c78ff;color:#fff;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;flex:none}
 .fmg-ann-save:disabled{opacity:.45;cursor:default}
-.fmg-ann-note{flex:0 1 auto;color:var(--dsw-alias-label-tertiary,#6b7280);font-size:11.5px;line-height:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-.fmg-ann-err{flex:1 1 auto;color:var(--dsw-alias-state-danger-primary,#d33);font-size:11.5px;line-height:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fmg-ann-path{flex:1 1 auto;font-family:var(--dsw-font-mono,monospace);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#6b7280)}
-.fmg-ann-pin{position:absolute;display:flex;align-items:center;gap:4px;transform:translate(10px,-50%);z-index:4}
-.fmg-ann-pin input{width:170px;height:28px;padding:0 9px;border:0;border-radius:8px;background:#fff;color:#18181b;font:inherit;font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.28);outline:none}
+.fmg-ann-sep{width:1px;height:16px;margin:0 2px;background:rgba(0,0,0,.12);flex:none}
+.fmg-ann-dot{width:30px;height:30px;display:grid;place-items:center;border:0;background:transparent;cursor:pointer;padding:0;flex:none}
+.fmg-ann-dot i{width:14px;height:14px;border-radius:50%;display:block;box-shadow:0 0 0 2px rgba(0,0,0,.14)}
+.fmg-ann-range{width:76px;margin:0 4px;accent-color:var(--dsw-alias-label-primary,#18181b);cursor:pointer;flex:none}
+.fmg-ann-hint{position:absolute;top:52px;left:50%;transform:translateX(-50%);padding:5px 12px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);color:var(--dsw-alias-label-secondary,#52525b);font-size:12px;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.1);z-index:5}
+.fmg-ann-pin{position:absolute;transform:translate(12px,-50%);z-index:7;display:flex;align-items:flex-start;gap:6px}
+.fmg-ann-card{width:248px;padding:10px;border-radius:14px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);box-shadow:0 10px 28px rgba(0,0,0,.18);color:var(--dsw-alias-label-primary,#18181b)}
+.fmg-ann-card textarea{width:100%;box-sizing:border-box;min-height:56px;resize:none;border:0;outline:none;background:transparent;color:inherit;font:inherit;font-size:12.5px;line-height:18px}
+.fmg-ann-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}
+.fmg-ann-card-buttons{display:flex;gap:6px}
+.fmg-ann-ghost{height:26px;padding:0 10px;border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:999px;background:transparent;color:var(--dsw-alias-label-primary,#18181b);font:inherit;font-size:12px;cursor:pointer}
+.fmg-ann-confirm{height:26px;padding:0 12px;border:0;border-radius:999px;background:#18181b;color:#fff;font:inherit;font-size:12px;cursor:pointer}
+.fmg-ann-textin{position:absolute;transform:translate(0,-50%);z-index:7;width:180px;height:30px;padding:0 10px;border:.5px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:8px;background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-primary,#18181b);font:inherit;font-size:12.5px;box-shadow:0 8px 20px rgba(0,0,0,.16);outline:none}
+.fmg-ann-pin-badge{position:absolute;transform:translate(-50%,-50%);min-width:18px;height:18px;padding:0 4px;border-radius:999px;background:#4c78ff;color:#fff;font-size:11px;line-height:18px;text-align:center;z-index:8;cursor:pointer;border:0;font-family:inherit}
+.fmg-ann-note{flex:0 1 auto;color:var(--dsw-alias-label-tertiary,#6b7280);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
+.fmg-ann-err{flex:0 1 auto;color:var(--dsw-alias-state-danger-primary,#d33);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
 .fmg-ann-empty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px 14px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px}
 .fmg-ann-thumbs{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:100%}
 .fmg-ann-thumbs button{padding:0;border:0;background:transparent;cursor:pointer;line-height:0;border-radius:6px;overflow:hidden}
 .fmg-ann-thumbs img{width:56px;height:56px;object-fit:cover;border-radius:6px;display:block}
-.fmg-ann-ghost{height:28px;padding:0 11px;border:.5px solid var(--dsw-alias-border-l2);border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer}
-.fmg-ann-ghost:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
+.fmg-ann-drop{position:absolute;inset:8px;display:flex;align-items:center;justify-content:center;border:1.5px dashed var(--dsw-alias-state-business-primary,#4c78ff);border-radius:12px;background:rgba(76,120,255,.06);color:var(--dsw-alias-state-business-primary,#4c78ff);font-size:13px;z-index:9;pointer-events:none}
 `;
     const zh = {
       nav: 'Fmage 生图', title: 'Fmage 生图',
@@ -160,28 +162,27 @@ window.__ModuleLoader__.load({
       enable: '启用 {name}', remove: '移除', show: '显示密钥', hide: '隐藏密钥',
       pill: '生图', pillTitle: '生图提供商', pillKeySet: 'Key 已配置', pillKeyMissing: '未配置 Key',
       pillSwitchFailed: '切换失败',
-      annTitle: 'Fmage 工作台', annEmpty: '还没有图片。从输入框选一张，或选择本地图片。',
-      annFromComposer: '从输入框选图', annPickFile: '从输入框选图', annNoDraft: '输入框里没有图片。',
+      annTitle: 'Fmage 工作台', annEmpty: '还没有图片。先在输入框添加一张图片。',
       annNeedsComposerImage: '标注只能作用于输入框里的图片。',
       annSourceGone: '这张图已从输入框移除，请重新选图。',
       annToolArrow: '箭头', annToolRect: '方框', annToolEllipse: '椭圆', annToolPen: '画笔',
-      annToolText: '文字', annToolMarker: '编号', annToolComment: '评论',
+      annToolText: '文字',
       annColor: '换颜色', annUndo: '撤销', annRedo: '重做', annClear: '清空',
-      annCommentHint: '点击图像以添加评论', annDone: '完成', annPickFromList: '选择图片',
+      annCommentHint: '点击图像以添加评论',
       annDropHere: '松开即在此打开', annDropUnsupported: '拖入的内容不是输入框里的图片。',
       annMustBeFirst: '标记层只能作用于第一张输入图；这张是第 {n} 张。换成第一张，或改用合成。',
       annExported: '已保存，评论已插入输入框。', annExportedCopy: '已保存，评论已复制。',
       annExportedSilent: '已保存；没有评论需要插入。',
-      annMode: '模式', annModeMarkup: '标记层', annModeFlatten: '合成到原图',
+      annModeMarkup: '标记层', annModeFlatten: '合成到原图',
       annModeMarkupHint: '把透明标注层作为 markup 单独发送；原图不变，标记由模型抹除。',
       annModeFlattenHint: '把标注烧进图片再发；标记可能残留在结果里。',
       annModeUnsupported: '当前模型不是 GPT Image 2.5/2.6，只能用合成。',
-      annComment: '评论', annAddComment: '加一条评论', annCommentPlaceholder: '这条标注要改什么？',
-      annCommentEmpty: '评论不能为空。',
-      annExport: '保存并插入', annExporting: '写入中…', annCopy: '复制评论', annCopied: '已复制',
-      annTextPrompt: '标注文字', annTextRequired: '先填标注文字。',
+      annComment: '评论', annCommentPlaceholder: '这条标注要改什么？',
+      annExport: '保存', annExporting: '保存中…',
+      annTools: '标注工具', annBack: '返回', annStroke: '粗细', annAddComment: '添加评论',
+      annToolEraser: '橡皮', annCancel: '取消', annSaveComment: '保存',
+      annTextPrompt: '标注文字',
       annRemoveComment: '删除这条评论',
-      annZoomIn: '放大', annZoomOut: '缩小', annZoomReset: '恢复适应窗口',
       annLoadFailed: '图片读取失败。', annFailed: '操作失败', annRestored: '已恢复上次的标注。',
       showPill: '在输入栏显示生图胶囊', showPillHint: '关闭后仍可在下方列表切换默认提供商；改动在下一次请求生效。',
       orderHint: '拖动只改变回退顺序；默认提供商由星标决定。',
@@ -214,28 +215,27 @@ window.__ModuleLoader__.load({
       enable: 'Enable {name}', remove: 'Remove', show: 'Show key', hide: 'Hide key',
       pill: 'Image', pillTitle: 'Image provider', pillKeySet: 'Key configured', pillKeyMissing: 'No key',
       pillSwitchFailed: 'Switch failed',
-      annTitle: 'Fmage workspace', annEmpty: 'No image yet. Take one from the composer, or pick a local image.',
-      annFromComposer: 'Take from composer', annPickFile: 'Pick image', annNoDraft: 'The composer has no image.',
+      annTitle: 'Fmage workspace', annEmpty: 'No image yet. Add one to the composer first.',
       annToolArrow: 'Arrow', annToolRect: 'Box', annToolEllipse: 'Ellipse', annToolPen: 'Pen',
-      annToolText: 'Text', annToolMarker: 'Pin', annToolComment: 'Comment',
+      annToolText: 'Text',
       annColor: 'Change colour', annUndo: 'Undo', annRedo: 'Redo', annClear: 'Clear',
-      annCommentHint: 'Click the image to add a comment', annDone: 'Done', annPickFromList: 'Choose an image',
+      annCommentHint: 'Click the image to add a comment',
       annDropHere: 'Drop to open it here', annDropUnsupported: 'That drop was not an image from the composer.',
       annNeedsComposerImage: 'Annotations only apply to an image in the composer.',
       annSourceGone: 'That image left the composer; pick it again.',
       annMustBeFirst: 'The markup layer applies only to the first input image; this is image {n}. Use the first one, or flatten instead.',
-      annMode: 'Mode', annModeMarkup: 'Markup layer', annModeFlatten: 'Flatten',
+      annModeMarkup: 'Markup layer', annModeFlatten: 'Flatten',
       annModeMarkupHint: 'Send the transparent layer as markup; the target image stays untouched and the model removes the marks.',
       annModeFlattenHint: 'Burn the marks into the image first; they may survive into the result.',
       annModeUnsupported: 'This model is not GPT Image 2.5/2.6, so only flatten is available.',
-      annComment: 'Comments', annAddComment: 'Add a comment', annCommentPlaceholder: 'What should change here?',
-      annCommentEmpty: 'A comment cannot be empty.',
-      annExport: 'Save and insert', annExporting: 'Writing…', annCopy: 'Copy comments', annCopied: 'Copied',
+      annComment: 'Comments', annCommentPlaceholder: 'What should change here?',
+      annExport: 'Save', annExporting: 'Saving…',
+      annTools: 'Drawing tools', annBack: 'Back', annStroke: 'Stroke width', annAddComment: 'Add a comment',
+      annToolEraser: 'Eraser', annCancel: 'Cancel', annSaveComment: 'Save',
       annExported: 'Saved; the comments were inserted into the composer.', annExportedCopy: 'Saved; the comments were copied.',
       annExportedSilent: 'Saved; there were no comments to insert.',
-      annTextPrompt: 'Annotation text', annTextRequired: 'Type the annotation text first.',
+      annTextPrompt: 'Annotation text',
       annRemoveComment: 'Remove this comment',
-      annZoomIn: 'Zoom in', annZoomOut: 'Zoom out', annZoomReset: 'Fit to window',
       annLoadFailed: 'The image could not be read.', annFailed: 'The operation failed', annRestored: 'Restored the previous annotation.',
       showPill: 'Show the image provider pill in the composer', showPillHint: 'Turning it off keeps the list below and the saved default; changes apply to the next request.',
       orderHint: 'Dragging only changes the fallback order; the star sets the default provider.',
@@ -719,8 +719,6 @@ window.__ModuleLoader__.load({
     const ANN_TAB_ID = 'dsh-fmage/annotation';
     const ANN_MODEL = /gpt[-_\s]+image[-_\s]+2\.[56](?:\.[0-9]+)*(?=$|[^a-z0-9.])/i;
     const ANN_COLORS = ['#e5484d', '#f5a524', '#12a594', '#4c78ff'];
-    const ANN_TOOLS = [['arrow', 'annToolArrow'], ['pen', 'annToolPen'], ['rect', 'annToolRect'],
-      ['ellipse', 'annToolEllipse'], ['text', 'annToolText'], ['comment', 'annToolComment']];
     const ANN_STORE = 'dsh-fmage/annotation/v1';
     let annText = key => key;
 
@@ -886,9 +884,9 @@ window.__ModuleLoader__.load({
     }
 
 
-    function annGlyph(path) {
+    function annGlyph(path, size) {
       return h('svg', {
-        width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+        width: size || 16, height: size || 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
         strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
       }, h('path', { d: path }));
     }
@@ -900,24 +898,42 @@ window.__ModuleLoader__.load({
       ellipse: 'M12 5c4.4 0 8 3.1 8 7s-3.6 7-8 7-8-3.1-8-7 3.6-7 8-7z',
       text: 'M6 5h12M12 5v14M9 19h6',
       comment: 'M20 15a3 3 0 0 1-3 3H9l-4 3V7a3 3 0 0 1 3-3h9a3 3 0 0 1 3 3z',
+      eraser: 'M4 15l6-6 5 5-6 6H6zM13 20h7',
       undo: 'M9 14 4 9l5-5M4 9h9a6 6 0 0 1 0 12h-3',
       redo: 'M15 14l5-5-5-5M20 9h-9a6 6 0 0 0 0 12h3',
       trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
-      image: 'M4 5h16v14H4zM4 15l4-4 4 4 3-3 5 5',
-      close: 'M6 6l12 12M18 6 6 18',
+      tools: 'M4 20l4-1 9-9-3-3-9 9z',
+      check: 'M5 13l4 4L19 7',
     };
 
-    // Codex-style workbench: the tools float over the image, comments attach to
-    // numbered pins, and the only persistent chrome is one bottom bar.
+    const ANN_DRAW_TOOLS = ['arrow', 'pen', 'rect', 'ellipse', 'text', 'eraser'];
+    const ANN_TOOL_LABELS = {
+      arrow: 'annToolArrow', pen: 'annToolPen', rect: 'annToolRect', ellipse: 'annToolEllipse',
+      text: 'annToolText', eraser: 'annToolEraser',
+    };
+
+    function distanceToSegment(point, from, to) {
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const length = dx * dx + dy * dy;
+      if (length === 0) return Math.hypot(point.x - from.x, point.y - from.y);
+      let t = ((point.x - from.x) * dx + (point.y - from.y) * dy) / length;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(point.x - (from.x + t * dx), point.y - (from.y + t * dy));
+    }
+
+    // Codex-style workbench: one floating bar, a tools submenu behind the
+    // pencil, comments edited in place, and text typed directly on the image.
     // `initialSource` exists so a render test can cover the loaded layout; the
     // slot never passes it.
-    function AnnotationPanel({ inputActions, initialSource }) {
+    function AnnotationPanel({ inputActions, initialSource, initialMenu }) {
       const t = annText;
       const [source, setSource] = useState(initialSource || null);
       const [shapes, setShapes] = useState([]);
       const [redo, setRedo] = useState([]);
       const [tool, setTool] = useState('arrow');
       const [color, setColor] = useState(ANN_COLORS[0]);
+      const [stroke, setStroke] = useState(4);
       const [comments, setComments] = useState([]);
       const [mode, setMode] = useState('flatten');
       const [capable, setCapable] = useState(false);
@@ -926,13 +942,14 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState('');
       const [notice, setNotice] = useState('');
       const [savedId, setSavedId] = useState('');
+      const [menu, setMenu] = useState(initialMenu === 'draw' ? 'draw' : 'main');
       const [drafting, setDrafting] = useState(null);
       const [zoom, setZoom] = useState(1);
-      const [label, setLabel] = useState('');
-      const [pendingId, setPendingId] = useState(null);
-      const [picker, setPicker] = useState(false);
+      const [editing, setEditing] = useState(null);
+      const [textDraft, setTextDraft] = useState(null);
       const [drafts, setDrafts] = useState([]);
-      const [dragging, setDragging] = useState(false);      const svgRef = useRef(null);
+      const [dragging, setDragging] = useState(false);
+      const svgRef = useRef(null);
 
       // The default provider decides whether a markup layer can be offered, and
       // it can change through the composer pill while this panel stays mounted.
@@ -961,7 +978,8 @@ window.__ModuleLoader__.load({
         setComments(Array.isArray(stored && stored.comments) ? stored.comments : []);
         setRedo([]);
         setSavedId('');
-        setPendingId(null);
+        setEditing(null);
+        setTextDraft(null);
         setNotice(stored ? t('annRestored') : '');
       }, [source, t]);
 
@@ -982,19 +1000,26 @@ window.__ModuleLoader__.load({
           });
           setZoom(1);
           setError('');
-          setPicker(false);
+          setMenu('main');
         } catch {
           setError(t('annLoadFailed'));
         }
       };
 
-      const showDrafts = () => {
-        const found = composerImages();
-        setDrafts(found);
-        if (!found.length) { setError(t('annNoDraft')); return; }
-        setError('');
-        setPicker(true);
-      };
+      // Opening the tab binds it to the first composer image: the panel only
+      // works on what the request will carry. Focus retries, so attaching an
+      // image after the tab is already open still binds it.
+      useEffect(() => {
+        if (source) return undefined;
+        const bind = () => {
+          const found = composerImages();
+          setDrafts(found);
+          if (found.length) void openSource({ ...found[0], draftIndex: 0 });
+        };
+        bind();
+        window.addEventListener('focus', bind);
+        return () => window.removeEventListener('focus', bind);
+      }, [source]);
 
       const pointOf = event => {
         const svg = svgRef.current;
@@ -1007,23 +1032,91 @@ window.__ModuleLoader__.load({
         };
       };
 
+      const tolerance = () => Math.max(10, stroke * 2, Math.min(source.width, source.height) / 120);
+
+      const hitShape = point => {
+        const tolerance_ = tolerance();
+        for (let index = shapes.length - 1; index >= 0; index -= 1) {
+          const shape = shapes[index];
+          if (shape.type === 'pen') {
+            if ((shape.points || []).some(item => Math.hypot(item.x - point.x, item.y - point.y) < tolerance_)) return shape;
+          } else if (shape.type === 'arrow') {
+            if (distanceToSegment(point, { x: shape.x1, y: shape.y1 }, { x: shape.x2, y: shape.y2 }) < tolerance_) return shape;
+          } else if (shape.type === 'rect' || shape.type === 'ellipse') {
+            const box = shapeGeometry(shape);
+            if (point.x >= box.x - tolerance_ && point.x <= box.x + box.width + tolerance_
+              && point.y >= box.y - tolerance_ && point.y <= box.y + box.height + tolerance_) return shape;
+          } else if (shape.type === 'text' || shape.type === 'marker') {
+            if (Math.hypot(shape.x - point.x, shape.y - point.y) < tolerance_ * 1.6) return shape;
+          }
+        }
+        return null;
+      };
+
+      const dropShape = shape => {
+        setShapes(list => list.filter(item => item.id !== shape.id));
+        if (shape.type === 'marker') {
+          setComments(list => list.filter(item => item.id !== `c-${shape.id}`));
+          setEditing(current => (current && current.id === `c-${shape.id}` ? null : current));
+        }
+      };
+
+      const openComment = id => {
+        const found = comments.find(item => item.id === id);
+        if (found) setEditing({ id, text: found.text, original: found.text, isNew: false });
+      };
+
       const addComment = point => {
         const id = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const width = Math.max(2, Math.round(Math.min(source.width, source.height) / 220));
-        const n = comments.length + 1;
         const commentId = `c-${id}`;
-        setShapes(list => [...list, { id, type: 'marker', color, width, x: point.x, y: point.y, n }]);
-        // Normalized position travels with the comment so the message can say
-        // where each note applies, the way the user would describe it.
+        const n = comments.length + 1;
+        setShapes(list => [...list, { id, type: 'marker', color, width: stroke, x: point.x, y: point.y, n }]);
         setComments(list => [...list, {
           id: commentId,
           text: '',
           x: Number((point.x / source.width).toFixed(4)),
           y: Number((point.y / source.height).toFixed(4)),
         }]);
-        setRedo([]);
-        setPendingId(commentId);
+        setEditing({ id: commentId, text: '', original: '', isNew: true });
         setError('');
+      };
+
+      // An empty comment never survives: closing it drops the pin too, so the
+      // image never keeps a numbered marker with nothing behind it.
+      const commitComment = () => {
+        if (!editing) return;
+        const value = editing.text.trim();
+        if (value) {
+          setComments(list => list.map(item => (item.id === editing.id ? { ...item, text: value } : item)));
+        } else {
+          const shapeId = editing.id.replace(/^c-/, '');
+          setShapes(list => list.filter(item => item.id !== shapeId));
+          setComments(list => list.filter(item => item.id !== editing.id));
+        }
+        setEditing(null);
+      };
+
+      const cancelComment = () => {
+        if (!editing) return;
+        if (editing.isNew) {
+          const shapeId = editing.id.replace(/^c-/, '');
+          setShapes(list => list.filter(item => item.id !== shapeId));
+          setComments(list => list.filter(item => item.id !== editing.id));
+        }
+        setEditing(null);
+      };
+
+      const commitText = () => {
+        if (!textDraft) return;
+        const value = textDraft.value.trim();
+        if (value) {
+          const id = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          setShapes(list => [...list, {
+            id, type: 'text', color, width: stroke, x: textDraft.x, y: textDraft.y, text: value,
+          }]);
+          setRedo([]);
+        }
+        setTextDraft(null);
       };
 
       const startShape = event => {
@@ -1031,20 +1124,17 @@ window.__ModuleLoader__.load({
         event.preventDefault();
         const point = pointOf(event);
         if (!point) return;
+        if (editing) { commitComment(); return; }
         if (tool === 'comment') { addComment(point); return; }
-        const id = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const width = Math.max(2, Math.round(Math.min(source.width, source.height) / 220));
+        const hit = hitShape(point);
+        if (tool === 'eraser') { if (hit) dropShape(hit); return; }
+        if (hit && hit.type === 'marker') { openComment(`c-${hit.id}`); return; }
         if (tool === 'text') {
-          // Electron does not implement window.prompt, so the text comes from
-          // the toolbar field instead of a blocking browser dialog.
-          const value = label.trim();
-          if (!value) { setError(t('annTextRequired')); return; }
-          setShapes(list => [...list, { id, type: 'text', color, width, x: point.x, y: point.y, text: value }]);
-          setRedo([]);
-          setError('');
+          setTextDraft({ x: point.x, y: point.y, value: '' });
           return;
         }
-        const shape = { id, type: tool, color, width, x1: point.x, y1: point.y, x2: point.x, y2: point.y };
+        const id = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const shape = { id, type: tool, color, width: stroke, x1: point.x, y1: point.y, x2: point.x, y2: point.y };
         if (tool === 'pen') shape.points = [point];
         setDrafting(shape);
         setShapes(list => [...list, shape]);
@@ -1077,11 +1167,7 @@ window.__ModuleLoader__.load({
         const last = shapes[shapes.length - 1];
         setShapes(shapes.slice(0, -1));
         setRedo([...redo, last]);
-        if (last.type === 'marker') {
-          const removed = comments[comments.length - 1];
-          setComments(comments.slice(0, -1));
-          if (removed && removed.id === pendingId) setPendingId(null);
-        }
+        if (last.type === 'marker') setComments(comments.filter(item => item.id !== `c-${last.id}`));
       };
 
       const redoLast = () => {
@@ -1092,8 +1178,6 @@ window.__ModuleLoader__.load({
         if (last.type === 'marker') setComments([...comments, { id: `c-${last.id}`, text: '' }]);
       };
 
-      // Codex-style comment block: the pin's normalized position plus its text,
-      // in the same shape the user would otherwise type by hand.
       const commentText = () => {
         const kept = comments.filter(entry => entry.text.trim());
         if (!kept.length) return '';
@@ -1108,19 +1192,12 @@ window.__ModuleLoader__.load({
 
       const exportAnnotation = async () => {
         if (!source || busy) return;
-        if (source.draftIndex === null) {
-          setError(t('annNeedsComposerImage'));
-          return;
-        }
-        // The attachment is the image the request will carry, so the annotated
-        // one has to be first; otherwise the layer would land on a different
-        // picture. Saved as flatten instead, or move it up.
+        if (editing) { commitComment(); return; }
+        if (source.draftIndex === null) { setError(t('annNeedsComposerImage')); return; }
         if (mode === 'markup' && source.draftIndex !== 0) {
           setError(t('annMustBeFirst', { n: String(source.draftIndex + 1) }));
           return;
         }
-        // Removing or replacing the attachment invalidates the layer: the next
-        // request would not carry the picture these marks belong to.
         if (!composerImages().some(item => item.url === source.url)) {
           setError(t('annSourceGone'));
           setSource(null);
@@ -1130,8 +1207,6 @@ window.__ModuleLoader__.load({
         setError('');
         setNotice('');
         try {
-          // Only the marks are written. The image stays the attachment the user
-          // already has, so there is no second copy to drift from it.
           const layer = document.createElement('canvas');
           layer.width = source.width;
           layer.height = source.height;
@@ -1139,34 +1214,25 @@ window.__ModuleLoader__.load({
           shapes.forEach(shape => drawShape(layerCtx, shape));
           const layerData = await blobToDataUrl(await pngBlobOf(layer));
           const kept = comments.filter(entry => entry.text.trim());
-          const payload = {
-            mode,
-            layer: layerData,
-            width: source.width,
-            height: source.height,
-            comments: kept,
-            sourceName: source.name,
-          };
-          const saved = await request(ANN_ROUTE, { method: 'POST', body: JSON.stringify(payload) });
-          // Comments travel as ordinary prose, not a path; `edit_image` finds
-          // the layer on its own.
+          const saved = await request(ANN_ROUTE, {
+            method: 'POST',
+            body: JSON.stringify({
+              mode, layer: layerData, width: source.width, height: source.height,
+              comments: kept, sourceName: source.name,
+            }),
+          });
           const text = commentText();
-          let inserted = false;
-          if (text) {
-            if (!inputActions) {
-              try { await navigator.clipboard.writeText(text); } catch { /* no clipboard */ }
-              setNotice(t('annExportedCopy'));
-            } else {
-              try {
-                inserted = inputActions.insertText(text, inputActions.captureInsertion());
-              } catch { inserted = false; }
-              if (!inserted) {
-                try { await navigator.clipboard.writeText(text); } catch { /* no clipboard */ }
-              }
-              setNotice(inserted ? t('annExported') : t('annExportedCopy'));
-            }
-          } else {
+          if (!text) {
             setNotice(t('annExportedSilent'));
+          } else {
+            let inserted = false;
+            if (inputActions) {
+              try { inserted = inputActions.insertText(text, inputActions.captureInsertion()); } catch { inserted = false; }
+            }
+            if (!inserted) {
+              try { await navigator.clipboard.writeText(text); } catch { /* no clipboard */ }
+            }
+            setNotice(inserted ? t('annExported') : t('annExportedCopy'));
           }
           setSavedId(saved.id || '');
         } catch (failure) {
@@ -1176,44 +1242,118 @@ window.__ModuleLoader__.load({
         }
       };
 
-      const pick = (id, labelKey, onClick, extra) => h('button', {
-        key: id, type: 'button', className: 'fmg-ann-ib', title: t(labelKey), 'aria-label': t(labelKey),
-        'aria-pressed': extra && extra.pressed, disabled: extra && extra.disabled,
+      const iconButton = (icon, labelKey, onClick, extra) => h('button', {
+        key: icon + (labelKey || ''),
+        type: 'button',
+        className: 'fmg-ann-ib',
+        title: t(labelKey),
+        'aria-label': t(labelKey),
+        'aria-pressed': extra && extra.pressed,
+        disabled: extra && extra.disabled,
         onClick,
-      }, annGlyph(ANN_ICONS[id]));
+      }, annGlyph(ANN_ICONS[icon]));
 
-      const tools = h('div', { className: 'fmg-ann-tools' },
-        pick('image', 'annPickFile', showDrafts),
-        h('span', { style: { width: 1, height: 16, margin: '0 2px', background: 'rgba(0,0,0,.12)' } }),
-        ANN_TOOLS.map(([id]) => pick(id, `annTool${id.charAt(0).toUpperCase()}${id.slice(1)}`,
-          () => { setTool(id); setError(''); }, { pressed: tool === id })),
+      const mainBar = h('div', { className: 'fmg-ann-bar' },
+        iconButton('tools', 'annTools', () => setMenu('draw')),
+        h('button', {
+          type: 'button',
+          className: 'fmg-ann-mode',
+          'aria-pressed': mode === 'markup',
+          disabled: !capable && mode === 'flatten',
+          title: capable ? t('annModeMarkupHint') : t('annModeUnsupported'),
+          onClick: () => { setManualMode(true); setMode(current => (current === 'markup' ? 'flatten' : 'markup')); },
+        }, mode === 'markup' ? t('annModeMarkup') : t('annModeFlatten')),
+        iconButton('comment', 'annAddComment', () => { setTool('comment'); setMenu('main'); }, { pressed: tool === 'comment' }),
+        h('button', {
+          type: 'button', className: 'fmg-ann-save', disabled: !source || busy,
+          onClick: () => { void exportAnnotation(); },
+        }, busy ? t('annExporting') : t('annExport')));
+
+      const drawBar = h('div', { className: 'fmg-ann-bar' },
+        ANN_DRAW_TOOLS.map(name => iconButton(name, ANN_TOOL_LABELS[name], () => setTool(name), { pressed: tool === name })),
+        h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
         h('button', {
           type: 'button', className: 'fmg-ann-dot', title: t('annColor'), 'aria-label': t('annColor'),
           onClick: () => setColor(ANN_COLORS[(ANN_COLORS.indexOf(color) + 1) % ANN_COLORS.length]),
         }, h('i', { style: { background: color } })),
-        h('span', { style: { width: 1, height: 16, margin: '0 2px', background: 'rgba(0,0,0,.12)' } }),
-        pick('undo', 'annUndo', undo, { disabled: !shapes.length }),
-        pick('redo', 'annRedo', redoLast, { disabled: !redo.length }),
-        pick('trash', 'annClear', () => { setShapes([]); setComments([]); setRedo([]); setPendingId(null); },
-          { disabled: !shapes.length }));
+        h('input', {
+          type: 'range', className: 'fmg-ann-range', min: 1, max: 40, value: stroke,
+          'aria-label': t('annStroke'), title: t('annStroke'),
+          onChange: event => setStroke(Number(event.target.value)),
+        }),
+        h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
+        iconButton('undo', 'annUndo', undo, { disabled: !shapes.length }),
+        iconButton('redo', 'annRedo', redoLast, { disabled: !redo.length }),
+        iconButton('trash', 'annClear', () => {
+          setShapes([]); setComments([]); setRedo([]); setEditing(null); setTextDraft(null);
+        }, { disabled: !shapes.length }),
+        h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
+        iconButton('check', 'annBack', () => setMenu('main')));
 
-      const commentHint = tool === 'comment'
-        ? h('div', { className: 'fmg-ann-hint' },
-          h('span', null, t('annCommentHint')),
-          h('button', {
-            type: 'button', className: 'fmg-ann-go', onClick: () => setTool('arrow'),
-          }, t('annDone')))
+      const anchorStyle = (x, y) => ({
+        left: `${(x / source.width) * 100}%`,
+        top: `${(y / source.height) * 100}%`,
+      });
+
+      const editingShape = editing
+        ? shapes.find(shape => shape.type === 'marker' && `c-${shape.id}` === editing.id)
         : null;
 
-      const pending = comments.find(entry => entry.id === pendingId);
-      const pendingShape = pending
-        ? shapes.find(shape => shape.type === 'marker' && `c-${shape.id}` === pending.id)
+      const commentCard = editing && editingShape
+        ? h('div', { className: 'fmg-ann-pin', style: anchorStyle(editingShape.x, editingShape.y) },
+          h('div', { className: 'fmg-ann-card' },
+            h('textarea', {
+              autoFocus: true,
+              value: editing.text,
+              placeholder: t('annCommentPlaceholder'),
+              'aria-label': t('annComment'),
+              onChange: event => {
+                const value = event.target.value;
+                setEditing(current => (current ? { ...current, text: value } : current));
+              },
+              onKeyDown: event => {
+                if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); commitComment(); }
+                if (event.key === 'Escape') { event.preventDefault(); cancelComment(); }
+              },
+            }),
+            h('div', { className: 'fmg-ann-card-actions' },
+              h('button', {
+                type: 'button', className: 'fmg-ann-ib', title: t('annRemoveComment'), 'aria-label': t('annRemoveComment'),
+                onClick: () => {
+                  const shapeId = editing.id.replace(/^c-/, '');
+                  setShapes(list => list.filter(item => item.id !== shapeId));
+                  setComments(list => list.filter(item => item.id !== editing.id));
+                  setEditing(null);
+                },
+              }, annGlyph(ANN_ICONS.trash)),
+              h('div', { className: 'fmg-ann-card-buttons' },
+                h('button', { type: 'button', className: 'fmg-ann-ghost', onClick: cancelComment }, t('annCancel')),
+                h('button', { type: 'button', className: 'fmg-ann-confirm', onClick: commitComment }, t('annSaveComment'))))))
+        : null;
+
+      const textBox = textDraft
+        ? h('input', {
+          className: 'fmg-ann-textin',
+          style: anchorStyle(textDraft.x, textDraft.y),
+          autoFocus: true,
+          value: textDraft.value,
+          placeholder: t('annTextPrompt'),
+          'aria-label': t('annTextPrompt'),
+          onChange: event => {
+            const value = event.target.value;
+            setTextDraft(current => (current ? { ...current, value } : current));
+          },
+          onKeyDown: event => {
+            if (event.key === 'Enter') { event.preventDefault(); commitText(); }
+            if (event.key === 'Escape') { event.preventDefault(); setTextDraft(null); }
+          },
+          onBlur: () => commitText(),
+        })
         : null;
 
       const stage = source
         ? h('div', {
           className: 'fmg-ann-stage',
-          // Ctrl/Cmd + wheel zooms; a plain wheel keeps scrolling the pane.
           onWheel: event => {
             if (!event.ctrlKey && !event.metaKey) return;
             event.preventDefault();
@@ -1229,27 +1369,8 @@ window.__ModuleLoader__.load({
               ref: svgRef, className: 'fmg-ann-svg', viewBox: `0 0 ${source.width} ${source.height}`,
               onPointerDown: startShape, onPointerMove: extendShape, onPointerUp: endShape, onPointerLeave: endShape,
             }, shapes.map(renderShape)),
-            pending && pendingShape
-              ? h('div', {
-                className: 'fmg-ann-pin',
-                style: {
-                  left: `${(pendingShape.x / source.width) * 100}%`,
-                  top: `${(pendingShape.y / source.height) * 100}%`,
-                },
-              },
-                h('input', {
-                  autoFocus: true,
-                  value: pending.text,
-                  placeholder: t('annCommentPlaceholder'),
-                  'aria-label': t('annComment'),
-                  onChange: event => {
-                    const value = event.target.value;
-                    setComments(list => list.map(item => (item.id === pending.id ? { ...item, text: value } : item)));
-                  },
-                  onKeyDown: event => { if (event.key === 'Enter') setPendingId(null); },
-                  onBlur: () => setPendingId(null),
-                }))
-              : null))
+            commentCard,
+            textBox))
         : h('div', { className: 'fmg-ann-stage' },
           h('div', { className: 'fmg-ann-empty' },
             h('p', null, t('annEmpty')),
@@ -1258,58 +1379,16 @@ window.__ModuleLoader__.load({
                 key: item.index, type: 'button', title: item.name,
                 onClick: () => { void openSource({ ...item, draftIndex: item.index }); },
               }, h('img', { src: item.url, alt: item.name }))))
-              : null,
-            h('div', { className: 'fmg-ann-bar' },
-              h('button', { type: 'button', className: 'fmg-ann-ghost', onClick: showDrafts }, t('annFromComposer')))));
+              : null));
 
-      const textField = tool === 'text'
-        ? h('input', {
-          className: 'fmg-ann-pin',
-          style: { position: 'relative', transform: 'none', width: 150, height: 26, marginRight: 4 },
-          value: label,
-          placeholder: t('annTextPrompt'),
-          'aria-label': t('annTextPrompt'),
-          onChange: event => setLabel(event.target.value),
-        })
-        : null;
+      const status = error
+        ? h('div', { className: 'fmg-ann-hint', role: 'alert' }, error)
+        : tool === 'comment'
+          ? h('div', { className: 'fmg-ann-hint' }, t('annCommentHint'))
+          : notice
+            ? h('div', { className: 'fmg-ann-hint', role: 'status' }, savedId ? `${notice} #${savedId}` : notice)
+            : null;
 
-      const bottom = h('div', { className: 'fmg-ann-bar' },
-        textField,
-        h('div', { className: 'fmg-ann-seg' },
-          h('button', {
-            type: 'button', 'aria-pressed': mode === 'markup', disabled: !capable,
-            // The compact bar has no room for the explanation, so a disabled
-            // markup button says why on hover.
-            title: capable ? t('annModeMarkupHint') : t('annModeUnsupported'),
-            onClick: () => { setManualMode(true); setMode('markup'); },
-          }, t('annModeMarkup')),
-          h('button', {
-            type: 'button', 'aria-pressed': mode === 'flatten', title: t('annModeFlattenHint'),
-            onClick: () => { setManualMode(true); setMode('flatten'); },
-          }, t('annModeFlatten'))),
-        h('button', {
-          type: 'button', className: 'fmg-ann-save', disabled: !source || busy || !shapes.length,
-          onClick: () => { void exportAnnotation(); },
-        }, busy ? t('annExporting') : t('annExport')),
-        picker ? h('span', { className: 'fmg-ann-note' }, t('annPickFromList')) : null,
-        !picker && savedId ? h('span', { className: 'fmg-ann-note' }, `#${savedId}`) : null,
-        !picker && error ? h('span', { className: 'fmg-ann-err', role: 'alert' }, error) : null,
-        !picker && !error && notice ? h('span', { className: 'fmg-ann-note', role: 'status' }, notice) : null);
-
-      const pickerBar = picker
-        ? h('div', { className: 'fmg-ann-hint', style: { top: 'auto', bottom: 54 } },
-          h('span', null, t('annPickFromList')),
-          drafts.map(item => h('button', {
-            key: item.index, type: 'button', className: 'fmg-ann-go',
-            onClick: () => { void openSource({ ...item, draftIndex: item.index }); },
-          }, String(item.index + 1))),
-          h('button', { type: 'button', className: 'fmg-ann-go', onClick: () => setPicker(false) }, t('annDone')))
-        : null;
-
-      // Dragging a composer thumbnail in binds the panel to that attachment; the
-      // panel never takes a local file, because the image being edited has to be
-      // the one the request will carry. The drop stops propagating so the
-      // composer's own document-level handler does not also take the image.
       const acceptsDrop = event => {
         const types = event.dataTransfer ? Array.from(event.dataTransfer.types || []) : [];
         return types.includes('text/uri-list') || types.includes('text/plain');
@@ -1341,14 +1420,11 @@ window.__ModuleLoader__.load({
         onDragLeave: () => setDragging(false),
         onDrop: event => { void onDrop(event); },
       },
-        source ? tools : null,
-        source ? commentHint : null,
+        source ? (menu === 'draw' ? drawBar : mainBar) : null,
+        source ? status : null,
         stage,
-        pickerBar,
-        bottom,
         dragging ? h('div', { className: 'fmg-ann-drop' }, t('annDropHere')) : null);
     }
-
 
     // Composer pill: reads the same config route as the settings page and writes
     // only `default_provider`, so the two surfaces cannot disagree.

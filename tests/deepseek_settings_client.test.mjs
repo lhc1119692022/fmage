@@ -123,19 +123,32 @@ test('the sidebar tab body only appears when the right sidebar services resolve'
     inputActions: { insertText: () => false, captureInsertion: () => ({}) },
   }));
   assert.match(html, /fmg-ann/);
-  assert.match(html, /从输入框选图/);
+  assert.match(html, /fmg-ann-empty/);
 
-  // Loaded layout: the floating toolbar, the mode switch and the save action.
+  // Loaded layout: one bar, four entries, no second toolbar.
   const loaded = renderToString(requireReact('react').createElement(tabBody.component, {
     inputActions: { insertText: () => false, captureInsertion: () => ({}) },
     initialSource: { url: 'about:blank', name: 'cat.png', draftIndex: 0, width: 640, height: 480 },
   }));
-  assert.match(loaded, /fmg-ann-tools/);
-  assert.match(loaded, /箭头/);
-  assert.match(loaded, /评论/);
-  assert.match(loaded, /标记层/);
-  assert.match(loaded, /合成到原图/);
-  assert.match(loaded, /保存并插入/);
+  assert.equal((loaded.match(/fmg-ann-bar/g) || []).length, 1, 'exactly one toolbar');
   assert.match(loaded, /viewBox="0 0 640 480"/);
-  assert.doesNotMatch(loaded, /fmg-ann-ghost/, 'the empty-state buttons give way to the toolbar');
+  assert.match(loaded, /aria-label="标注工具"/);
+  assert.match(loaded, /aria-label="添加评论"/);
+  assert.match(loaded, /合成到原图/);
+  assert.match(loaded, />保存</);
+  // The drawing tools live behind the submenu, not on the main bar.
+  assert.doesNotMatch(loaded, /aria-label="画笔"/);
+  assert.doesNotMatch(loaded, /fmg-ann-range/);
+
+  const draw = renderToString(requireReact('react').createElement(tabBody.component, {
+    inputActions: { insertText: () => false, captureInsertion: () => ({}) },
+    initialSource: { url: 'about:blank', name: 'cat.png', draftIndex: 0, width: 640, height: 480 },
+    initialMenu: 'draw',
+  }));
+  assert.equal((draw.match(/fmg-ann-bar/g) || []).length, 1, 'the submenu replaces the bar, never adds one');
+  assert.match(draw, /aria-label="画笔"/);
+  assert.match(draw, /aria-label="橡皮"/);
+  assert.match(draw, /fmg-ann-range/);
+  assert.match(draw, /aria-label="返回"/);
+  assert.doesNotMatch(draw, />保存</, 'saving lives on the main bar');
 });
