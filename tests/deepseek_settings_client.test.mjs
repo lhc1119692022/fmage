@@ -54,7 +54,7 @@ test('client registers the Fmage settings section and renders its loading state'
   };
   plugin.apply(ctx);
   assert.deepEqual(injected, ['settings.section', 'conversation.input.right', 'conversation.input.right']);
-  assert.deepEqual(injects, [['sidebarRightTabs', 'sidebarRight']]);
+  assert.equal(JSON.stringify(injects), JSON.stringify([['sidebarRightTabs', 'sidebarRight']]));
   assert.equal(registration.id, 'fmage');
   assert.equal(registration.locale, 'settings.fmage');
   assert.equal(registration.label(), 'Fmage 生图');
@@ -96,7 +96,7 @@ test('the sidebar tab body only appears when the right sidebar services resolve'
     },
   };
   const ctx = {
-    effect: () => {},
+    effect: fn => { fn(); },
     inject: (names, cb) => { if (names.includes('sidebarRightTabs')) cb(owner); },
     locale: { register: (ns, dicts) => { dictionaries = dicts; return () => {}; }, bind: () => key => dictionaries.zh[key] ?? key },
     slots: { inject: (name, cb) => { if (name === 'settings.section' || name === 'conversation.input.right') cb(); }, register: () => () => {} },

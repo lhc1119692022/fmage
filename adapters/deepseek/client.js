@@ -982,11 +982,9 @@ window.__ModuleLoader__.load({
           return;
         }
         if (tool === 'marker') {
-          setComments(list => {
-            const n = list.length + 1;
-            setShapes(previous => [...previous, { id, type: 'marker', color, width, x: point.x, y: point.y, n }]);
-            return [...list, { id: `c-${id}`, text: '' }];
-          });
+          const n = comments.length + 1;
+          setShapes(list => [...list, { id, type: 'marker', color, width, x: point.x, y: point.y, n }]);
+          setComments(list => [...list, { id: `c-${id}`, text: '' }]);
           setRedo([]);
           return;
         }
@@ -1019,23 +1017,19 @@ window.__ModuleLoader__.load({
       };
 
       const undo = () => {
-        setShapes(list => {
-          if (!list.length) return list;
-          const last = list[list.length - 1];
-          setRedo(steps => [...steps, last]);
-          if (last.type === 'marker') setComments(entries => entries.slice(0, -1));
-          return list.slice(0, -1);
-        });
+        if (!shapes.length) return;
+        const last = shapes[shapes.length - 1];
+        setShapes(shapes.slice(0, -1));
+        setRedo([...redo, last]);
+        if (last.type === 'marker') setComments(comments.slice(0, -1));
       };
 
       const redoLast = () => {
-        setRedo(steps => {
-          if (!steps.length) return steps;
-          const last = steps[steps.length - 1];
-          setShapes(list => [...list, last]);
-          if (last.type === 'marker') setComments(entries => [...entries, { id: `c-${last.id}`, text: '' }]);
-          return steps.slice(0, -1);
-        });
+        if (!redo.length) return;
+        const last = redo[redo.length - 1];
+        setShapes([...shapes, last]);
+        setRedo(redo.slice(0, -1));
+        if (last.type === 'marker') setComments([...comments, { id: `c-${last.id}`, text: '' }]);
       };
 
       const exportAnnotation = async () => {
