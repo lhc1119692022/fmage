@@ -1472,7 +1472,7 @@ window.__ModuleLoader__.load({
           annNotify();
         };
         const poll = async () => {
-          if (Date.now() - recent.savedAt > 60 * 60 * 1000) { settle('expired'); return; }
+          if (Date.now() - recent.savedAt > 24 * 60 * 60 * 1000) { settle('expired'); return; }
           try {
             const meta = await request(`${ANN_ROUTE}?id=${encodeURIComponent(recent.id)}`);
             if (!alive) return;
