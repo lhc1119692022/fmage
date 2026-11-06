@@ -1331,31 +1331,6 @@ function pendingAnnotation() {
   return newest;
 }
 
-// The agent writing the prompt cannot see the marks (they never appear in the
-// attachment) and the user rarely mentions them, so the request itself says
-// what the marks are for. "Even where the wording names more" settles the
-// common clash: the user circles one ear, the prompt says "the ears".
-const MARKUP_INSTRUCTION =
-  "Image 1 comes with a separate markup layer of hand-drawn marks (strokes, circles, arrows, notes). " +
-  "The marks show where the requested change goes: apply it only to the marked areas and keep everything " +
-  "unmarked exactly as it is, even where the wording above names more. The marks are guidance only and " +
-  "must not appear in the result.";
-const FLATTEN_INSTRUCTION =
-  "The colored hand-drawn marks on Image 1 (strokes, circles, arrows, notes) are editing instructions, not " +
-  "part of the picture. Apply the requested change only to the marked areas and keep everything unmarked " +
-  "exactly as it is, even where the wording above names more. Remove every mark from the result and restore " +
-  "what lies beneath it.";
-
-/** The prompt actually sent: the agent's prompt plus what the attached marks mean. */
-function promptWithAnnotationInstruction(prompt, args) {
-  const instruction = nonEmptyString(args._flatten_markup)
-    ? FLATTEN_INSTRUCTION
-    : nonEmptyString(args.markup)
-      ? MARKUP_INSTRUCTION
-      : null;
-  return instruction ? `${prompt.trimEnd()}\n\n${instruction}` : prompt;
-}
-
 /** Retire a layer once a request actually used it; a failed call leaves it. */
 async function consumeAnnotation(annotation) {
   if (!annotation) return;
@@ -2794,9 +2769,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     output_timestamp: nonEmptyString(args.output_timestamp) || timestampForPath(),
     output_sequence: positiveInteger(args.output_sequence, 1),
   };
-  const submittedPrompt = command === "edit" && provider.transport !== TRANSPORT_MIDJOURNEY
-    ? promptWithAnnotationInstruction(prompt, args)
-    : prompt;
+  const submittedPrompt = prompt;
   const retryPolicy = generationRetryPolicy(provider.config);
   const scriptPath = providerTransportScript(provider);
   const tempDir = await mkdtemp(join(tmpdir(), "fmage-"));
@@ -2897,9 +2870,6 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
       mcp_single_started_at: singleStartedAt,
       mcp_single_finished_at: isoNow(),
     };
-    if (submittedPrompt !== prompt) {
-      enriched.notes = [...normalizedStringArray(enriched.notes), "annotation_instruction_appended"];
-    }
     if (annotation !== null) {
       enriched.annotation_applied = annotation.mode;
       // A dry run only reports the wiring; the layer stays available.
@@ -3604,13 +3574,6 @@ function resultText(result, options = {}) {
     const pendingCount = result.pending_count ? `, ${result.pending_count} pending` : "";
     lines.push(
       `Progress: ${result.completed_count ?? 0}/${result.requested_count ?? "?"} completed${runningCount}${pendingCount}, ${result.failed_count ?? 0} failed`,
-    );
-  }
-  if (result.annotation_applied) {
-    lines.push(
-      result.annotation_applied === "flatten"
-        ? "Annotation: the sidebar marks are composited into Image 1 and the prompt tells the model to edit only the marked areas and remove the marks."
-        : "Annotation: the sidebar markup layer is attached to Image 1 and the prompt tells the model to edit only the marked areas.",
     );
   }
   const submittedPrompt = result.prompt_submitted ?? result.revised_prompt_submitted;

@@ -123,14 +123,8 @@ class AnnotationAutoloadTests(unittest.TestCase):
         content = response["result"]["structuredContent"]
         self.assertEqual(content["annotation_applied"], "markup")
         self.assertEqual(Path(content["markup"]).resolve(), layer.resolve())
-        # The agent cannot see the marks, so the request explains them and
-        # lets them narrow a broader wording.
-        submitted = content["prompt_submitted"]
-        self.assertTrue(submitted.startswith("recolor the marked area\n\n"), submitted)
-        self.assertIn("markup layer", submitted)
-        self.assertIn("only to the marked areas", submitted)
-        self.assertIn("annotation_instruction_appended", content["notes"])
-        self.assertIn("Annotation:", response["result"]["content"][0]["text"])
+        # The agent's prompt reaches the provider unchanged.
+        self.assertEqual(content["prompt_submitted"], "recolor the marked area")
 
     def test_without_a_cache_dir_the_layer_is_read_from_the_temp_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -186,7 +180,7 @@ class AnnotationAutoloadTests(unittest.TestCase):
         self.assertEqual(content["annotation_applied"], "flatten")
         self.assertEqual(Path(content["flatten_markup"]).resolve(), layer.resolve())
         self.assertIsNone(content.get("markup"))
-        self.assertIn("Remove every mark from the result", content["prompt_submitted"])
+        self.assertEqual(content["prompt_submitted"], "recolor it")
 
     def test_a_markup_layer_is_refused_on_a_model_without_the_channel(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
