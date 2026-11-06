@@ -40,8 +40,8 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
 
 - Before editing, inspect the file and preserve existing providers.
 - If missing and creation is requested, copy from plugin `config/providers.example.json`.
-- Edit non-secret fields normally: active providers, transport, base_url, model, response_format,
-  async_mode, auth_scheme, generation_config_format, image_field, timeout, and provider names.
+- Edit non-secret fields normally: active providers, transport, base_url, model, response_format
+  (legacy DALL-E only), async_mode, auth_scheme, generation_config_format, image_field, timeout, and provider names.
 - Supported protocols are openai-images, gemini-generate-content, and midjourney.
   Choose the protocol from the provider's API contract, never its name or hostname.
   Old channel transport names and transport_profile are migration inputs only; do not create them.
@@ -54,6 +54,9 @@ If `FMAGE_CONFIG` was used, add one short note that it overrides the default.
   No post-generation actions.
 - For OpenAI Images async submission and /images/tasks/{task_id} polling, set async_mode=true.
   Any provider/model may use this protocol. image_field accepts auto, image, or image[].
+- `response_format` is a legacy DALL-E response control (`url` or `b64_json`). GPT Image models
+  always return `b64_json` and reject this field on generation and edits; never send it for
+  `gpt-image-*` models. Async task-status reads use `response_format=b64_json` independently.
 - Gemini uses x-goog-api-key by default; set auth_scheme=bearer when required by the API.
   Explicit /v1 and /v1beta base paths are preserved; unversioned URLs default to /v1beta.
   generation_config_format defaults to image-config (generationConfig.imageConfig).

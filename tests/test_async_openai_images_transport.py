@@ -154,11 +154,35 @@ class EndpointAndPayloadTests(unittest.TestCase):
             args = image808_args("generate", Path(temp_dir), "--response-format", "url")
         base_payload = openai.common_payload(args, "prompt", "1536x1024")
         image808_payload = transport.common_payload(args, "prompt", "1536x1024")
-        self.assertEqual(
-            {key: value for key, value in image808_payload.items() if key != "response_format"},
-            base_payload,
-        )
-        self.assertEqual(image808_payload["response_format"], "url")
+        self.assertEqual(image808_payload, base_payload)
+        self.assertNotIn("response_format", image808_payload)
+
+    def test_gpt_image_payload_never_sends_legacy_response_format(self) -> None:
+        for model in ("gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.6-sunburst-token"):
+            with self.subTest(model=model), tempfile.TemporaryDirectory() as temp_dir:
+                args = image808_args(
+                    "generate",
+                    Path(temp_dir),
+                    "--model",
+                    model,
+                    "--response-format",
+                    "url",
+                )
+                payload = transport.common_payload(args, "prompt", "1536x1024")
+                self.assertNotIn("response_format", payload)
+
+    def test_legacy_non_gpt_payload_keeps_response_format(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            args = image808_args(
+                "generate",
+                Path(temp_dir),
+                "--model",
+                "dall-e-3",
+                "--response-format",
+                "b64_json",
+            )
+        payload = transport.common_payload(args, "prompt", "1536x1024")
+        self.assertEqual(payload["response_format"], "b64_json")
 
     def test_transparent_background_is_forwarded_with_png_for_async_transport(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -456,7 +480,7 @@ class ServerRoutingTests(unittest.TestCase):
             urllib.parse.parse_qs(urllib.parse.urlsplit(image808["endpoint"]).query)["async"],
             ["true"],
         )
-        self.assertEqual(image808["request"]["response_format"], "url")
+        self.assertNotIn("response_format", image808["request"])
         self.assertEqual(image808["request"]["size"], "auto")
         self.assertEqual(image808["request"]["quality"], "high")
         self.assertEqual(image808["remote_async"]["total_timeout_seconds"], 321)
@@ -509,7 +533,7 @@ class ServerRoutingTests(unittest.TestCase):
             "get_provider_status",
             {"provider": "image-808"},
         )
-        self.assertEqual(status["response_format"], "url")
+        self.assertNotIn("response_format", status)
         self.assertEqual(status["timeout_seconds"], 321)
         self.assertEqual(status["remote_async"]["status_path"], "/images/tasks/{task_id}")
 

@@ -143,6 +143,8 @@ There are no channel-specific execution profiles or model allowlists for OpenAI 
 For asynchronous OpenAI Images APIs, configure async_mode=true; this submits with
 async=true and polls /images/tasks/{task_id}. Configure image_field as auto,
 image, or image[] to match the edit API before submission. Names and hostnames do not select behavior.
+`response_format` is a legacy DALL-E field and is never sent to GPT Image models; they always
+return base64 image data. Task-status reads use `response_format=b64_json` independently.
 Gemini supports explicit auth_scheme values x-goog-api-key (default) and bearer.
 Explicit /v1 and /v1beta paths are preserved; an unversioned base URL uses /v1beta.
 generation_config_format selects image-config (default, imageConfig) or response-format

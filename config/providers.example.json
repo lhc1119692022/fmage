@@ -81,7 +81,6 @@
       "transport": "openai-images",
       "base_url": "https://va-api.40-160-63-37.sslip.io/v1",
       "model": "gpt-image-2",
-      "response_format": "url",
       "api_key": "",
       "async_mode": true,
       "image_field": "image[]"

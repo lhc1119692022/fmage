@@ -112,7 +112,10 @@ def task_status_endpoint_template(base_url: str, response_format: str) -> str:
 
 def common_payload(args: argparse.Namespace, prompt: str, size: str) -> dict[str, Any]:
     payload = openai.common_payload(args, prompt, size)
-    payload["response_format"] = args.response_format
+    # response_format is a legacy DALL-E response control. GPT Image models always
+    # return base64 image data and reject this field on generations and edits.
+    if not openai.is_gpt_image_model(args.model):
+        payload["response_format"] = args.response_format
     return payload
 
 

@@ -23,6 +23,11 @@ REMOVED_PROMPT_FIELDS = (
     "prompt_policy",
 )
 REMOVED_TRANSPORTS = {"zenmux-vertex"}
+# Matches the shared family patterns in config/gpt-image-model-families.json.
+GPT_IMAGE_MODEL_PATTERN = re.compile(
+    r"(?:^|[^a-z0-9])gpt[-_\s]+image[-_\s]+[0-9]+(?:\.[0-9]+)*(?=$|[^a-z0-9.])",
+    re.IGNORECASE | re.ASCII,
+)
 # A fresh retry is a new paid provider request, so it stays opt-in.
 RETRY_DEFAULTS = {"retry_on_failure": False, "retry_count": 2}
 # gpt-image-2.6 complexity switch: false never sends the field.
@@ -46,6 +51,10 @@ def resolve_config_path(explicit: str | None = None) -> Path:
 
 def _is_mapping(value: Any) -> bool:
     return isinstance(value, dict)
+
+
+def _is_gpt_image_model(value: Any) -> bool:
+    return bool(GPT_IMAGE_MODEL_PATTERN.search(str(value or "")))
 
 
 def _is_removed_dalle_provider(provider_name: str, provider: dict[str, Any]) -> bool:
@@ -84,6 +93,16 @@ def _normalize_legacy_fields(provider: dict[str, Any], provider_name: str, chang
             provider.pop(field, None)
         changes.append(
             f'{provider_name}: removed obsolete prompt-preparation fields ({", ".join(removed_fields)})'
+        )
+
+    if (
+        provider.get("transport") == OPENAI_IMAGES_TRANSPORT
+        and _is_gpt_image_model(provider.get("model"))
+        and "response_format" in provider
+    ):
+        provider.pop("response_format", None)
+        changes.append(
+            f"{provider_name}: removed legacy response_format (unsupported by GPT Image models)"
         )
 
 

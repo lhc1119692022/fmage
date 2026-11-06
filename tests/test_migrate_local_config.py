@@ -200,6 +200,32 @@ class MigrateLocalConfigTests(unittest.TestCase):
         self.assertEqual(payload["active_providers"], ["normal"])
         self.assertTrue(any('removed provider "Dall-image-2"' in change for change in changes))
 
+    def test_removes_legacy_response_format_from_gpt_image_providers(self) -> None:
+        payload = {
+            "active_providers": ["gpt-image"],
+            "providers": {
+                "gpt-image": {
+                    "transport": "openai-images",
+                    "model": "gpt-image-2.6-sunburst-token",
+                    "response_format": "url",
+                    "api_key": "keep-this-secret",
+                },
+                "legacy-non-gpt": {
+                    "transport": "openai-images",
+                    "model": "flux-1.1-pro",
+                    "response_format": "url",
+                    "api_key": "keep-this-secret",
+                },
+            },
+        }
+
+        changes = migrate_payload(payload)
+
+        self.assertNotIn("response_format", payload["providers"]["gpt-image"])
+        self.assertEqual(payload["providers"]["gpt-image"]["api_key"], "keep-this-secret")
+        self.assertTrue(any("response_format" in change for change in changes))
+        self.assertEqual(payload["providers"]["legacy-non-gpt"]["response_format"], "url")
+
     def test_check_mode_does_not_write(self) -> None:
         payload = {
             "active_providers": ["808-image-2", "808-MJ"],

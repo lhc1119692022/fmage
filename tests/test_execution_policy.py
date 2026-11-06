@@ -222,7 +222,7 @@ class SubmissionPolicyTests(unittest.TestCase):
             query.assert_called_once()
             download.assert_not_called()
             sleep.assert_not_called()
-            self.assertEqual(submit.call_args.args[1]["response_format"], "url")
+            self.assertNotIn("response_format", submit.call_args.args[1])
             self.assertEqual(Path(result["images"][0]).read_bytes(), PNG)
             self.assertNotIn("remote_result_recovered_as_b64_json", result["notes"])
 
