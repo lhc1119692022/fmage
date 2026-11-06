@@ -7,7 +7,6 @@ import argparse
 from datetime import datetime, timezone
 import json
 import math
-import mimetypes
 import os
 from pathlib import Path
 import re
@@ -36,6 +35,7 @@ from transport_common import (
     request_prompt,
     sanitize_provider_response_metadata,
     save_response_images_from_data,
+    upload_name_and_type,
     write_latest_state,
 )
 
@@ -945,16 +945,17 @@ def multipart_request(
         chunks.append(b"\r\n")
 
     for field_name, path in files:
-        mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        content = path.read_bytes()
+        filename, mime_type = upload_name_and_type(path, content)
         chunks.append(f"--{boundary}\r\n".encode("utf-8"))
         chunks.append(
             (
                 f'Content-Disposition: form-data; name="{field_name}"; '
-                f'filename="{path.name}"\r\n'
+                f'filename="{filename}"\r\n'
                 f"Content-Type: {mime_type}\r\n\r\n"
             ).encode("utf-8")
         )
-        chunks.append(path.read_bytes())
+        chunks.append(content)
         chunks.append(b"\r\n")
 
     chunks.append(f"--{boundary}--\r\n".encode("utf-8"))

@@ -21,7 +21,7 @@ import uuid
 from transport_common import (
     STATUS_QUERY_TIMEOUT_SECONDS, build_prompt_provenance, collect_image_metadata,
     download_image, read_response_bytes, request_timeout,
-    sanitize_provider_response_metadata, sniff_extension, timeout_seconds, with_request_budget,
+    sanitize_provider_response_metadata, sniff_extension, sniffed_image_type, timeout_seconds, with_request_budget,
 )
 
 TRANSPORT_NAME = "midjourney"
@@ -71,7 +71,8 @@ def reference_value(value):
         return value
     path = Path(value)
     data = path.read_bytes()
-    mime = mimetypes.guess_type(path.name)[0]
+    sniffed = sniffed_image_type(data)
+    mime = sniffed[1] if sniffed else mimetypes.guess_type(path.name)[0]
     if not mime or not mime.startswith("image/"):
         raise ValueError(f"Unsupported reference image type: {path.name}")
     return f"data:{mime};base64," + base64.b64encode(data).decode("ascii")

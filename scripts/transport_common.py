@@ -6,6 +6,7 @@ from contextvars import ContextVar
 from functools import wraps
 import hashlib
 import json
+import mimetypes
 import os
 from pathlib import Path
 import struct
@@ -426,6 +427,44 @@ def sniff_extension(data: bytes, preferred: str = "png") -> str:
     if looks_like_svg(data):
         return "svg"
     return preferred if preferred in {"png", "jpg", "jpeg", "webp", "svg", "gif"} else "png"
+
+
+IMAGE_MIME_TYPES = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp", "gif": "image/gif"}
+
+
+def sniffed_image_type(data: bytes) -> tuple[str, str] | None:
+    """(extension, MIME type) read from a raster image's signature, or None."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        extension = "png"
+    elif data.startswith(b"\xff\xd8"):
+        extension = "jpg"
+    elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        extension = "webp"
+    elif data.startswith((b"GIF87a", b"GIF89a")):
+        extension = "gif"
+    else:
+        return None
+    return extension, IMAGE_MIME_TYPES[extension]
+
+
+def upload_name_and_type(path: Path, data: bytes) -> tuple[str, str]:
+    """
+    Filename and Content-Type for one uploaded image.
+
+    The bytes decide, not the name: chat hosts hand over attachments as
+    content-addressed files with no extension, and providers reject an upload
+    labeled application/octet-stream. A filename whose suffix disagrees with
+    the bytes is given the right one, because some gateways read it instead.
+    """
+    sniffed = sniffed_image_type(data)
+    if sniffed is None:
+        return path.name, mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    extension, mime_type = sniffed
+    suffix = path.suffix.lower().lstrip(".")
+    if suffix == extension or (extension == "jpg" and suffix == "jpeg"):
+        return path.name, mime_type
+    base = path.stem if suffix in {"png", "jpg", "jpeg", "webp", "gif"} else path.name
+    return f"{base}.{extension}", mime_type
 
 
 def looks_like_svg(data: bytes) -> bool:

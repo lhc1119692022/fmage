@@ -35,6 +35,7 @@ from transport_common import (
     sanitize_provider_response_metadata,
     save_response_images_from_data,
     sniff_extension,
+    sniffed_image_type,
     write_latest_state,
 )
 
@@ -238,7 +239,8 @@ def inline_image_part(reference: str, timeout: int) -> dict[str, Any]:
         if not path.is_file():
             raise FileNotFoundError(f"Reference image not found: {reference}")
         data = path.read_bytes()
-        mime_type = mimetypes.guess_type(path.name)[0] or mime_type_from_bytes(data)
+        sniffed = sniffed_image_type(data)
+        mime_type = sniffed[1] if sniffed else mimetypes.guess_type(path.name)[0] or mime_type_from_bytes(data)
     return {
         "inlineData": {
             "mimeType": mime_type,

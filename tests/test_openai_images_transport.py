@@ -583,6 +583,49 @@ class RequestHeaderTests(unittest.TestCase):
         self.assertEqual(headers["user-agent"], transport.CLIENT_USER_AGENT)
 
 
+class UploadTypeTests(unittest.TestCase):
+    def test_an_attachment_without_an_extension_is_labeled_by_its_bytes(self) -> None:
+        # Chat hosts store attachments as content-addressed files with no
+        # extension; the provider refuses application/octet-stream.
+        captured: dict[str, bytes] = {}
+
+        class FakeResponse(BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def fake_urlopen(request, timeout):
+            captured["body"] = request.data
+            return FakeResponse(b'{"data": []}')
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            attachment = Path(temp_dir) / ("00b4" + "a" * 60)
+            buffer = BytesIO()
+            Image.new("RGB", (8, 8), (1, 2, 3)).save(buffer, format="PNG")
+            attachment.write_bytes(buffer.getvalue())
+            jpeg = Path(temp_dir) / "photo.png"
+            Image.new("RGB", (8, 8), (1, 2, 3)).save(jpeg, format="JPEG")
+            with mock.patch.object(transport.urllib.request, "urlopen", fake_urlopen):
+                transport.multipart_request(
+                    "https://example.test/v1/images/edits", {"model": "gpt-image-2.6"},
+                    [("image", attachment), ("image", jpeg)], "test-key", 10,
+                )
+        body = captured["body"]
+        self.assertNotIn(b"application/octet-stream", body)
+        self.assertIn(f'filename="{attachment.name}.png"\r\nContent-Type: image/png'.encode(), body)
+        self.assertIn(b'filename="photo.jpg"\r\nContent-Type: image/jpeg', body)
+
+    def test_a_named_file_keeps_its_name_when_the_bytes_agree(self) -> None:
+        from transport_common import upload_name_and_type
+        png = b"\x89PNG\r\n\x1a\n" + b"\0" * 16
+        self.assertEqual(upload_name_and_type(Path("cat.png"), png), ("cat.png", "image/png"))
+        self.assertEqual(upload_name_and_type(Path("cat.jpeg"), b"\xff\xd8\xff"), ("cat.jpeg", "image/jpeg"))
+        self.assertEqual(upload_name_and_type(Path("cat.v2"), png), ("cat.v2.png", "image/png"))
+        self.assertEqual(upload_name_and_type(Path("notes.txt"), b"hello"), ("notes.txt", "text/plain"))
+
+
 class EndpointTests(unittest.TestCase):
     def test_image_endpoint_adds_v1_for_host_root(self) -> None:
         self.assertEqual(
