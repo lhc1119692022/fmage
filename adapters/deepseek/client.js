@@ -235,7 +235,7 @@ window.__ModuleLoader__.load({
       annRecentExpired: '上一次标注已失效，没有被使用',
       annModeMarkup: '分层', annModeFlatten: '合成',
       annModeMarkupHint: '把透明标注层作为 markup 单独发送；原图不变，标记由模型抹除。',
-      annModeFlattenHint: '把标注烧进图片再发；标记可能残留在结果里。',
+      annModeFlattenHint: '保存时用合成图替换输入框里的原图，发送前可恢复；标记可能残留在结果里。',
       annModeUnsupported: '当前模型不是 GPT Image 2.5/2.6，只能用合成。',
       annComment: '评论', annCommentPlaceholder: '添加评论…',
       annToolSelect: '选择', annDone: '完成', annSend: '发送', annRotate: '旋转', annMove: '移动', annDeleteText: '删除文字',
@@ -246,6 +246,13 @@ window.__ModuleLoader__.load({
       annTextPrompt: '输入文字',
       annRemoveComment: '删除这条评论',
       annLoadFailed: '图片读取失败。', annFailed: '操作失败',
+      annReplaced: '已用合成图替换原图，评论已插入输入框。', annReplacedCopy: '已用合成图替换原图，评论已复制。',
+      annReplacedSilent: '已用合成图替换原图',
+      annFallback: '没能替换输入框里的图片，改为生图时合成；评论已插入输入框。',
+      annFallbackCopy: '没能替换输入框里的图片，改为生图时合成；评论已复制。',
+      annFallbackSilent: '没能替换输入框里的图片，改为生图时合成。',
+      annSwapped: '输入框里是合成图', annSwappedHint: '发送的是合成图；原图仍保留，发送前可以换回',
+      annRestore: '恢复原图', annRestored: '已恢复原图，标注可以继续修改。', annRestoreFailed: '没能恢复原图。',
       showPill: '在输入栏显示生图胶囊', showPillHint: '关闭后仍可在下方列表切换默认提供商；改动在下一次请求生效。',
       orderHint: '拖动只改变回退顺序；默认提供商由星标决定。',
       advanced: '高级：排序与回退',
@@ -288,7 +295,7 @@ window.__ModuleLoader__.load({
       annMustBeFirst: 'The markup layer applies only to the first input image; this is image {n}. Use the first one, or flatten instead.',
       annModeMarkup: 'Layer', annModeFlatten: 'Flatten',
       annModeMarkupHint: 'Send the transparent layer as markup; the target image stays untouched and the model removes the marks.',
-      annModeFlattenHint: 'Burn the marks into the image first; they may survive into the result.',
+      annModeFlattenHint: 'Saving swaps the composer image for a copy with the marks burned in; you can undo it before sending. The marks may survive into the result.',
       annModeUnsupported: 'This model is not GPT Image 2.5/2.6, so only flatten is available.',
       annComment: 'Comment', annCommentPlaceholder: 'Add a comment…',
       annToolSelect: 'Select', annDone: 'Done', annSend: 'Send', annRotate: 'Rotate', annMove: 'Move', annDeleteText: 'Delete text',
@@ -308,6 +315,14 @@ window.__ModuleLoader__.load({
       annTextPrompt: 'Type text',
       annRemoveComment: 'Remove this comment',
       annLoadFailed: 'The image could not be read.', annFailed: 'The operation failed',
+      annReplaced: 'The composer image now has the marks; the comments were inserted into the composer.',
+      annReplacedCopy: 'The composer image now has the marks; the comments were copied.',
+      annReplacedSilent: 'The composer image now has the marks',
+      annFallback: 'The composer image could not be swapped, so the marks are flattened at edit time; the comments were inserted into the composer.',
+      annFallbackCopy: 'The composer image could not be swapped, so the marks are flattened at edit time; the comments were copied.',
+      annFallbackSilent: 'The composer image could not be swapped, so the marks are flattened at edit time.',
+      annSwapped: 'The composer holds the marked copy', annSwappedHint: 'The marked copy is what gets sent; the original is kept and can come back before sending',
+      annRestore: 'Restore original', annRestored: 'The original is back; the marks can be edited again.', annRestoreFailed: 'The original could not be restored.',
       showPill: 'Show the image provider pill in the composer', showPillHint: 'Turning it off keeps the list below and the saved default; changes apply to the next request.',
       orderHint: 'Dragging only changes the fallback order; the star sets the default provider.',
       advanced: 'Advanced: order and fallback',
@@ -932,6 +947,85 @@ window.__ModuleLoader__.load({
       check();
     }
 
+    // Flatten saves swap the composer image for the marked copy. Keyed by the
+    // copy's object URL; holds what 恢复原图 needs. The host's plugin
+    // removeAttachment only takes an id off the draft and leaves the browser
+    // attachment alive, so the original can be put back until the send.
+    const annReplaced = new Map();
+
+    const annPause = ms => new Promise(resolve => { setTimeout(resolve, ms); });
+
+    async function annWaitFor(check, timeout) {
+      const end = Date.now() + timeout;
+      for (;;) {
+        const value = check();
+        if (value) return value;
+        if (Date.now() > end) return null;
+        await annPause(16);
+      }
+    }
+
+    /** Position of a composer image in the attachment rail, which lists every attachment in draft order. */
+    function railSlot(url) {
+      const card = document.querySelector('[data-composer-card]');
+      if (!card) return null;
+      const image = Array.from(card.querySelectorAll('img[src^="blob:"]')).find(item => item.src === url);
+      const group = image ? image.closest('[role="group"]') : null;
+      if (!group || !card.contains(group)) return null;
+      const items = Array.from(group.children);
+      const index = items.findIndex(item => item.contains(image));
+      return index < 0 ? null : { index, count: items.length };
+    }
+
+    /** Reorder the draft with the plugin actions: keep the common prefix, append the rest. */
+    function arrangeAttachments(actions, current, target) {
+      let keep = 0;
+      while (keep < current.length && keep < target.length && current[keep] === target[keep]) keep += 1;
+      if (keep < current.length) actions.pruneAttachments(current.slice(0, keep));
+      if (keep < target.length) actions.addAttachments(target.slice(keep));
+    }
+
+    /**
+     * Hand a file to the composer the way a dropped file arrives, so it goes
+     * through the host's own checks and upload. False when nothing took it.
+     */
+    function dropIntoComposer(file) {
+      const card = document.querySelector('[data-composer-card]');
+      if (!card || typeof DataTransfer !== 'function' || typeof DragEvent !== 'function') return false;
+      try {
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        if (!Array.from(transfer.types).includes('Files')) return false;
+        const event = new DragEvent('drop', { bubbles: true, cancelable: true, composed: true, dataTransfer: transfer });
+        card.dispatchEvent(event);
+        return event.defaultPrevented;
+      } catch {
+        return false;
+      }
+    }
+
+    /** The source at its own size with the marks painted on, in the source's format where it can. */
+    async function compositeFile(source, shapes) {
+      const original = await (await fetch(source.url)).blob();
+      const image = await loadImageElement(source.url);
+      const layer = document.createElement('canvas');
+      layer.width = source.width;
+      layer.height = source.height;
+      drawShapes(layer.getContext('2d'), shapes);
+      const canvas = document.createElement('canvas');
+      canvas.width = source.width;
+      canvas.height = source.height;
+      const context = canvas.getContext('2d');
+      context.drawImage(image, 0, 0, source.width, source.height);
+      context.drawImage(layer, 0, 0);
+      const jpeg = original.type === 'image/jpeg';
+      const type = jpeg ? 'image/jpeg' : 'image/png';
+      const blob = await new Promise(resolve => { canvas.toBlob(resolve, type, jpeg ? 0.95 : undefined); });
+      if (!blob) throw new Error('composite encode failed');
+      const stem = String(source.name || '').replace(/\.[^./\\]+$/, '') || 'image';
+      return new File([blob], `${stem}-annotated.${jpeg ? 'jpg' : 'png'}`, { type, lastModified: Date.now() });
+    }
+
     function loadImageElement(url) {
       return new Promise((resolve, reject) => {
         const image = new Image();
@@ -1204,8 +1298,14 @@ window.__ModuleLoader__.load({
     // editor, handles, brush circle) is positioned in screen pixels and keeps
     // its size at any zoom. `initialSource`/`initialMenu` exist for the render
     // test; the slot never passes them.
-    function AnnotationPanel({ inputActions, initialSource, initialMenu }) {
+    function AnnotationPanel({ inputActions, useInput, initialSource, initialMenu }) {
       const t = annText;
+      // Draft attachment ids in order; the swap needs them to put the marked
+      // copy where the original was.
+      const attachmentIds = typeof useInput === 'function' ? useInput(state => state.attachmentIds) : null;
+      const idsRef = useRef(null);
+      idsRef.current = Array.isArray(attachmentIds) ? attachmentIds : null;
+      const swapping = useRef(false);
       const [source, setSource] = useState(initialSource || null);
       const [shapes, setShapes] = useState([]);
       const [comments, setComments] = useState([]);
@@ -1384,11 +1484,14 @@ window.__ModuleLoader__.load({
         let frame = 0;
         const check = () => {
           frame = 0;
+          // A swap in progress moves attachments on purpose; it opens the result itself.
+          if (swapping.current) return;
           // No composer on screen (another view): nothing to compare against.
           if (!document.querySelector('[data-composer-card]')) return;
           const found = composerImages();
           const live = new Set(found.map(item => item.url));
           pruneAnnotations(live);
+          for (const url of Array.from(annReplaced.keys())) if (!live.has(url)) annReplaced.delete(url);
           if (source && live.has(source.url)) return;
           if (source) { setSource(null); setOwner(null); }
           setDrafts(found);
@@ -1786,9 +1889,10 @@ window.__ModuleLoader__.load({
       };
 
       // Comments go into the prompt at the caret, else to the clipboard.
-      const deliverComments = async kept => {
+      const ANN_SAVED_KEYS = ['annExported', 'annExportedCopy', 'annExportedSilent'];
+      const deliverComments = async (kept, keys = ANN_SAVED_KEYS) => {
         const text = commentText(kept);
-        if (!text) { notify(t('annExportedSilent')); return; }
+        if (!text) { notify(t(keys[2])); return; }
         let inserted = false;
         if (inputActions) {
           try { inserted = inputActions.insertText(text, inputActions.captureInsertion()); } catch { inserted = false; }
@@ -1796,7 +1900,94 @@ window.__ModuleLoader__.load({
         if (!inserted) {
           try { await navigator.clipboard.writeText(text); } catch { /* no clipboard */ }
         }
-        notify(inserted ? t('annExported') : t('annExportedCopy'));
+        notify(inserted ? t(keys[0]) : t(keys[1]));
+      };
+
+      const swapActions = () => Boolean(inputActions && idsRef.current
+        && ['removeAttachment', 'addAttachments', 'pruneAttachments'].every(name => typeof inputActions[name] === 'function'));
+
+      // Put the marked copy where the original sits. The original is taken
+      // off first so the copy fits under the host's per-message image limits;
+      // any failure puts the draft back as it was. Returns the copy's URL.
+      const swapInComposer = async (file, original, marks) => {
+        const before = idsRef.current.slice();
+        const slot = railSlot(original.url);
+        if (!slot || slot.count !== before.length) return null;
+        const originalId = before[slot.index];
+        const beforeUrls = new Set(composerImages().map(item => item.url));
+        inputActions.removeAttachment(originalId);
+        const gone = await annWaitFor(() => idsRef.current && !idsRef.current.includes(originalId)
+          && !composerImages().some(item => item.url === original.url), 1500);
+        if (!gone) {
+          if (idsRef.current && !idsRef.current.includes(originalId)) arrangeAttachments(inputActions, idsRef.current, before);
+          return null;
+        }
+        // Let the composer re-arm its drop handler with the shorter list.
+        await annPause(60);
+        const dropped = dropIntoComposer(file);
+        const addedId = dropped
+          ? await annWaitFor(() => (idsRef.current || []).find(id => !before.includes(id)), 2500)
+          : null;
+        if (!addedId) {
+          arrangeAttachments(inputActions, idsRef.current || [], before);
+          await annWaitFor(() => composerImages().some(item => item.url === original.url), 1500);
+          return null;
+        }
+        const target = before.slice();
+        target[slot.index] = addedId;
+        arrangeAttachments(inputActions, idsRef.current, target);
+        const url = await annWaitFor(() => {
+          const ids = idsRef.current || [];
+          if (ids.join('\n') !== target.join('\n')) return null;
+          const found = composerImages().find(item => !beforeUrls.has(item.url));
+          return found && railSlot(found.url) && railSlot(found.url).index === slot.index ? found.url : null;
+        }, 2500);
+        if (!url) {
+          // The copy arrived but did not settle into place: back to the original.
+          arrangeAttachments(inputActions, idsRef.current || [], before);
+          return null;
+        }
+        // Saving a marked copy again still restores to the first original,
+        // carrying the marks of every round so far.
+        const prior = annReplaced.get(original.url);
+        annReplaced.delete(original.url);
+        annReplaced.set(url, prior ? {
+          ...prior, copyId: addedId,
+          shapes: [...prior.shapes, ...marks.shapes], comments: [...prior.comments, ...marks.comments],
+        } : {
+          originalId, copyId: addedId, originalUrl: original.url, name: original.name,
+          draftIndex: original.draftIndex, shapes: marks.shapes, comments: marks.comments,
+        });
+        return url;
+      };
+
+      const restoreOriginal = async () => {
+        const entry = source ? annReplaced.get(source.url) : null;
+        if (!entry || busy || !swapActions()) return;
+        setBusy(true);
+        swapping.current = true;
+        let restored = false;
+        try {
+          const ids = idsRef.current.slice();
+          const at = ids.indexOf(entry.copyId);
+          if (at >= 0) {
+            const target = ids.slice();
+            target[at] = entry.originalId;
+            arrangeAttachments(inputActions, ids, target);
+            restored = Boolean(await annWaitFor(() => composerImages().some(item => item.url === entry.originalUrl)
+              && !composerImages().some(item => item.url === source.url), 1500));
+            if (!restored) arrangeAttachments(inputActions, idsRef.current || [], ids);
+          }
+          if (restored) {
+            annReplaced.delete(source.url);
+            writeAnnotation(entry.originalUrl, { shapes: entry.shapes, comments: entry.comments });
+            await openSource({ url: entry.originalUrl, name: entry.name, draftIndex: entry.draftIndex });
+          }
+        } finally {
+          swapping.current = false;
+          setBusy(false);
+        }
+        notify(restored ? t('annRestored') : t('annRestoreFailed'), !restored);
       };
 
       const exportAnnotation = async () => {
@@ -1840,6 +2031,33 @@ window.__ModuleLoader__.load({
             await deliverComments(kept);
             return;
           }
+          let keys = ANN_SAVED_KEYS;
+          if (mode === 'flatten' && swapActions()) {
+            // A layer saved earlier for this upload must not also ride the
+            // edit of the marked copy, so withdraw it before the swap.
+            const earlier = annSaved.get(source.url);
+            if (earlier) {
+              await request(ANN_ROUTE, { method: 'POST', body: JSON.stringify({ action: 'withdraw', id: earlier.id }) });
+              annSaved.delete(source.url);
+              annNotify();
+            }
+            let url = null;
+            swapping.current = true;
+            try {
+              url = await swapInComposer(await compositeFile(source, shapes), source, { shapes, comments: list });
+              if (url) await openSource({ url, name: source.name, draftIndex: source.draftIndex });
+            } catch {
+              url = null;
+            } finally {
+              swapping.current = false;
+            }
+            if (url) {
+              await deliverComments(kept, ['annReplaced', 'annReplacedCopy', 'annReplacedSilent']);
+              return;
+            }
+            // Could not swap: the edit flattens the saved layer instead.
+            keys = ['annFallback', 'annFallbackCopy', 'annFallbackSilent'];
+          }
           const layer = document.createElement('canvas');
           layer.width = source.width;
           layer.height = source.height;
@@ -1862,7 +2080,7 @@ window.__ModuleLoader__.load({
           });
           watchUploads();
           annNotify();
-          await deliverComments(kept);
+          await deliverComments(kept, keys);
         } catch (failure) {
           notify(`${t('annFailed')}: ${failure && failure.message ? failure.message : ''}`, true);
         } finally {
@@ -1901,6 +2119,13 @@ window.__ModuleLoader__.load({
           h('span', { className: 'fmg-ann-status-text', title: savedStale ? t('annPendingStaleHint') : t('annPendingHint') },
             savedStale ? t('annPendingStale') : t('annPending', { mode: modeName(savedEntry.mode) })),
           h('button', { type: 'button', disabled: busy, onClick: () => { void withdrawSave(); } }, t('annWithdraw')))
+        : null;
+      const swappedEntry = source ? annReplaced.get(source.url) : null;
+      const swappedStatus = swappedEntry
+        ? h('div', { className: 'fmg-ann-status', role: 'status', onPointerDown: event => { event.stopPropagation(); } },
+          h('span', { className: 'fmg-ann-status-dot', 'aria-hidden': true }),
+          h('span', { className: 'fmg-ann-status-text', title: t('annSwappedHint') }, t('annSwapped')),
+          h('button', { type: 'button', disabled: busy, onClick: () => { void restoreOriginal(); } }, t('annRestore')))
         : null;
       const recentText = !recent ? null
         : recent.status === 'sent'
@@ -2235,7 +2460,7 @@ window.__ModuleLoader__.load({
                 shapes.filter(shape => shape.type !== 'erase' && shape.id !== hiddenText).map(renderShape)))),
           h('div', { className: 'fmg-ann-layer' }, overlays),
           menu === 'draw' && ANN_STROKE_TOOLS.includes(tool) ? slider : null,
-          savedStatus,
+          swappedStatus || savedStatus,
           h('div', { className: 'fmg-ann-zoom', onPointerDown: stopUi },
             iconButton('minus', t('annZoomOut'), { onClick: () => zoomTo(zoom => zoom / 1.25) }),
             h('button', {
