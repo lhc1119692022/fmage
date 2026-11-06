@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, rmSync } from "node:fs";
 import { access, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
@@ -53,10 +53,15 @@ if (!CONFIG_PATH) {
   process.exit(1);
 }
 const TRANSPORT_OPENAI_IMAGES = "openai-images";
-// Layers saved by the sidebar live here; the MCP server picks the newest unused
-// one up by itself so no path ever has to enter the conversation.
-const ANNOTATION_CACHE = DATA_HOME ? join(DATA_HOME, "cache", "annotations") : null;
+// Layers saved by the sidebar; the MCP server picks the newest unused one up by
+// itself so no path ever has to enter the conversation. The location contract
+// is shared with adapters/deepseek/annotation-api.mjs: <cache_dir>/annotations
+// when the user set a cache directory, else <os temp>/fmage/annotations. Both
+// are read, because a save falls back to temp when cache_dir is unwritable.
+const ANNOTATION_DIR_NAME = "annotations";
 const ANNOTATION_TTL_MS = 60 * 60 * 1000;
+const ANNOTATION_USED_RETENTION_MS = 24 * 60 * 60 * 1000;
+const ANNOTATION_ID_PATTERN = /^[a-z0-9]{8,40}$/;
 const workflowService = createWorkflowService(CONFIG_PATH);
 const TRANSPORT_GEMINI_GENERATE_CONTENT = "gemini-generate-content";
 const TRANSPORT_MIDJOURNEY = "midjourney";
@@ -1279,29 +1284,48 @@ function bananaModelCapability(provider) {
  * first attachment, and the transport checks the layer's canvas against that
  * image, so a wrong pairing fails loudly instead of editing the wrong picture.
  */
+function annotationDirectories() {
+  const fallback = join(tmpdir(), "fmage", ANNOTATION_DIR_NAME);
+  const configured = nonEmptyString(readConfigForPaths()?.cache_dir);
+  const preferred = configured ? join(resolve(configBaseDir(), configured), ANNOTATION_DIR_NAME) : null;
+  return preferred && resolve(preferred) !== resolve(fallback) ? [preferred, fallback] : [fallback];
+}
+
 function pendingAnnotation() {
-  if (!ANNOTATION_CACHE) return null;
-  let entries;
-  try {
-    entries = readdirSync(ANNOTATION_CACHE, { withFileTypes: true });
-  } catch {
-    return null;
-  }
+  const now = Date.now();
   let newest = null;
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const directory = join(ANNOTATION_CACHE, entry.name);
-    let meta;
+  for (const root of annotationDirectories()) {
+    let entries;
     try {
-      meta = JSON.parse(readFileSync(join(directory, "meta.json"), "utf8"));
+      entries = readdirSync(root, { withFileTypes: true });
     } catch {
       continue;
     }
-    if (meta.consumedAt) continue;
-    const createdAt = Date.parse(meta.createdAt);
-    if (!Number.isFinite(createdAt) || Date.now() - createdAt > ANNOTATION_TTL_MS) continue;
-    if (newest === null || createdAt > newest.createdAt) {
-      newest = { directory, createdAt, layer: join(directory, "layer.png"), mode: meta.mode };
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !ANNOTATION_ID_PATTERN.test(entry.name)) continue;
+      const directory = join(root, entry.name);
+      let meta;
+      try {
+        meta = JSON.parse(readFileSync(join(directory, "meta.json"), "utf8"));
+      } catch {
+        continue;
+      }
+      const consumedAt = Date.parse(meta.consumedAt);
+      const createdAt = Date.parse(meta.createdAt);
+      // Same retention as the sidebar's save: unused for an hour, used for a day.
+      const stale = Number.isFinite(consumedAt)
+        ? now - consumedAt > ANNOTATION_USED_RETENTION_MS
+        : !Number.isFinite(createdAt) || now - createdAt > ANNOTATION_TTL_MS;
+      if (stale) {
+        if (Number.isFinite(consumedAt) || Number.isFinite(createdAt)) {
+          try { rmSync(directory, { recursive: true, force: true }); } catch { /* best effort */ }
+        }
+        continue;
+      }
+      if (meta.consumedAt) continue;
+      if (newest === null || createdAt > newest.createdAt) {
+        newest = { directory, createdAt, layer: join(directory, "layer.png"), mode: meta.mode };
+      }
     }
   }
   return newest;

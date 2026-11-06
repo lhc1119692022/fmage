@@ -2,19 +2,24 @@
 // this module owns the file on disk.
 //
 // The model never sees this file's path. `edit_image` looks for the newest
-// unused layer in `cache/annotations` and attaches it itself, so nothing has
-// to be pasted into the conversation. That is why the directory is a cache:
-// every entry is disposable, and an unused one expires.
+// unused layer and attaches it itself, so nothing has to be pasted into the
+// conversation. That is why the directory is a cache: every entry is
+// disposable, and an unused one expires.
 //
-// Layout, also read by mcp/server.mjs:
-//   <root>/cache/annotations/<id>/layer.png
-//   <root>/cache/annotations/<id>/meta.json  { id, mode, width, height, createdAt, consumedAt, comments }
+// Location, resolved the same way by mcp/server.mjs:
+//   1. <cache_dir>/annotations/   when providers.json sets a usable cache_dir
+//                                 (relative paths resolve against that file's folder)
+//   2. <os temp>/fmage/annotations/  otherwise, or when (1) cannot be written
+// Each entry is <id>/layer.png plus <id>/meta.json
+//   { id, mode, width, height, createdAt, consumedAt, comments }.
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 export const ANNOTATION_ROUTE = '/api/fmage.annotation';
-export const ANNOTATION_CACHE_DIR = ['cache', 'annotations'];
+export const ANNOTATION_DIR_NAME = 'annotations';
+export const TEMP_ANNOTATION_DIR = ['fmage', 'annotations'];
 const NO_STORE = { 'cache-control': 'no-store' };
 const MAX_LAYER_BYTES = 32 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 40 * 1024 * 1024;
@@ -23,7 +28,9 @@ const LAYER_NAME = 'layer.png';
 // A layer is only meaningful for the edit the user is about to ask for. An
 // hour is long enough to write a prompt and short enough that a forgotten
 // layer cannot attach itself to an unrelated request later.
-const RETENTION_MS = 60 * 60 * 1000;
+export const UNUSED_TTL_MS = 60 * 60 * 1000;
+// A used layer stays a day so the run that sent it can still be inspected.
+export const USED_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 class AnnotationError extends Error {
   constructor(message, status = 400) {
@@ -120,11 +127,51 @@ function metaOf(body) {
   };
 }
 
+/** The user's `cache_dir` from providers.json, resolved, or null when unset. */
+async function configuredCacheDir(configPath) {
+  try {
+    const config = JSON.parse((await readFile(configPath, 'utf8')).replace(/^\uFEFF/, ''));
+    const value = typeof config?.cache_dir === 'string' ? config.cache_dir.trim() : '';
+    return value ? resolve(dirname(configPath), value) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Candidate directories in preference order; the last one is the temp fallback. */
+export async function annotationDirectories(configPath, temp = tmpdir()) {
+  const fallback = join(temp, ...TEMP_ANNOTATION_DIR);
+  const configured = await configuredCacheDir(configPath);
+  const preferred = configured ? join(configured, ANNOTATION_DIR_NAME) : null;
+  return preferred && resolve(preferred) !== resolve(fallback) ? [preferred, fallback] : [fallback];
+}
+
 /**
- * Drop entries past the retention window.
+ * Whether an entry is past its retention: an unused layer an hour after it
+ * was saved, a used one a day after its request. Timestamps come from the
+ * meta file; one that cannot be read falls back to the file's age.
+ */
+async function expired(target, now) {
+  const metaPath = join(target, META_NAME);
+  let meta;
+  try {
+    meta = JSON.parse(await readFile(metaPath, 'utf8'));
+  } catch {
+    const info = await stat(metaPath);
+    return now - info.mtimeMs > USED_RETENTION_MS;
+  }
+  const consumed = Date.parse(meta?.consumedAt);
+  if (Number.isFinite(consumed)) return now - consumed > USED_RETENTION_MS;
+  const created = Date.parse(meta?.createdAt);
+  if (Number.isFinite(created)) return now - created > UNUSED_TTL_MS;
+  return now - (await stat(metaPath)).mtimeMs > UNUSED_TTL_MS;
+}
+
+/**
+ * Drop entries past their retention.
  *
- * Best effort and age-based: the entry just written is always kept, and a
- * directory without our meta file is never touched.
+ * Best effort: the entry just written is always kept, and only directories
+ * named like our ids that hold our meta file are ever touched.
  */
 async function pruneExpired(directory, keep) {
   let entries;
@@ -133,13 +180,12 @@ async function pruneExpired(directory, keep) {
   } catch {
     return;
   }
-  const cutoff = Date.now() - RETENTION_MS;
-  await Promise.all(entries.filter(entry => entry.isDirectory()).map(async entry => {
+  const now = Date.now();
+  await Promise.all(entries.filter(entry => entry.isDirectory() && ID_PATTERN.test(entry.name)).map(async entry => {
     const target = join(directory, entry.name);
     if (target === keep) return;
     try {
-      const meta = await stat(join(target, META_NAME));
-      if (meta.mtimeMs < cutoff) await rm(target, { recursive: true, force: true });
+      if (await expired(target, now)) await rm(target, { recursive: true, force: true });
     } catch { /* not an annotation entry, or already gone */ }
   }));
 }
@@ -150,22 +196,23 @@ async function pruneExpired(directory, keep) {
  * Only the marks are written. The image being annotated stays the one the user
  * attached, so there is no second copy to drift from it.
  */
-export function createAnnotationApi(root) {
-  const directory = join(root, ...ANNOTATION_CACHE_DIR);
+export function createAnnotationApi(root, { temp } = {}) {
+  const configPath = join(root, 'providers.json');
+  const directories = () => annotationDirectories(configPath, temp);
 
   return {
-    directory,
+    directories,
 
     async read(body) {
       const id = annotationId(body?.id);
-      const target = join(directory, id);
-      let meta;
-      try {
-        meta = JSON.parse(await readFile(join(target, META_NAME), 'utf8'));
-      } catch {
-        throw new AnnotationError('Annotation not found.', 404);
+      for (const directory of await directories()) {
+        const target = join(directory, id);
+        try {
+          const meta = JSON.parse(await readFile(join(target, META_NAME), 'utf8'));
+          return { ...meta, id, directory: target, layer: join(target, LAYER_NAME) };
+        } catch { /* try the next location */ }
       }
-      return { ...meta, id, directory: target, layer: join(target, LAYER_NAME) };
+      throw new AnnotationError('Annotation not found.', 404);
     },
 
     async save(body) {
@@ -176,13 +223,24 @@ export function createAnnotationApi(root) {
       const layer = decodePng(body.layer, 'layer');
 
       const id = randomBytes(8).toString('hex');
-      const target = join(directory, id);
-      await mkdir(target, { recursive: true });
-      await writeFile(join(target, LAYER_NAME), layer);
       const record = { ...meta, id, createdAt: new Date().toISOString(), consumedAt: null };
-      await writeFile(join(target, META_NAME), JSON.stringify(record, null, 2) + '\n', 'utf8');
-      await pruneExpired(directory, target);
-      return { ...record, directory: target, layer: join(target, LAYER_NAME) };
+      const candidates = await directories();
+      // An unusable cache_dir (missing drive, read-only, a file) falls through
+      // to the temp directory instead of failing the save.
+      for (const directory of candidates) {
+        const target = join(directory, id);
+        try {
+          await mkdir(target, { recursive: true });
+          await writeFile(join(target, LAYER_NAME), layer);
+          await writeFile(join(target, META_NAME), JSON.stringify(record, null, 2) + '\n', 'utf8');
+        } catch {
+          await rm(target, { recursive: true, force: true }).catch(() => {});
+          continue;
+        }
+        await Promise.all(candidates.map(candidate => pruneExpired(candidate, target)));
+        return { ...record, directory: target, layer: join(target, LAYER_NAME) };
+      }
+      throw new AnnotationError('No writable annotation cache directory.', 500);
     },
   };
 }

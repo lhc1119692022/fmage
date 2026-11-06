@@ -241,8 +241,11 @@ floating toolbar, and save.
 Saving writes one transparent layer and nothing else — no copy of the image, no path in the
 conversation:
 
-- The layer lands in `<DSH_HOME>/fmage/cache/annotations/<id>/`, with a `meta.json` that records
-  the mode, the canvas, and the comments. Entries expire after an hour.
+- The layer lands in `<cache_dir>/annotations/<id>/` when the settings name a cache folder, and in
+  the system temp folder (`%TEMP%\fmage\annotations` on Windows) when they don't or that folder
+  cannot be written. A `meta.json` beside it records the mode, the canvas, and the comments.
+- An unused layer stops attaching and is deleted after an hour; a used one is deleted a day after
+  its request. Both the next save and the next `edit_image` sweep expired entries.
 - `edit_image` looks for the newest unused layer and attaches it by itself: `--markup` on a
   2.5/2.6 `openai-images` provider, or a local composite (`--flatten-markup`) on any other model.
   A used layer is retired; a failed request leaves it in place.

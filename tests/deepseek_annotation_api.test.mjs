@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
@@ -44,11 +44,22 @@ function crc32(buffer) {
 const dataUrl = () => `data:image/png;base64,${pngBytes().toString('base64')}`;
 const base = () => ({ mode: 'markup', layer: dataUrl(), width: 640, height: 480 });
 
-async function fixture(t) {
+async function fixture(t, config) {
   const root = await mkdtemp(join(tmpdir(), 'fmage-annotation-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  return { root, api: createAnnotationApi(root) };
+  if (config !== undefined) await writeFile(join(root, 'providers.json'), JSON.stringify(config), 'utf8');
+  const temp = join(root, 'tmp');
+  // Without a cache_dir, layers land in <temp>/fmage/annotations.
+  return { root, temp, store: join(temp, 'fmage', 'annotations'), api: createAnnotationApi(root, { temp }) };
 }
+
+async function rewriteMeta(directory, patch) {
+  const path = join(directory, 'meta.json');
+  const meta = JSON.parse(await readFile(path, 'utf8'));
+  await writeFile(path, JSON.stringify({ ...meta, ...patch }), 'utf8');
+}
+
+const hoursAgo = hours => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
 function routesFor(api) {
   const routes = new Map();
@@ -60,7 +71,7 @@ function routesFor(api) {
 }
 
 test('a save writes only the layer plus its metadata', async t => {
-  const { api, root } = await fixture(t);
+  const { api, store } = await fixture(t);
   const saved = await api.save({
     ...base(),
     comments: [{ id: 1, text: 'make this ear fold', x: 0.221, y: 0.26 }],
@@ -70,8 +81,8 @@ test('a save writes only the layer plus its metadata', async t => {
   assert.equal(saved.consumedAt, null);
   assert.equal(saved.mode, 'markup');
   assert.ok(saved.layer.endsWith('layer.png'));
-  assert.deepEqual(await readdir(join(root, 'cache', 'annotations', saved.id)), ['layer.png', 'meta.json']);
-  const meta = JSON.parse(await readFile(join(root, 'cache', 'annotations', saved.id, 'meta.json'), 'utf8'));
+  assert.deepEqual(await readdir(join(store, saved.id)), ['layer.png', 'meta.json']);
+  const meta = JSON.parse(await readFile(join(store, saved.id, 'meta.json'), 'utf8'));
   assert.equal(meta.comments[0].text, 'make this ear fold');
   assert.equal(meta.comments[0].x, 0.221);
   assert.equal(meta.width, 640);
@@ -130,7 +141,7 @@ test('the route answers JSON, maps errors to status codes and keeps no-store', a
   assert.equal(missing.status, 404);
   const badJson = await route.fetch(new Request('http://h' + ANNOTATION_ROUTE, { method: 'POST', body: 'nope' }));
   assert.equal(badJson.status, 400);
-  assert.deepEqual(await readdir(root), ['cache']);
+  assert.deepEqual(await readdir(root), ['tmp']);
 });
 
 test('two saves never share a directory', async t => {
@@ -148,21 +159,58 @@ test('a second save keeps the earlier layer intact', async t => {
   assert.deepEqual(await readFile(join(first.directory, 'layer.png')), pngBytes());
 });
 
-test('an entry older than the retention window is swept; fresh ones and strangers are not', async t => {
-  const { api, root } = await fixture(t);
+test('a configured cache_dir is used first, relative to providers.json', async t => {
+  const { api, root, temp } = await fixture(t, { cache_dir: 'my-cache' });
+  const saved = await api.save(base());
+  assert.equal(saved.directory, join(root, 'my-cache', 'annotations', saved.id));
+  assert.deepEqual(await readdir(temp).catch(() => []), []);
+  assert.equal((await api.read({ id: saved.id })).id, saved.id);
+});
+
+test('an absolute cache_dir is used as is', async t => {
+  const elsewhere = await mkdtemp(join(tmpdir(), 'fmage-cache-dir-'));
+  t.after(() => rm(elsewhere, { recursive: true, force: true }));
+  const { api } = await fixture(t, { cache_dir: elsewhere });
+  const saved = await api.save(base());
+  assert.equal(saved.directory, join(elsewhere, 'annotations', saved.id));
+});
+
+test('an empty or unusable cache_dir falls back to the temp directory', async t => {
+  for (const cacheDir of ['', '   ']) {
+    const { api, store } = await fixture(t, { cache_dir: cacheDir });
+    const saved = await api.save(base());
+    assert.equal(saved.directory, join(store, saved.id));
+  }
+  const { api, root, store } = await fixture(t, { cache_dir: 'blocked' });
+  await writeFile(join(root, 'blocked'), 'a file where the directory should be');
+  const saved = await api.save(base());
+  assert.equal(saved.directory, join(store, saved.id));
+  assert.equal((await api.read({ id: saved.id })).id, saved.id);
+});
+
+test('unused layers expire after an hour, used ones after a day; strangers are untouched', async t => {
+  const { api, store } = await fixture(t);
   const fresh = await api.save(base());
-  const stale = await api.save(base());
-  const stranger = join(root, 'cache', 'annotations', 'c'.repeat(16));
+  const unusedStale = await api.save(base());
+  const usedRecent = await api.save(base());
+  const usedStale = await api.save(base());
+  await rewriteMeta(unusedStale.directory, { createdAt: hoursAgo(2) });
+  await rewriteMeta(usedRecent.directory, { createdAt: hoursAgo(5), consumedAt: hoursAgo(4) });
+  await rewriteMeta(usedStale.directory, { createdAt: hoursAgo(30), consumedAt: hoursAgo(25) });
+  const stranger = join(store, 'c'.repeat(16));
   await mkdir(stranger, { recursive: true });
   await writeFile(join(stranger, 'notes.txt'), 'keep me');
-
-  const old = new Date(Date.now() - 3 * 60 * 60 * 1000);
-  await utimes(join(stale.directory, 'meta.json'), old, old);
+  const foreign = join(store, 'Not-An-Id');
+  await mkdir(foreign, { recursive: true });
+  await writeFile(join(foreign, 'meta.json'), '{}');
 
   await api.save(base());
 
-  const names = await readdir(join(root, 'cache', 'annotations'));
-  assert.ok(names.includes(fresh.id), 'the older-but-fresh entry survives');
-  assert.ok(!names.includes(stale.id), 'the expired entry is removed');
+  const names = await readdir(store);
+  assert.ok(names.includes(fresh.id), 'a fresh unused entry survives');
+  assert.ok(!names.includes(unusedStale.id), 'an unused entry past an hour is removed');
+  assert.ok(names.includes(usedRecent.id), 'a used entry is kept for a day');
+  assert.ok(!names.includes(usedStale.id), 'a used entry past a day is removed');
   assert.ok(names.includes('c'.repeat(16)), 'a directory without our meta file is untouched');
+  assert.ok(names.includes('Not-An-Id'), 'a directory not named like an id is untouched');
 });

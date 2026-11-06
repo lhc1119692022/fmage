@@ -16,13 +16,15 @@ SERVER_PATH = Path(__file__).resolve().parents[1] / "mcp" / "server.mjs"
 class AnnotationSession:
     """Runs the MCP server against a data home that already holds one layer."""
 
-    def __init__(self, model: str, transport: str = "openai-images") -> None:
+    def __init__(self, model: str, transport: str = "openai-images", cache_dir: bool = True) -> None:
         self.directory = tempfile.TemporaryDirectory()
         root = Path(self.directory.name)
+        self.temp = root / "tmp"
+        self.temp.mkdir()
         config = {
             "active_providers": ["test"],
             "output_dir": str(root / "outputs"),
-            "cache_dir": str(root / "cache"),
+            "cache_dir": str(root / "cache") if cache_dir else "",
             "providers": {
                 "test": {
                     "transport": transport,
@@ -39,6 +41,10 @@ class AnnotationSession:
             "FMAGE_CONFIG": str(root / "providers.json"),
             "FMAGE_DATA_HOME": str(root),
             "FMAGE_PYTHON": sys.executable,
+            # os.tmpdir() reads TEMP/TMP on Windows and TMPDIR elsewhere.
+            "TEMP": str(self.temp),
+            "TMP": str(self.temp),
+            "TMPDIR": str(self.temp),
         }
         self.process = subprocess.Popen(
             ["node", str(SERVER_PATH)],
@@ -51,8 +57,8 @@ class AnnotationSession:
         )
         self.next_id = 1
 
-    def add_layer(self, mode: str, size: tuple[int, int] = (64, 64)) -> Path:
-        directory = self.data_home / "cache" / "annotations" / "abc123abc123abc1"
+    def add_layer(self, mode: str, size: tuple[int, int] = (64, 64), root: Path | None = None) -> Path:
+        directory = (root or self.data_home / "cache" / "annotations") / "abc123abc123abc1"
         directory.mkdir(parents=True, exist_ok=True)
         layer = Image.new("RGBA", size, (0, 0, 0, 0))
         layer.putpixel((8, 8), (220, 30, 30, 255))
@@ -114,6 +120,23 @@ class AnnotationAutoloadTests(unittest.TestCase):
         payload = json.dumps(response)
         self.assertNotIn("error", response, payload)
         self.assertFalse(response["result"].get("isError"), payload)
+        content = response["result"]["structuredContent"]
+        self.assertEqual(content["annotation_applied"], "markup")
+        self.assertEqual(Path(content["markup"]).resolve(), layer.resolve())
+
+    def test_without_a_cache_dir_the_layer_is_read_from_the_temp_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = AnnotationSession("gpt-image-2.6", cache_dir=False)
+            self.addCleanup(session.close)
+            layer = session.add_layer("markup", root=session.temp / "fmage" / "annotations")
+            reference = Path(directory) / "reference.png"
+            Image.new("RGB", (64, 64), (40, 70, 100)).save(reference)
+            response = session.call("tools/call", {
+                "name": "edit_image",
+                "arguments": {"prompt": "recolor the marked area", "images": [str(reference)], "dry_run": True},
+            })
+        payload = json.dumps(response)
+        self.assertNotIn("error", response, payload)
         content = response["result"]["structuredContent"]
         self.assertEqual(content["annotation_applied"], "markup")
         self.assertEqual(Path(content["markup"]).resolve(), layer.resolve())

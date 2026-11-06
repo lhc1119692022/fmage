@@ -32,8 +32,10 @@ Host 使用已存条目或 `api_key_env` 指向的环境变量，且不会把密
 
 同一组路由里还有 `GET` / `POST /api/fmage.annotation`，服务侧栏标注工作台：保存时只接收一张透明
 标注层和它的元数据（模式、画布尺寸、评论），校验 PNG 签名后按 `<id>` 写 `layer.png` 与 `meta.json`。
-它落在 `<DSH_HOME>/fmage/cache/annotations/`——这是缓存而不是长期数据：未被使用的条目一小时后由下一次
-保存顺带清理，路径全部服务端生成。基准图不复制，仍是输入框里的那张附件。
+它优先落在设置里「缓存目录」（`providers.json` 的 `cache_dir`，相对路径按该文件所在目录解析）下的
+`annotations/`；没有设置，或该目录无法写入时，落在系统临时目录 `%TEMP%\fmage\annotations/`。
+MCP 两处都读。这是缓存而不是长期数据：未使用的层一小时后失效并删除，用过的层保留一天便于排查；
+下一次保存和下一次 `edit_image` 都会顺带清理，路径全部服务端生成。基准图不复制，仍是输入框里的那张附件。
 
 MCP 侧在 `edit_image` 发请求前取“最新且未被使用”的那一层自行附加：`openai-images` + 2.5/2.6 走
 `--markup`，其它模型走 `--flatten-markup`（本地把层合成进第一张图再发）。因此对话里不再出现任何
