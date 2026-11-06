@@ -815,6 +815,16 @@ window.__ModuleLoader__.load({
     const annListeners = new Set();
     const annNotify = () => { annListeners.forEach(listener => listener()); };
     let annText = key => key;
+    // The user's last 分层/合成 choice, kept across panels and restarts.
+    // Flatten until the user picks 分层; a model without the markup channel
+    // shows 合成 but keeps the stored choice for when it is back.
+    const ANN_MODE_KEY = 'dsh-fmage/annotation-mode';
+    function storedAnnMode() {
+      try { return window.localStorage.getItem(ANN_MODE_KEY) === 'markup' ? 'markup' : 'flatten'; } catch { return 'flatten'; }
+    }
+    function storeAnnMode(value) {
+      try { window.localStorage.setItem(ANN_MODE_KEY, value); } catch { /* storage unavailable */ }
+    }
 
     function isMarkupModel(model) { return ANN_MODEL.test(String(model || '')); }
 
@@ -1207,9 +1217,9 @@ window.__ModuleLoader__.load({
       const [palette, setPalette] = useState(false);
       const [stroke, setStroke] = useState(6);
       const [sliding, setSliding] = useState(false);
-      const [mode, setMode] = useState('flatten');
+      const [preferredMode, setPreferredMode] = useState(storedAnnMode);
       const [capable, setCapable] = useState(false);
-      const [manualMode, setManualMode] = useState(false);
+      const mode = capable && preferredMode === 'markup' ? 'markup' : 'flatten';
       const [busy, setBusy] = useState(false);
       const [toast, setToast] = useState(null);
       const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
@@ -1288,13 +1298,12 @@ window.__ModuleLoader__.load({
               || providers.find(item => item.enabled) || null;
             const supported = Boolean(active) && active.transport === 'openai-images' && isMarkupModel(active.model);
             setCapable(supported);
-            setMode(current => (manualMode ? (supported ? current : 'flatten') : supported ? 'markup' : 'flatten'));
           }).catch(() => { /* config unavailable: keep the current mode */ });
         };
         sync();
         window.addEventListener('focus', sync);
         return () => { alive = false; window.removeEventListener('focus', sync); };
-      }, [manualMode]);
+      }, []);
 
       // Stage size drives the fit scale.
       useEffect(() => {
@@ -1776,10 +1785,26 @@ window.__ModuleLoader__.load({
         return `图像 ${(source.draftIndex ?? 0) + 1}：\n${lines.join('\n')}\n`;
       };
 
+      // Comments go into the prompt at the caret, else to the clipboard.
+      const deliverComments = async kept => {
+        const text = commentText(kept);
+        if (!text) { notify(t('annExportedSilent')); return; }
+        let inserted = false;
+        if (inputActions) {
+          try { inserted = inputActions.insertText(text, inputActions.captureInsertion()); } catch { inserted = false; }
+        }
+        if (!inserted) {
+          try { await navigator.clipboard.writeText(text); } catch { /* no clipboard */ }
+        }
+        notify(inserted ? t('annExported') : t('annExportedCopy'));
+      };
+
       const exportAnnotation = async () => {
         if (!source || busy) return;
         if (source.draftIndex === null) { notify(t('annNeedsComposerImage'), true); return; }
-        if (mode === 'markup' && source.draftIndex !== 0) {
+        // 分层/合成 applies to drawn marks only; comments travel as prompt text.
+        const marked = shapes.some(shape => shape.type !== 'erase');
+        if (marked && mode === 'markup' && source.draftIndex !== 0) {
           notify(t('annMustBeFirst', { n: String(source.draftIndex + 1) }), true);
           return;
         }
@@ -1799,10 +1824,22 @@ window.__ModuleLoader__.load({
           commitComment();
         }
         const kept = normalizedComments(list);
-        if (!shapes.some(shape => shape.type !== 'erase') && !kept.length) { notify(t('annNothing'), true); return; }
+        if (!marked && !kept.length) { notify(t('annNothing'), true); return; }
         setBusy(true);
         notify('');
         try {
+          if (!marked) {
+            // Comments only: no layer file. A layer saved earlier for this
+            // upload would still ride the next edit, so withdraw it.
+            const earlier = annSaved.get(source.url);
+            if (earlier) {
+              await request(ANN_ROUTE, { method: 'POST', body: JSON.stringify({ action: 'withdraw', id: earlier.id }) });
+              annSaved.delete(source.url);
+              annNotify();
+            }
+            await deliverComments(kept);
+            return;
+          }
           const layer = document.createElement('canvas');
           layer.width = source.width;
           layer.height = source.height;
@@ -1825,19 +1862,7 @@ window.__ModuleLoader__.load({
           });
           watchUploads();
           annNotify();
-          const text = commentText(kept);
-          if (!text) {
-            notify(t('annExportedSilent'));
-          } else {
-            let inserted = false;
-            if (inputActions) {
-              try { inserted = inputActions.insertText(text, inputActions.captureInsertion()); } catch { inserted = false; }
-            }
-            if (!inserted) {
-              try { await navigator.clipboard.writeText(text); } catch { /* no clipboard */ }
-            }
-            notify(inserted ? t('annExported') : t('annExportedCopy'));
-          }
+          await deliverComments(kept);
         } catch (failure) {
           notify(`${t('annFailed')}: ${failure && failure.message ? failure.message : ''}`, true);
         } finally {
@@ -1952,20 +1977,21 @@ window.__ModuleLoader__.load({
         textButton('comment', t('annAddComment'), { onClick: () => { setMenu('comment'); setSelected(null); } }),
         h('button', {
           type: 'button', className: 'fmg-ann-tb fmg-ann-mode', title: modeTitle,
-          'aria-label': `${t('annModeMarkup')}/${t('annModeFlatten')}`,
+          'aria-label': `${t('annModeFlatten')}/${t('annModeMarkup')}`,
           // Not `disabled`: a disabled button shows no tooltip, and the user
           // should learn why 分层 is unavailable.
           'aria-disabled': !capable,
           onClick: () => {
             if (!capable) { notify(t('annModeUnsupported'), true); return; }
-            setManualMode(true);
-            setMode(current => (current === 'markup' ? 'flatten' : 'markup'));
+            const next = mode === 'markup' ? 'flatten' : 'markup';
+            setPreferredMode(next);
+            storeAnnMode(next);
           },
         },
           annGlyph(ANN_ICONS.layers),
-          h('span', { className: mode === 'markup' ? 'is-on' : 'is-off' }, t('annModeMarkup')),
+          h('span', { className: mode === 'flatten' ? 'is-on' : 'is-off' }, t('annModeFlatten')),
           h('span', { className: 'is-slash', 'aria-hidden': true }, '/'),
-          h('span', { className: mode === 'flatten' ? 'is-on' : 'is-off' }, t('annModeFlatten'))),
+          h('span', { className: mode === 'markup' ? 'is-on' : 'is-off' }, t('annModeMarkup'))),
         h('span', { className: 'fmg-ann-sep', 'aria-hidden': true }),
         textButton('save', busy ? t('annExporting') : t('annExport'), {
           disabled: busy, onClick: () => { void exportAnnotation(); },
