@@ -244,18 +244,30 @@ conversation:
 - The layer lands in `<cache_dir>/annotations/<id>/` when the settings name a cache folder, and in
   the system temp folder (`%TEMP%\fmage\annotations` on Windows) when they don't or that folder
   cannot be written. A `meta.json` beside it records the mode, the canvas, and the comments.
-- An unused layer stops attaching and is deleted after an hour; a used one is deleted a day after
+- An unused layer stops attaching and is deleted after a day; a used one is deleted a day after
   its request. Both the next save and the next `edit_image` sweep expired entries.
-- `edit_image` looks for the newest unused layer and attaches it by itself: `--markup` on a
+- `edit_image` looks for the newest unused layer drawn on its first input image (by SHA-256, or
+  by a coarse luma fingerprint for a resized copy) and attaches it by itself: `--markup` on a
   2.5/2.6 `openai-images` provider, or a local composite (`--flatten-markup`) on any other model.
-  A used layer is retired; a failed request leaves it in place.
+  A layer saved for another picture is left alone. A used layer is retired; a failed request
+  leaves it in place.
 - Comments are inserted into the composer as ordinary prose in the shape the user would type,
   `图像 1： 1. (x: 22.1%, y: 26%) …`, so they reach the prompt without a machine path.
 - The annotated image has to be the first attachment, because that is the image the API treats as
   the edit target; the panel refuses to save a markup layer otherwise and points at "flatten".
 
 Nothing is added to the draft except that comment block, and the panel never edits an attachment
-in place.
+in place. A flatten composite over the host's 50 MiB per-image limit is saved as WebP (quality
+100), then scaled down if it is still too large.
+
+The conversation hands tools a normalized copy of each attachment (at most 2048×2048 and 4 MiB).
+On `openai-images` providers `edit_image` sends the original instead: the sidebar uploads every
+composer picture to `<cache_dir>/originals/` (or `%TEMP%\fmage\originals`), and the edit swaps a
+host copy for the stored original only when its pixels match block by block. The original is
+oriented, converted to 8-bit sRGB, and kept within 16,777,216 pixels and 50 MiB. Any miss sends the
+copy as before; the result's `original_restored` field records what was sent. Stored originals are
+dropped after 7 days unused or when they pass 2 GB. Pictures already in a conversation before the
+Desktop app restarts with this build have no stored original.
 
 ### SVG and GIF output
 
