@@ -35,6 +35,8 @@ RUNTIME_SCRIPTS = (
     "openai_images_transport.py", "openai_images_async_transport.py",
     # Matches sidebar annotations to a host-normalized copy of the upload.
     "image_fingerprint.py",
+    # Swaps that copy for the original the composer uploaded.
+    "original_restore.py",
 )
 CONFIG_FILES = ("providers.example.json", "workflows.example.json", "midjourney-v8.2-contract.json", "banana-model-capabilities.json", "gpt-image-model-families.json")
 # Harness checks dsh peers with includePrerelease=True. Keep the oldest
@@ -135,7 +137,7 @@ def payload() -> dict[str, bytes]:
         "peerDependencies": {"@deepseek-ai/dsh-skill": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/dsh-mcp-client": DEEPSEEK_PEER_VERSIONS, "@deepseek-ai/cordis": "~4.0.4"},
     })
     files["cordis.patch.yml"] = b'- insert:\n    - id: fmage\n      name: dsh-fmage\n'
-    for name in ("index.mjs", "config-api.mjs", "annotation-api.mjs", "client.js"):
+    for name in ("index.mjs", "config-api.mjs", "annotation-api.mjs", "originals-api.mjs", "client.js"):
         files[name] = (ROOT / "adapters/deepseek" / name).read_bytes()
     files["catalog.json"] = json_bytes(catalog)
     files["mcp/launch.mjs"] = (ROOT / "adapters/launch.mjs").read_bytes()

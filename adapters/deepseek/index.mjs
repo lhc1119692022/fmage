@@ -9,6 +9,7 @@ import * as mcpClient from '@deepseek-ai/dsh-mcp-client';
 
 import { createConfigApi, registerConfigRoutes } from './config-api.mjs';
 import { createAnnotationApi, registerAnnotationRoutes } from './annotation-api.mjs';
+import { createOriginalsApi, registerOriginalRoutes } from './originals-api.mjs';
 
 export const name = 'fmage';
 export const inject = ['skills', 'tools'];
@@ -56,6 +57,7 @@ export async function apply(ctx) {
   ctx.inject(['connection'], scope => {
     registerConfigRoutes(scope, createConfigApi(configPath));
     registerAnnotationRoutes(scope, createAnnotationApi(dataHome));
+    registerOriginalRoutes(scope, createOriginalsApi(dataHome));
   });
   const { version, sha256 } = JSON.parse(readFileSync(join(root, '.fmage-build.json'), 'utf8'));
   const receipt = join(root, '.fmage-runtime.json');

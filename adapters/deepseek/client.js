@@ -947,6 +947,69 @@ window.__ModuleLoader__.load({
       check();
     }
 
+    // The conversation keeps a normalized copy of each attached picture (at
+    // most 2048x2048) and hands tools that copy. The composer still holds the
+    // file the user picked, so its bytes go to the Host as soon as the picture
+    // appears; edit_image recognizes the copy and sends this original instead.
+    // Read-only toward the composer: attachments, their order and the draft
+    // are never touched, and every failure is silent (the copy still goes).
+    const ORIG_ROUTE = 'api/fmage.original';
+    const ORIG_MAX_BYTES = 64 * 1024 * 1024;
+    const origSeen = new Set();
+    const origDone = new Set();
+    let origQueue = Promise.resolve();
+
+    function hexDigest(buffer) {
+      return Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function collectOriginal(url) {
+      if (!window.crypto || !window.crypto.subtle) return;
+      const blob = await (await fetch(url)).blob();
+      if (!blob.size || blob.size > ORIG_MAX_BYTES) return;
+      const sha256 = hexDigest(await window.crypto.subtle.digest('SHA-256', await blob.arrayBuffer()));
+      if (origDone.has(sha256)) return;
+      const known = await fetch(`${ORIG_ROUTE}?sha256=${sha256}`, { cache: 'no-store' });
+      if (known.ok) {
+        const state = await known.json();
+        if (state && (state.status === 'ready' || state.status === 'uploading')) { origDone.add(sha256); return; }
+      }
+      const image = await loadImageElement(url);
+      const width = image.naturalWidth;
+      const height = image.naturalHeight;
+      const grid = annFingerprint(image);
+      if (!width || !height || !grid) return;
+      const query = new URLSearchParams({ sha256, width: String(width), height: String(height), fingerprint: grid.join(',') });
+      const response = await fetch(`${ORIG_ROUTE}?${query}`, {
+        method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/octet-stream' }, body: blob,
+      });
+      if (response.ok) origDone.add(sha256);
+    }
+
+    /** Uploads each new composer picture once, one at a time. Returns the stop function. */
+    function watchOriginals() {
+      if (typeof MutationObserver !== 'function' || !document.body) return () => {};
+      let frame = 0;
+      const check = () => {
+        frame = 0;
+        const live = new Set(composerImages().map(item => item.url));
+        for (const url of live) {
+          if (origSeen.has(url)) continue;
+          origSeen.add(url);
+          origQueue = origQueue.then(() => collectOriginal(url)).catch(() => { /* the copy still goes */ });
+        }
+        for (const url of Array.from(origSeen)) if (!live.has(url)) origSeen.delete(url);
+      };
+      const schedule = () => { if (!frame) frame = window.requestAnimationFrame(check); };
+      const observer = new MutationObserver(schedule);
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+      check();
+      return () => {
+        observer.disconnect();
+        if (frame) window.cancelAnimationFrame(frame);
+      };
+    }
+
     // Flatten saves swap the composer image for the marked copy. Keyed by the
     // copy's object URL; holds what 恢复原图 needs. The host's plugin
     // removeAttachment only takes an id off the draft and leaves the browser
@@ -1004,7 +1067,21 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** The source at its own size with the marks painted on, in the source's format where it can. */
+    // The host admits at most 50 MiB per image; a larger copy would be refused.
+    const COMPOSITE_MAX_BYTES = 50 * 1024 * 1024;
+    // Chrome encodes WebP only up to this many pixels per side.
+    const WEBP_MAX_SIDE = 16383;
+
+    function canvasBlob(canvas, type, quality) {
+      return new Promise(resolve => { canvas.toBlob(resolve, type, quality); });
+    }
+
+    /**
+     * The source with the marks painted on, in the source's format where it
+     * fits. A copy over the host's 50 MiB per-image limit is re-encoded as
+     * WebP at quality 100; one still too large is scaled down, keeping its
+     * aspect ratio, until it fits.
+     */
     async function compositeFile(source, shapes) {
       const original = await (await fetch(source.url)).blob();
       const image = await loadImageElement(source.url);
@@ -1018,12 +1095,42 @@ window.__ModuleLoader__.load({
       const context = canvas.getContext('2d');
       context.drawImage(image, 0, 0, source.width, source.height);
       context.drawImage(layer, 0, 0);
-      const jpeg = original.type === 'image/jpeg';
-      const type = jpeg ? 'image/jpeg' : 'image/png';
-      const blob = await new Promise(resolve => { canvas.toBlob(resolve, type, jpeg ? 0.95 : undefined); });
-      if (!blob) throw new Error('composite encode failed');
       const stem = String(source.name || '').replace(/\.[^./\\]+$/, '') || 'image';
-      return new File([blob], `${stem}-annotated.${jpeg ? 'jpg' : 'png'}`, { type, lastModified: Date.now() });
+      const fileOf = (blob, extension) => new File([blob], `${stem}-annotated.${extension}`, { type: blob.type, lastModified: Date.now() });
+      const jpeg = original.type === 'image/jpeg';
+      const native = await canvasBlob(canvas, jpeg ? 'image/jpeg' : 'image/png', jpeg ? 0.95 : undefined);
+      if (native && native.size <= COMPOSITE_MAX_BYTES) return fileOf(native, jpeg ? 'jpg' : 'png');
+      // A browser that cannot encode WebP at this size hands back PNG instead,
+      // so only a blob that really is WebP counts.
+      const webpOf = async target => {
+        const blob = await canvasBlob(target, 'image/webp', 1);
+        return blob && blob.type === 'image/webp' ? blob : null;
+      };
+      let blob = Math.max(canvas.width, canvas.height) <= WEBP_MAX_SIDE ? await webpOf(canvas) : null;
+      if (blob && blob.size <= COMPOSITE_MAX_BYTES) return fileOf(blob, 'webp');
+      let scale = Math.min(1, WEBP_MAX_SIDE / Math.max(canvas.width, canvas.height));
+      // The first try sizes from the WebP just measured, or else only from the
+      // side cap; a PNG's size says little about how large the WebP will be.
+      let measured = blob ? blob.size : 0;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        // Bytes grow roughly with area, so shrink each side by the square
+        // root of the overshoot, with a margin so the next try usually fits.
+        if (measured > COMPOSITE_MAX_BYTES) scale *= Math.sqrt(COMPOSITE_MAX_BYTES / measured) * 0.95;
+        else if (attempt > 0) scale *= 0.85;
+        const width = Math.max(1, Math.round(canvas.width * scale));
+        const height = Math.max(1, Math.round(canvas.height * scale));
+        const smaller = document.createElement('canvas');
+        smaller.width = width;
+        smaller.height = height;
+        const small = smaller.getContext('2d');
+        small.imageSmoothingEnabled = true;
+        small.imageSmoothingQuality = 'high';
+        small.drawImage(canvas, 0, 0, width, height);
+        blob = await webpOf(smaller);
+        if (blob && blob.size <= COMPOSITE_MAX_BYTES) return fileOf(blob, 'webp');
+        measured = blob ? blob.size : 0;
+      }
+      throw new Error('composite encode failed');
     }
 
     function loadImageElement(url) {
@@ -2646,6 +2753,8 @@ window.__ModuleLoader__.load({
           return () => style.remove();
         }, 'fmage: settings styles');
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'fmage: settings dictionaries');
+        // From load on, not only after a first save: any picture may be edited.
+        ctx.effect(() => watchOriginals(), 'fmage: original sidecar');
         const t = ctx.locale.bind(NS);
         pillText = t;
         annText = t;

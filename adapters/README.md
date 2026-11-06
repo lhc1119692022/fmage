@@ -12,9 +12,9 @@ Codex 使用原生 `.codex-plugin/plugin.json`；DeepSeek Desktop 由 `scripts/h
 
 ## DeepSeek 设置页
 
-`adapters/deepseek/` 包含四部分：`index.mjs`（Host 半：技能、MCP、运行心跳与配置路由）、
+`adapters/deepseek/` 包含五部分：`index.mjs`（Host 半：技能、MCP、运行心跳与配置路由）、
 `config-api.mjs`（`providers.json` 的读写、校验、掩码、备份与原子替换）、
-`annotation-api.mjs`（标注工作台的文件落盘与回读）和 `client.js`
+`annotation-api.mjs`（标注工作台的文件落盘与回读）、`originals-api.mjs`（输入框原图的旁路缓存）和 `client.js`
 （浏览器半，经 `window.__ModuleLoader__.load` 注册，向 `settings.section` 插槽贡献「Fmage 生图」页，
 向 `conversation.input.right` 插槽贡献输入栏生图胶囊，
 并在右侧栏「开始」页注册一张「Fmage 工作台」卡片、向 `sidebar.right.pane.tab` 注册其正文）。胶囊与设置页共用同一个读取、摘要校验和写入路径，
@@ -34,7 +34,7 @@ Host 使用已存条目或 `api_key_env` 指向的环境变量，且不会把密
 标注层和它的元数据（模式、画布尺寸、评论），校验 PNG 签名后按 `<id>` 写 `layer.png` 与 `meta.json`。
 它优先落在设置里「缓存目录」（`providers.json` 的 `cache_dir`，相对路径按该文件所在目录解析）下的
 `annotations/`；没有设置，或该目录无法写入时，落在系统临时目录 `%TEMP%\fmage\annotations/`。
-MCP 两处都读。这是缓存而不是长期数据：未使用的层一小时后失效并删除，用过的层保留一天便于排查；
+MCP 两处都读。这是缓存而不是长期数据：未使用的层一天后失效并删除，用过的层保留一天便于排查；
 下一次保存和下一次 `edit_image` 都会顺带清理，路径全部服务端生成。基准图不复制，仍是输入框里的那张附件。
 
 MCP 侧在 `edit_image` 发请求前取“最新且未被使用”的那一层自行附加：`openai-images` + 2.5/2.6 走
@@ -45,6 +45,29 @@ MCP 侧在 `edit_image` 发请求前取“最新且未被使用”的那一层�
 层按原图尺寸绘制，而对话交给模型的往往是宿主规范化后的副本（例如 2368×1776 → 2364×1773）。
 两者比例一致（每边误差不超过 1 像素的取整）时，transport 在运行目录里把层按预乘 alpha 重采样到第一张
 输入图的尺寸再发送或合成；比例不同仍报错。
+
+### 原图旁路
+
+对话交给工具的是宿主规范化后的副本（不超过 2048×2048、4 MiB，带元数据或超限时重新编码），
+输入框里却还是用户选的文件。浏览器半在插件加载后就开始观察输入框：每张图（包括「合成」保存后换进去的
+标注图）一出现，就读出字节、算 SHA-256 与 16×16 亮度指纹，以 `application/octet-stream` 流式
+`POST /api/fmage.original` 上传（上限 64 MiB；Host 缓冲路由只收 16 MiB，所以这条是 streaming 路由）。
+已存的图只发一次 `GET` 查询。上传失败不提示也不重试，附件本身、顺序和对话内容都不变。
+
+存放在 `<cache_dir>/originals/<sha256>/`，没有或不可写时在 `%TEMP%\fmage\originals/`，每张一个目录：
+`original.<ext>` 加 `meta.json`（尺寸、格式、指纹、状态与时间）。上传中写 `status: "uploading"`，
+完成后原子换成 `ready`。每次上传都会清理：7 天没在输入框出现、也没被编辑用过的删除；总量超过 2 GB
+时从最久未用的开始删；1 小时内被编辑用过的不删；10 分钟还没传完的视为中断。
+
+`edit_image` 只在 `openai-images` 渠道上替换，且只看路径在宿主附件库
+（`attachments/v1/objects/<xx>/<sha256>`）里的输入。对每张这样的副本，先按指纹与比例挑出候选（像素不少于副本）；
+候选还在上传时最多等 5 秒。`scripts/original_restore.py` 把候选按 EXIF 摆正、转 8 位 sRGB、缩到副本尺寸，
+逐块比较，误差在 JPEG/WebP 重编码范围内才算同一张图。命中后把原图复制进本次运行的临时目录发送：
+无需改动时就是原文件，否则重新编码；超过 16777216 像素（`--markup` 对第一张图的上限）或 50 MiB 时按比例缩小。
+任何一步不成立都静默发送副本。结果与清单里的 `original_restored` 记录发出的尺寸和副本尺寸；
+有等待中的标注层却没匹配上时记 `annotation_waiting_not_matched`。只是状态字段，不进提示词。
+
+「合成」保存的标注图超过宿主 50 MiB 单图上限时，改用 WebP（质量 100）；仍超就按比例缩小到放得下。
 
 工作台顶部一条浮动栏：「标注」进入画笔、箭头、方框、椭圆、文字和橡皮（粗细滑块只在这里出现），
 「添加评论」在图上落编号评论，「分层 / 合成」切换上述两种发送方式（非 2.5/2.6 模型只能合成），「保存」写出图层。

@@ -188,13 +188,15 @@ test('an empty or unusable cache_dir falls back to the temp directory', async t 
   assert.equal((await api.read({ id: saved.id })).id, saved.id);
 });
 
-test('unused layers expire after an hour, used ones after a day; strangers are untouched', async t => {
+test('unused and used layers both expire after a day; strangers are untouched', async t => {
   const { api, store } = await fixture(t);
   const fresh = await api.save(base());
+  const unusedHours = await api.save(base());
   const unusedStale = await api.save(base());
   const usedRecent = await api.save(base());
   const usedStale = await api.save(base());
-  await rewriteMeta(unusedStale.directory, { createdAt: hoursAgo(2) });
+  await rewriteMeta(unusedHours.directory, { createdAt: hoursAgo(2) });
+  await rewriteMeta(unusedStale.directory, { createdAt: hoursAgo(25) });
   await rewriteMeta(usedRecent.directory, { createdAt: hoursAgo(5), consumedAt: hoursAgo(4) });
   await rewriteMeta(usedStale.directory, { createdAt: hoursAgo(30), consumedAt: hoursAgo(25) });
   const stranger = join(store, 'c'.repeat(16));
@@ -208,7 +210,8 @@ test('unused layers expire after an hour, used ones after a day; strangers are u
 
   const names = await readdir(store);
   assert.ok(names.includes(fresh.id), 'a fresh unused entry survives');
-  assert.ok(!names.includes(unusedStale.id), 'an unused entry past an hour is removed');
+  assert.ok(names.includes(unusedHours.id), 'an unused entry a few hours old still waits');
+  assert.ok(!names.includes(unusedStale.id), 'an unused entry past a day is removed');
   assert.ok(names.includes(usedRecent.id), 'a used entry is kept for a day');
   assert.ok(!names.includes(usedStale.id), 'a used entry past a day is removed');
   assert.ok(names.includes('c'.repeat(16)), 'a directory without our meta file is untouched');

@@ -29,10 +29,10 @@ const MAX_LAYER_BYTES = 32 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 40 * 1024 * 1024;
 const META_NAME = 'meta.json';
 const LAYER_NAME = 'layer.png';
-// A layer is only meaningful for the edit the user is about to ask for. An
-// hour is long enough to write a prompt and short enough that a forgotten
-// layer cannot attach itself to an unrelated request later.
-export const UNUSED_TTL_MS = 60 * 60 * 1000;
+// A layer waits a day for its edit, so a slow upload, a long prompt or a
+// break does not lose the marks. It binds to its picture by sha256 and
+// fingerprint, so a waiting layer cannot attach itself to another picture.
+export const UNUSED_TTL_MS = 24 * 60 * 60 * 1000;
 // A used layer stays a day so the run that sent it can still be inspected.
 export const USED_RETENTION_MS = 24 * 60 * 60 * 1000;
 
@@ -180,7 +180,7 @@ export async function annotationDirectories(configPath, temp = tmpdir()) {
 }
 
 /**
- * Whether an entry is past its retention: an unused layer an hour after it
+ * Whether an entry is past its retention: an unused layer a day after it
  * was saved, a used one a day after its request. Timestamps come from the
  * meta file; one that cannot be read falls back to the file's age.
  */

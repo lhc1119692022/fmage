@@ -60,7 +60,8 @@ const TRANSPORT_OPENAI_IMAGES = "openai-images";
 // when the user set a cache directory, else <os temp>/fmage/annotations. Both
 // are read, because a save falls back to temp when cache_dir is unwritable.
 const ANNOTATION_DIR_NAME = "annotations";
-const ANNOTATION_TTL_MS = 60 * 60 * 1000;
+// Unused layers wait a day, like adapters/deepseek/annotation-api.mjs.
+const ANNOTATION_TTL_MS = 24 * 60 * 60 * 1000;
 const ANNOTATION_USED_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ANNOTATION_ID_PATTERN = /^[a-z0-9]{8,40}$/;
 // A layer binds to the picture it was drawn on: by the SHA-256 of the file the
@@ -71,6 +72,22 @@ const ANNOTATION_FINGERPRINT_SCRIPT = join(PLUGIN_ROOT, "scripts", "image_finger
 // 1 and the browser's grid matches PIL's within 0.5; distinct photos measure 20+.
 const ANNOTATION_FINGERPRINT_TOLERANCE = 3;
 const ANNOTATION_ASPECT_TOLERANCE = 0.02;
+// Originals the Desktop composer uploaded (adapters/deepseek/originals-api.mjs),
+// at <cache_dir>/originals or <os temp>/fmage/originals like the layers. The
+// conversation hands tools a normalized copy of each attachment (at most
+// 2048x2048, re-encoded); an edit recognizes that copy and sends the original.
+const ORIGINAL_DIR_NAME = "originals";
+const ORIGINAL_RESTORE_SCRIPT = join(PLUGIN_ROOT, "scripts", "original_restore.py");
+// Only files in the host's attachment store are copies worth replacing.
+const HOST_ATTACHMENT_PATTERN = /[\\/]attachments[\\/]v1[\\/]objects[\\/][0-9a-f]{2}[\\/][0-9a-f]{64}$/i;
+const ORIGINAL_SHA256_PATTERN = /^[a-f0-9]{64}$/;
+// An upload still arriving when the edit starts is waited for this long.
+const ORIGINAL_UPLOAD_WAIT_MS = 5000;
+const ORIGINAL_STALE_UPLOAD_MS = 10 * 60 * 1000;
+// The markup channel takes a first image of at most 16777216 pixels, and the
+// Images API at most 50 MiB per input; a larger original is scaled to fit.
+const ORIGINAL_MAX_PIXELS = 16_777_216;
+const ORIGINAL_MAX_BYTES = 50 * 1024 * 1024;
 const workflowService = createWorkflowService(CONFIG_PATH);
 const TRANSPORT_GEMINI_GENERATE_CONTENT = "gemini-generate-content";
 const TRANSPORT_MIDJOURNEY = "midjourney";
@@ -955,13 +972,15 @@ function asyncImageArguments(args, promptFile, provider) {
   appendOption(argv, "--output-format", args.output_format ?? "png");
   appendOption(argv, "--output-compression", args.output_compression);
   appendSpecialFormatArguments(argv, args, provider);
-  appendOption(
-    argv,
-    "--response-format",
-    nonEmptyString(args.response_format) ||
-      provider.raw.response_format ||
-      ASYNC_DEFAULT_RESPONSE_FORMAT,
-  );
+  if (!isGptImageProvider(provider)) {
+    appendOption(
+      argv,
+      "--response-format",
+      nonEmptyString(args.response_format) ||
+        provider.raw.response_format ||
+        ASYNC_DEFAULT_RESPONSE_FORMAT,
+    );
+  }
   appendOption(argv, "--output-dir", outputDir);
   appendOption(argv, "--timeout", timeoutSeconds(args.timeout, provider.raw.timeout));
   appendOption(argv, "--pending-total-timeout", timeoutSeconds(args.timeout, provider.raw.timeout, args._pending_total_timeout));
@@ -1083,6 +1102,11 @@ function imageComplexitySetting(config) {
   return value;
 }
 
+function isGptImageProvider(provider) {
+  return provider?.transport === TRANSPORT_OPENAI_IMAGES &&
+    GPT_IMAGE_MODEL_PATTERNS["gpt-image"].test(nonEmptyString(provider?.model) || "");
+}
+
 function isImage26Provider(provider) {
   return provider?.transport === TRANSPORT_OPENAI_IMAGES &&
     GPT_IMAGE_MODEL_PATTERNS["gpt-image-2.6"].test(nonEmptyString(provider?.model) || "");
@@ -1103,9 +1127,7 @@ function appendSpecialFormatArguments(argv, args, provider) {
 }
 
 function defaultQualityForProvider(provider) {
-  return provider?.transport === TRANSPORT_OPENAI_IMAGES &&
-    GPT_IMAGE_MODEL_PATTERNS["gpt-image"].test(nonEmptyString(provider?.model) || "")
-    ? "high" : "medium";
+  return isGptImageProvider(provider) ? "high" : "medium";
 }
 
 const RESOLUTION_TOKEN_PATTERN = String.raw`(?:\b\d+(?:\.\d+)?\s*k\b|\b\d{3,5}\s*[x×]\s*\d{3,5}\b)`;
@@ -1283,11 +1305,15 @@ function bananaModelCapability(provider) {
   return { canonicalModel, ...capability };
 }
 
-function annotationDirectories() {
-  const fallback = join(tmpdir(), "fmage", ANNOTATION_DIR_NAME);
+function sidebarCacheDirectories(name) {
+  const fallback = join(tmpdir(), "fmage", name);
   const configured = nonEmptyString(readConfigForPaths()?.cache_dir);
-  const preferred = configured ? join(resolve(configBaseDir(), configured), ANNOTATION_DIR_NAME) : null;
+  const preferred = configured ? join(resolve(configBaseDir(), configured), name) : null;
   return preferred && resolve(preferred) !== resolve(fallback) ? [preferred, fallback] : [fallback];
+}
+
+function annotationDirectories() {
+  return sidebarCacheDirectories(ANNOTATION_DIR_NAME);
 }
 
 /** Unused layers inside their TTL, newest first; expired entries are removed on the way. */
@@ -1312,7 +1338,7 @@ function waitingAnnotations() {
       }
       const consumedAt = Date.parse(meta.consumedAt);
       const createdAt = Date.parse(meta.createdAt);
-      // Same retention as the sidebar's save: unused for an hour, used for a day.
+      // Same retention as the sidebar's save: a day, used or not.
       const stale = Number.isFinite(consumedAt)
         ? now - consumedAt > ANNOTATION_USED_RETENTION_MS
         : !Number.isFinite(createdAt) || now - createdAt > ANNOTATION_TTL_MS;
@@ -1412,6 +1438,132 @@ async function consumeAnnotation(annotation) {
     meta.consumedAt = new Date().toISOString();
     await writeFile(path, JSON.stringify(meta, null, 2) + "\n", "utf8");
   } catch { /* best effort: the TTL still retires it */ }
+}
+
+/** Stored originals: sha-named folders holding a meta file for that sha. */
+function storedOriginals() {
+  const found = [];
+  for (const root of sidebarCacheDirectories(ORIGINAL_DIR_NAME)) {
+    let entries;
+    try {
+      entries = readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !ORIGINAL_SHA256_PATTERN.test(entry.name)) continue;
+      const directory = join(root, entry.name);
+      try {
+        const meta = JSON.parse(readFileSync(join(directory, "meta.json"), "utf8"));
+        if (meta?.sha256 === entry.name) found.push({ directory, meta });
+      } catch { /* not an original, or being rewritten */ }
+    }
+  }
+  return found;
+}
+
+function originalUploadInProgress(meta, now = Date.now()) {
+  if (meta?.status !== "uploading") return false;
+  const startedAt = Date.parse(meta.startedAt);
+  return Number.isFinite(startedAt) && now - startedAt <= ORIGINAL_STALE_UPLOAD_MS;
+}
+
+/** Originals that could be the picture behind a copy with this grid and size. */
+function plausibleOriginals(entries, copy) {
+  return entries.filter(({ meta }) => {
+    const width = Number(meta.width);
+    const height = Number(meta.height);
+    return width * height >= copy.width * copy.height
+      && sameCanvasShape(meta, copy)
+      && fingerprintDistance(meta.fingerprint, copy.grid) <= ANNOTATION_FINGERPRINT_TOLERANCE
+      && (meta.status === "ready" || originalUploadInProgress(meta));
+  });
+}
+
+/** Record that an edit sent this original, which protects it from eviction for an hour. */
+async function touchOriginal(directory) {
+  const path = join(directory, "meta.json");
+  try {
+    const meta = JSON.parse(await readFile(path, "utf8"));
+    meta.usedAt = new Date().toISOString();
+    const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(temporary, JSON.stringify(meta, null, 2) + "\n", "utf8");
+    await rename(temporary, path);
+  } catch { /* best effort */ }
+}
+
+/**
+ * Swap each host-normalized copy among the edit's local inputs for the
+ * original the composer uploaded, written into `tempDir`. Anything that is not
+ * a recognized copy stays as it is, and any failure keeps the copy: this can
+ * only make a request better, never fail one.
+ *
+ * @returns {Promise<{images: string[], restored: object[]}>}
+ */
+async function restoreOriginalInputs(images, tempDir) {
+  const restored = [];
+  const output = [...images];
+  let entries = null;
+  let deadline = null;
+  for (let index = 0; index < output.length; index += 1) {
+    try {
+      const path = localImageFile(output[index]);
+      if (!path || !HOST_ATTACHMENT_PATTERN.test(resolve(path))) continue;
+      entries ??= storedOriginals();
+      if (!entries.length) break;
+      const copy = await imageFingerprint(path);
+      if (!copy) continue;
+      let plausible = plausibleOriginals(entries, copy);
+      if (!plausible.length) continue;
+      // The composer starts the upload when the picture appears; a send right
+      // after a large drop can arrive first. One shared wait for the whole edit.
+      deadline ??= Date.now() + ORIGINAL_UPLOAD_WAIT_MS;
+      while (plausible.some(({ meta }) => meta.status !== "ready") && Date.now() < deadline) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+        entries = storedOriginals();
+        plausible = plausibleOriginals(entries, copy);
+      }
+      const candidates = plausible
+        .filter(({ meta }) => meta.status === "ready" && nonEmptyString(meta.file))
+        .map(({ directory, meta }) => ({
+          path: join(directory, meta.file),
+          sha256: meta.sha256,
+          width: meta.width,
+          height: meta.height,
+          fingerprint: meta.fingerprint,
+          directory,
+        }));
+      if (!candidates.length) continue;
+      const listFile = join(tempDir, `originals-${index + 1}.json`);
+      await writeFile(listFile, JSON.stringify(candidates), "utf8");
+      const result = await runProcess(pythonCommand(), [
+        ORIGINAL_RESTORE_SCRIPT,
+        "--copy", path,
+        "--candidates", listFile,
+        "--out-dir", join(tempDir, "originals", String(index + 1)),
+        "--max-pixels", String(ORIGINAL_MAX_PIXELS),
+        "--max-bytes", String(ORIGINAL_MAX_BYTES),
+      ], { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" }, { timeoutSeconds: 120 });
+      if (!result?.matched || !localImageFile(result.path)) continue;
+      output[index] = result.path;
+      const used = candidates.find((candidate) => candidate.sha256 === result.sha256);
+      if (used) await touchOriginal(used.directory);
+      restored.push({
+        image: index + 1,
+        width: result.width,
+        height: result.height,
+        bytes: result.bytes,
+        original_width: result.original_width,
+        original_height: result.original_height,
+        original_bytes: result.original_bytes,
+        copy_width: result.copy_width,
+        copy_height: result.copy_height,
+        copy_bytes: result.copy_bytes,
+        ...(normalizedStringArray(result.notes).length ? { notes: normalizedStringArray(result.notes) } : {}),
+      });
+    } catch { /* keep the copy */ }
+  }
+  return { images: output, restored };
 }
 
 function enforceMarkupPolicy(args = {}, provider) {
@@ -1968,6 +2120,11 @@ async function writeImageManifestSidecars(cacheDir, result) {
       warnings: Array.isArray(result.warnings) ? result.warnings : baseManifest.warnings,
       notes: Array.isArray(result.notes) ? result.notes : baseManifest.notes,
       timing: result.timing ?? baseManifest.timing,
+      // What the edit sent in place of the conversation's copies, and which
+      // sidebar marks went with it.
+      ...(Array.isArray(result.original_restored) ? { original_restored: result.original_restored } : {}),
+      ...(result.annotation_applied ? { annotation_applied: result.annotation_applied } : {}),
+      ...(result.annotation_waiting_not_matched ? { annotation_waiting_not_matched: true } : {}),
     };
     delete manifest.response_metadata;
     delete manifest.prompt_submitted;
@@ -2816,140 +2973,159 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
   const singleStartedAt = isoNow();
   const provider = resolvedProvider ?? (await resolveProvider(args.provider, !args.dry_run));
   const prompt = provider.transport === TRANSPORT_MIDJOURNEY ? args.prompt : nonEmptyString(args.prompt);
-  // A layer the sidebar saved attaches itself here, so the user never has to
-  // name it. An explicit `markup` argument still wins.
-  let annotation = null;
-  if (command === "edit" && !nonEmptyString(args.markup)) {
-    annotation = await pendingAnnotation(imageInputPaths(args.images)[0]);
-    if (annotation !== null) {
-      if (annotation.mode === "flatten") {
-        args = { ...args, _flatten_markup: annotation.layer };
-      } else if (provider.transport === TRANSPORT_OPENAI_IMAGES && isMarkupCapableModel(provider.model)) {
-        args = { ...args, markup: annotation.layer };
-      } else {
-        throw new Error(
-          `An annotation layer is waiting, but provider "${provider.name}" uses "${provider.model}" on ` +
-            `"${provider.transport}", which cannot take one. Switch to an openai-images provider on a ` +
-            "gpt-image-2.5/2.6 model, or re-save the annotation as \"flatten\".",
-        );
-      }
-    }
-  }
-  args = enforceModelCapabilityPolicy(args, provider);
-  args = {
-    ...args,
-    output_timestamp: nonEmptyString(args.output_timestamp) || timestampForPath(),
-    output_sequence: positiveInteger(args.output_sequence, 1),
-  };
-  const submittedPrompt = prompt;
-  const retryPolicy = generationRetryPolicy(provider.config);
-  const scriptPath = providerTransportScript(provider);
   const tempDir = await mkdtemp(join(tmpdir(), "fmage-"));
-  const promptFile = join(tempDir, "prompt.txt");
-  await writeFile(promptFile, submittedPrompt, "utf8");
-
   try {
-    const transportArguments =
-      provider.asyncMode && provider.transport === TRANSPORT_OPENAI_IMAGES
-        ? asyncImageArguments(args, promptFile, provider)
-        : commonArguments(args, promptFile, provider);
-    const argv = [scriptPath, command, ...transportArguments];
-    if (command === "edit") {
-      const images = imageInputPaths(args.images);
-      if (args.use_latest) {
-        images.push(...(await loadLatestImages(provider.config)));
-      }
-      for (const image of images) {
-        const imagePath = nonEmptyString(image);
-        if (imagePath) appendOption(argv, "--image", imagePath);
-      }
-      appendEditArguments(argv, args, provider);
-      if (images.length === 0) {
-        throw new Error("Editing requires at least one image path/URL or use_latest=true.");
+    // The conversation hands over a normalized copy of each attachment; the
+    // original the composer uploaded goes instead, before the annotation lookup
+    // so a layer bound to the original's bytes matches exactly.
+    let originalsRestored = [];
+    if (command === "edit" && provider.transport === TRANSPORT_OPENAI_IMAGES) {
+      const restoredInputs = await restoreOriginalInputs(imageInputPaths(args.images), tempDir);
+      if (restoredInputs.restored.length) {
+        args = { ...args, images: restoredInputs.images };
+        originalsRestored = restoredInputs.restored;
       }
     }
+    // A layer the sidebar saved attaches itself here, so the user never has to
+    // name it. An explicit `markup` argument still wins.
+    let annotation = null;
+    let annotationWaiting = false;
+    if (command === "edit" && !nonEmptyString(args.markup)) {
+      annotationWaiting = waitingAnnotations().length > 0;
+      annotation = await pendingAnnotation(imageInputPaths(args.images)[0]);
+      if (annotation !== null) {
+        if (annotation.mode === "flatten") {
+          args = { ...args, _flatten_markup: annotation.layer };
+        } else if (provider.transport === TRANSPORT_OPENAI_IMAGES && isMarkupCapableModel(provider.model)) {
+          args = { ...args, markup: annotation.layer };
+        } else {
+          throw new Error(
+            `An annotation layer is waiting, but provider "${provider.name}" uses "${provider.model}" on ` +
+              `"${provider.transport}", which cannot take one. Switch to an openai-images provider on a ` +
+              "gpt-image-2.5/2.6 model, or re-save the annotation as \"flatten\".",
+          );
+        }
+      }
+    }
+    args = enforceModelCapabilityPolicy(args, provider);
+    args = {
+      ...args,
+      output_timestamp: nonEmptyString(args.output_timestamp) || timestampForPath(),
+      output_sequence: positiveInteger(args.output_sequence, 1),
+    };
+    const submittedPrompt = prompt;
+    const retryPolicy = generationRetryPolicy(provider.config);
+    const scriptPath = providerTransportScript(provider);
+    const promptFile = join(tempDir, "prompt.txt");
+    await writeFile(promptFile, submittedPrompt, "utf8");
 
-    const helperTimeoutSeconds = timeoutSeconds(args.timeout, provider.raw.timeout, args._pending_total_timeout);
-    const helperEnvironment = {
-      PYTHONUTF8: "1",
-      PYTHONIOENCODING: "utf-8",
-      ...(provider.apiKey ? { FMAGE_ACTIVE_API_KEY: provider.apiKey } : {}),
-    };
-    if (!args.dry_run) {
-      Object.assign(helperEnvironment, {
-        FMAGE_DIRECT_OUTPUT_DIR: finalOutputRoot(args, provider),
-        FMAGE_OUTPUT_TIMESTAMP: args.output_timestamp,
-        FMAGE_OUTPUT_SEQUENCE: String(args.output_sequence),
-      });
-    }
-    const { result, attempts } = await withGenerationRetry(
-      () => runProcess(
-        pythonCommand(),
-        argv,
-        helperEnvironment,
-        { timeoutSeconds: helperTimeoutSeconds },
-      ),
-      { retries: retryPolicy.retries },
-    );
-    const enriched = await enrichResult(result, submittedPrompt, provider);
-    enriched.timeout_seconds = timeoutSeconds(args.timeout, provider.raw.timeout);
-    enriched.prompt_mode = args.prompt_mode;
-    if (attempts > 1) {
-      enriched.generation_attempts = attempts;
-      enriched.warnings = [
-        ...normalizedStringArray(enriched.warnings),
-        `Provider request was retried ${attempts - 1} time(s) as a fresh request before succeeding.`,
-      ];
-    }
-    if (retryPolicy.enabled) {
-      enriched.generation_retry = {
-        enabled: true,
-        retries: retryPolicy.retries,
+    try {
+      const transportArguments =
+        provider.asyncMode && provider.transport === TRANSPORT_OPENAI_IMAGES
+          ? asyncImageArguments(args, promptFile, provider)
+          : commonArguments(args, promptFile, provider);
+      const argv = [scriptPath, command, ...transportArguments];
+      if (command === "edit") {
+        const images = imageInputPaths(args.images);
+        if (args.use_latest) {
+          images.push(...(await loadLatestImages(provider.config)));
+        }
+        for (const image of images) {
+          const imagePath = nonEmptyString(image);
+          if (imagePath) appendOption(argv, "--image", imagePath);
+        }
+        appendEditArguments(argv, args, provider);
+        if (images.length === 0) {
+          throw new Error("Editing requires at least one image path/URL or use_latest=true.");
+        }
+      }
+
+      const helperTimeoutSeconds = timeoutSeconds(args.timeout, provider.raw.timeout, args._pending_total_timeout);
+      const helperEnvironment = {
+        PYTHONUTF8: "1",
+        PYTHONIOENCODING: "utf-8",
+        ...(provider.apiKey ? { FMAGE_ACTIVE_API_KEY: provider.apiKey } : {}),
       };
+      if (!args.dry_run) {
+        Object.assign(helperEnvironment, {
+          FMAGE_DIRECT_OUTPUT_DIR: finalOutputRoot(args, provider),
+          FMAGE_OUTPUT_TIMESTAMP: args.output_timestamp,
+          FMAGE_OUTPUT_SEQUENCE: String(args.output_sequence),
+        });
+      }
+      const { result, attempts } = await withGenerationRetry(
+        () => runProcess(
+          pythonCommand(),
+          argv,
+          helperEnvironment,
+          { timeoutSeconds: helperTimeoutSeconds },
+        ),
+        { retries: retryPolicy.retries },
+      );
+      const enriched = await enrichResult(result, submittedPrompt, provider);
+      enriched.timeout_seconds = timeoutSeconds(args.timeout, provider.raw.timeout);
+      enriched.prompt_mode = args.prompt_mode;
+      if (attempts > 1) {
+        enriched.generation_attempts = attempts;
+        enriched.warnings = [
+          ...normalizedStringArray(enriched.warnings),
+          `Provider request was retried ${attempts - 1} time(s) as a fresh request before succeeding.`,
+        ];
+      }
+      if (retryPolicy.enabled) {
+        enriched.generation_retry = {
+          enabled: true,
+          retries: retryPolicy.retries,
+        };
+      }
+      if (args._quality_policy_warning) {
+        enriched.warnings = [
+          ...normalizedStringArray(enriched.warnings),
+          args._quality_policy_warning,
+        ];
+      }
+      if (args._output_format_policy_warning) {
+        enriched.warnings = [
+          ...normalizedStringArray(enriched.warnings),
+          args._output_format_policy_warning,
+        ];
+      }
+      if (args._output_compression_policy_warning) {
+        enriched.warnings = [
+          ...normalizedStringArray(enriched.warnings),
+          args._output_compression_policy_warning,
+        ];
+      }
+      if (args._resolution_policy_warning) {
+        enriched.warnings = [
+          ...normalizedStringArray(enriched.warnings),
+          args._resolution_policy_warning,
+        ];
+      }
+      if (args._model_capability_policy_warning) {
+        enriched.warnings = [
+          ...normalizedStringArray(enriched.warnings),
+          args._model_capability_policy_warning,
+        ];
+      }
+      enriched.timing = {
+        ...enriched.timing,
+        mcp_single_started_at: singleStartedAt,
+        mcp_single_finished_at: isoNow(),
+      };
+      if (annotation !== null) {
+        enriched.annotation_applied = annotation.mode;
+        // A dry run only reports the wiring; the layer stays available.
+        if (!args.dry_run) await consumeAnnotation(annotation);
+      }
+      // A layer was waiting but belongs to another picture: status only, so a
+      // user who expected the marks can see why they were not sent.
+      if (annotation === null && annotationWaiting) enriched.annotation_waiting_not_matched = true;
+      if (originalsRestored.length) enriched.original_restored = originalsRestored;
+      return publishResultImages(enriched, args, provider);
+    } catch (error) {
+      throw attachProviderFailureContext(error, provider);
     }
-    if (args._quality_policy_warning) {
-      enriched.warnings = [
-        ...normalizedStringArray(enriched.warnings),
-        args._quality_policy_warning,
-      ];
-    }
-    if (args._output_format_policy_warning) {
-      enriched.warnings = [
-        ...normalizedStringArray(enriched.warnings),
-        args._output_format_policy_warning,
-      ];
-    }
-    if (args._output_compression_policy_warning) {
-      enriched.warnings = [
-        ...normalizedStringArray(enriched.warnings),
-        args._output_compression_policy_warning,
-      ];
-    }
-    if (args._resolution_policy_warning) {
-      enriched.warnings = [
-        ...normalizedStringArray(enriched.warnings),
-        args._resolution_policy_warning,
-      ];
-    }
-    if (args._model_capability_policy_warning) {
-      enriched.warnings = [
-        ...normalizedStringArray(enriched.warnings),
-        args._model_capability_policy_warning,
-      ];
-    }
-    enriched.timing = {
-      ...enriched.timing,
-      mcp_single_started_at: singleStartedAt,
-      mcp_single_finished_at: isoNow(),
-    };
-    if (annotation !== null) {
-      enriched.annotation_applied = annotation.mode;
-      // A dry run only reports the wiring; the layer stays available.
-      if (!args.dry_run) await consumeAnnotation(annotation);
-    }
-    return publishResultImages(enriched, args, provider);
-  } catch (error) {
-    throw attachProviderFailureContext(error, provider);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -3219,7 +3395,8 @@ function commonProperties(editing = false) {
     },
     response_format: {
       type: "string",
-      description: "Optional JSON transport response format. Omit for Midjourney.",
+      enum: ["url", "b64_json"],
+      description: "Legacy image response format for non-GPT OpenAI Images providers that support it. GPT Image models always return b64_json and reject this field on generation and edits; omit it for GPT Image and Midjourney.",
     },
     output_dir: {
       type: "string",
@@ -3657,6 +3834,12 @@ function resultText(result, options = {}) {
       "Annotation: the sidebar marks were composited into the copy of Image 1 sent to the provider; the attachment itself is unchanged.",
     );
   }
+  for (const item of Array.isArray(result.original_restored) ? result.original_restored : []) {
+    lines.push(
+      `Original: Image ${item.image} uses the attached file at ${item.width}x${item.height}; ` +
+        `the conversation's copy is ${item.copy_width}x${item.copy_height}.`,
+    );
+  }
   const submittedPrompt = result.prompt_submitted ?? result.revised_prompt_submitted;
   if (submittedPrompt) {
     lines.push(`Prompt submitted:\n${submittedPrompt}`);
@@ -3830,7 +4013,18 @@ async function providerStatus(requestedProvider) {
     cache_dir: transportOutputRoot({}, provider),
     task_dir: taskStoreRoot(),
     timeout_seconds: timeoutSeconds(provider.raw.timeout),
-    ...(provider.transport === TRANSPORT_OPENAI_IMAGES ? { response_format: provider.raw.response_format ?? (provider.asyncMode ? "url" : null), async_mode: provider.asyncMode } : {}),
+    ...(provider.transport === TRANSPORT_OPENAI_IMAGES
+      ? {
+          ...(!isGptImageProvider(provider)
+            ? {
+                response_format:
+                  provider.raw.response_format ??
+                  (provider.asyncMode ? ASYNC_DEFAULT_RESPONSE_FORMAT : null),
+              }
+            : {}),
+          async_mode: provider.asyncMode,
+        }
+      : {}),
     ...(provider.asyncMode ? { remote_async: { status_path: provider.midjourney ? "/v1/tasks/{task_id}" : "/images/tasks/{task_id}" } } : {}),
     ...(provider.midjourney ? { midjourney: { ...provider.midjourney, prompt_only_controls: true, native_dimensions: true } } : {}),
   };

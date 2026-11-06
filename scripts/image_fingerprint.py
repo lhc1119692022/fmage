@@ -32,10 +32,17 @@ def cell_bounds(size: int) -> list[tuple[int, int]]:
 
 
 def fingerprint(path: Path) -> dict[str, object]:
-    from PIL import Image, ImageChops, ImageOps, ImageStat
+    from PIL import Image, ImageOps
 
     with Image.open(path) as opened:
         image = ImageOps.exif_transpose(opened).convert("RGBA")
+    return fingerprint_of(image)
+
+
+def fingerprint_of(image) -> dict[str, object]:
+    """The grid of an already oriented RGBA image."""
+    from PIL import ImageChops, ImageStat
+
     width, height = image.size
     luma = ImageChops.multiply(image.convert("RGB").convert("L"), image.getchannel("A"))
     grid = []
