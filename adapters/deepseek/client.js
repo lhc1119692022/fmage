@@ -190,6 +190,14 @@ window.__ModuleLoader__.load({
 .fmg-ann-zoom-val:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
 .fmg-ann-toast{position:absolute;left:50%;bottom:54px;transform:translateX(-50%);z-index:9;max-width:calc(100% - 32px);padding:7px 12px;border-radius:9px;background:#1c2024;color:#fff;font-size:12px;line-height:17px;box-shadow:0 6px 18px rgba(0,0,0,.2);pointer-events:none;box-sizing:border-box}
 .fmg-ann-toast.is-error{background:#e5484d}
+.fmg-ann-status{position:absolute;left:12px;bottom:12px;z-index:7;display:flex;align-items:center;gap:6px;max-width:calc(100% - 150px);height:32px;padding:0 4px 0 10px;border-radius:10px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.08));box-shadow:0 4px 14px rgba(0,0,0,.1);box-sizing:border-box;font-size:12px;color:var(--dsw-alias-label-secondary,#60646c)}
+.fmg-ann-status-dot{flex:none;width:7px;height:7px;border-radius:50%;background:#12a594}
+.fmg-ann-status.is-stale .fmg-ann-status-dot{background:#f5a524}
+.fmg-ann-status-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fmg-ann-status button{flex:none;height:24px;padding:0 8px;border:0;border-radius:7px;background:transparent;color:var(--dsw-alias-brand-primary,#4c78ff);font:inherit;font-size:12px;cursor:pointer}
+.fmg-ann-status button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
+.fmg-ann-status button:disabled{opacity:.4;cursor:default}
+.fmg-ann-recent{margin:0;max-width:100%;color:var(--dsw-alias-label-secondary,#60646c)}
 .fmg-ann-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px 14px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px}
 .fmg-ann-thumbs{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:100%}
 .fmg-ann-thumbs button{padding:0;border:0;background:transparent;cursor:pointer;line-height:0;border-radius:6px;overflow:hidden}
@@ -218,6 +226,13 @@ window.__ModuleLoader__.load({
       annMustBeFirst: '标记层只能作用于第一张输入图；这张是第 {n} 张。换成第一张，或改用合成。',
       annExported: '已保存，评论已插入输入框。', annExportedCopy: '已保存，评论已复制。',
       annExportedSilent: '已保存',
+      annPending: '已保存（{mode}）· 待发送', annPendingHint: '下一次编辑这张图的生图请求会带上它',
+      annPendingStale: '有新改动未保存', annPendingStaleHint: '发送的仍是上次保存的版本；点保存更新',
+      annWithdraw: '撤销保存', annWithdrawn: '已撤销保存', annWithdrawUsed: '这份标注已被生图请求使用，无法撤销。',
+      annRecentSent: '上一次标注（{mode}）已随生图请求发送 · {time}',
+      annRecentWaiting: '上一次标注（{mode}）已保存，还没有生图请求使用它',
+      annRecentReleased: '上一次标注已作废：同一张图被重新上传了',
+      annRecentExpired: '上一次标注已失效，没有被使用',
       annModeMarkup: '分层', annModeFlatten: '合成',
       annModeMarkupHint: '把透明标注层作为 markup 单独发送；原图不变，标记由模型抹除。',
       annModeFlattenHint: '把标注烧进图片再发；标记可能残留在结果里。',
@@ -283,6 +298,13 @@ window.__ModuleLoader__.load({
       annToolEraser: 'Eraser', annCancel: 'Cancel', annSaveComment: 'Save',
       annExported: 'Saved; the comments were inserted into the composer.', annExportedCopy: 'Saved; the comments were copied.',
       annExportedSilent: 'Saved',
+      annPending: 'Saved ({mode}) · pending', annPendingHint: 'The next image request that edits this picture takes it',
+      annPendingStale: 'Unsaved changes', annPendingStaleHint: 'The last saved version is what gets sent; save to update it',
+      annWithdraw: 'Withdraw', annWithdrawn: 'Save withdrawn', annWithdrawUsed: 'An image request already used this annotation, so it cannot be withdrawn.',
+      annRecentSent: 'Last annotation ({mode}) went out with an image request · {time}',
+      annRecentWaiting: 'Last annotation ({mode}) is saved; no image request has used it yet',
+      annRecentReleased: 'Last annotation was dropped: the same picture was uploaded again',
+      annRecentExpired: 'Last annotation expired unused',
       annTextPrompt: 'Type text',
       annRemoveComment: 'Remove this comment',
       annLoadFailed: 'The image could not be read.', annFailed: 'The operation failed',
@@ -784,6 +806,14 @@ window.__ModuleLoader__.load({
       }
       legacy.forEach(key => window.localStorage.removeItem(key));
     } catch { /* storage unavailable */ }
+    // Saves the server is holding for an edit, per composer upload, plus the
+    // last few whose upload has left the composer (normally: it was sent).
+    // `release` drops a sent save once the same picture is uploaded again, so
+    // a new task never inherits it. In memory only, like the drafts.
+    const annSaved = new Map();
+    const annRecent = [];
+    const annListeners = new Set();
+    const annNotify = () => { annListeners.forEach(listener => listener()); };
     let annText = key => key;
 
     function isMarkupModel(model) { return ANN_MODEL.test(String(model || '')); }
@@ -796,6 +826,100 @@ window.__ModuleLoader__.load({
       return Array.from(card.querySelectorAll('img[src^="blob:"]')).map((img, index) => ({
         index, url: img.src, name: img.getAttribute('alt') || `image-${index + 1}`,
       }));
+    }
+
+    /** SHA-256 of the bytes behind a composer object URL, or null. */
+    async function fileSha256(url) {
+      try {
+        if (!window.crypto || !window.crypto.subtle) return null;
+        const bytes = await (await fetch(url)).arrayBuffer();
+        const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+        return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+      } catch {
+        return null;
+      }
+    }
+
+    // 16x16 luma grid; must match scripts/image_fingerprint.py, which the
+    // edit uses to recognize this picture in a resized or re-encoded copy.
+    const ANN_GRID = 16;
+    function annFingerprint(image) {
+      try {
+        const scale = Math.min(1, Math.sqrt(4e6 / (image.naturalWidth * image.naturalHeight)));
+        const width = Math.max(ANN_GRID, Math.round(image.naturalWidth * scale));
+        const height = Math.max(ANN_GRID, Math.round(image.naturalHeight * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        context.drawImage(image, 0, 0, width, height);
+        const data = context.getImageData(0, 0, width, height).data;
+        const bounds = size => Array.from({ length: ANN_GRID }, (_, index) => {
+          const start = Math.floor(index * size / ANN_GRID);
+          const end = Math.max(start + 1, Math.floor((index + 1) * size / ANN_GRID));
+          return [Math.min(start, size - 1), Math.min(end, size)];
+        });
+        const rows = bounds(height);
+        const columns = bounds(width);
+        const grid = [];
+        for (const [top, bottom] of rows) {
+          for (const [left, right] of columns) {
+            let total = 0;
+            for (let y = top; y < bottom; y += 1) {
+              for (let x = left; x < right; x += 1) {
+                const at = (y * width + x) * 4;
+                const luma = (data[at] * 19595 + data[at + 1] * 38470 + data[at + 2] * 7471 + 0x8000) >> 16;
+                total += Math.floor(luma * data[at + 3] / 255);
+              }
+            }
+            grid.push(Math.round(total / ((bottom - top) * (right - left)) * 10) / 10);
+          }
+        }
+        return grid;
+      } catch {
+        return null;
+      }
+    }
+
+    // Runs from the first save on, whether or not the panel is open.
+    let annWatching = false;
+    const annSeen = new Set();
+    function watchUploads() {
+      if (annWatching || typeof MutationObserver !== 'function') return;
+      annWatching = true;
+      let frame = 0;
+      const check = () => {
+        frame = 0;
+        if (!document.querySelector('[data-composer-card]')) return;
+        const live = new Set(composerImages().map(item => item.url));
+        let changed = false;
+        for (const [url, saved] of Array.from(annSaved)) {
+          if (live.has(url)) continue;
+          annSaved.delete(url);
+          annRecent.unshift({ ...saved, status: 'waiting' });
+          changed = true;
+        }
+        annRecent.splice(5);
+        for (const url of live) {
+          if (annSeen.has(url)) continue;
+          annSeen.add(url);
+          if (!annRecent.some(item => item.status === 'waiting' && item.sha256)) continue;
+          void fileSha256(url).then(async sha256 => {
+            const hits = annRecent.filter(item => item.status === 'waiting' && item.sha256 && item.sha256 === sha256);
+            if (!hits.length) return;
+            const keep = composerImages().map(item => item.url);
+            await request(ANN_ROUTE, { method: 'POST', body: JSON.stringify({ action: 'release', sha256, keep }) });
+            hits.forEach(item => { item.status = 'released'; });
+            annNotify();
+          }).catch(() => { /* the TTL still retires it */ });
+        }
+        for (const url of Array.from(annSeen)) if (!live.has(url)) annSeen.delete(url);
+        if (changed) annNotify();
+      };
+      const schedule = () => { if (!frame) frame = window.requestAnimationFrame(check); };
+      new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+      window.addEventListener('focus', schedule);
+      check();
     }
 
     function loadImageElement(url) {
@@ -1101,6 +1225,7 @@ window.__ModuleLoader__.load({
       // restore for a newly opened attachment has landed.
       const [owner, setOwner] = useState(null);
       const [dragging, setDragging] = useState(false);
+      const [, setSavedTick] = useState(0);
       const rootRef = useRef(null);
       const stageRef = useRef(null);
       const sliderRef = useRef(null);
@@ -1112,6 +1237,40 @@ window.__ModuleLoader__.load({
       commentLive.current = editing;
 
       const notify = (text, error) => setToast(text ? { text, error: Boolean(error), at: Date.now() } : null);
+
+      useEffect(() => {
+        const listener = () => setSavedTick(tick => tick + 1);
+        annListeners.add(listener);
+        return () => { annListeners.delete(listener); };
+      }, []);
+
+      // With the composer empty, follow the last save until a request uses it.
+      const recent = annRecent[0] || null;
+      const recentStatus = recent ? recent.status : null;
+      useEffect(() => {
+        if (source || !recent || recent.status !== 'waiting') return undefined;
+        let alive = true;
+        let timer = 0;
+        const settle = (status, consumedAt) => {
+          recent.status = status;
+          if (consumedAt) recent.consumedAt = consumedAt;
+          annNotify();
+        };
+        const poll = async () => {
+          if (Date.now() - recent.savedAt > 60 * 60 * 1000) { settle('expired'); return; }
+          try {
+            const meta = await request(`${ANN_ROUTE}?id=${encodeURIComponent(recent.id)}`);
+            if (!alive) return;
+            if (meta && meta.consumedAt) { settle('sent', meta.consumedAt); return; }
+          } catch (failure) {
+            if (!alive) return;
+            if (failure && failure.status === 404) { settle('expired'); return; }
+          }
+          if (alive && recent.status === 'waiting') timer = setTimeout(poll, 3000);
+        };
+        timer = setTimeout(poll, 0);
+        return () => { alive = false; clearTimeout(timer); };
+      }, [source, recent, recentStatus]);
 
       useEffect(() => {
         if (!toast) return undefined;
@@ -1649,13 +1808,23 @@ window.__ModuleLoader__.load({
           layer.height = source.height;
           drawShapes(layer.getContext('2d'), shapes);
           const layerData = await blobToDataUrl(await pngBlobOf(layer));
-          await request(ANN_ROUTE, {
+          // Bind the layer to this picture so it only goes with an edit of it.
+          const [sha256, fingerprint] = await Promise.all([
+            fileSha256(source.url),
+            loadImageElement(source.url).then(annFingerprint, () => null),
+          ]);
+          const saved = await request(ANN_ROUTE, {
             method: 'POST',
             body: JSON.stringify({
               mode, layer: layerData, width: source.width, height: source.height,
-              comments: kept, sourceName: source.name,
+              comments: kept, sourceName: source.name, sha256, fingerprint, upload: source.url,
             }),
           });
+          annSaved.set(source.url, {
+            id: saved.id, mode, sha256, savedAt: Date.now(), shapes, signature: JSON.stringify(kept),
+          });
+          watchUploads();
+          annNotify();
           const text = commentText(kept);
           if (!text) {
             notify(t('annExportedSilent'));
@@ -1675,6 +1844,45 @@ window.__ModuleLoader__.load({
           setBusy(false);
         }
       };
+
+      const withdrawSave = async () => {
+        const saved = source ? annSaved.get(source.url) : null;
+        if (!saved || busy) return;
+        setBusy(true);
+        try {
+          const result = await request(ANN_ROUTE, { method: 'POST', body: JSON.stringify({ action: 'withdraw', id: saved.id }) });
+          annSaved.delete(source.url);
+          if (result && result.consumedAt) {
+            annRecent.unshift({ ...saved, status: 'sent', consumedAt: result.consumedAt });
+            notify(t('annWithdrawUsed'), true);
+          } else {
+            notify(t('annWithdrawn'));
+          }
+          annNotify();
+        } catch (failure) {
+          notify(`${t('annFailed')}: ${failure && failure.message ? failure.message : ''}`, true);
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const modeName = value => (value === 'markup' ? t('annModeMarkup') : t('annModeFlatten'));
+      const savedEntry = source ? annSaved.get(source.url) : null;
+      const savedStale = Boolean(savedEntry) && (savedEntry.shapes !== shapes || savedEntry.mode !== mode
+        || savedEntry.signature !== JSON.stringify(normalizedComments(comments)));
+      const savedStatus = savedEntry
+        ? h('div', { className: `fmg-ann-status${savedStale ? ' is-stale' : ''}`, role: 'status', onPointerDown: event => { event.stopPropagation(); } },
+          h('span', { className: 'fmg-ann-status-dot', 'aria-hidden': true }),
+          h('span', { className: 'fmg-ann-status-text', title: savedStale ? t('annPendingStaleHint') : t('annPendingHint') },
+            savedStale ? t('annPendingStale') : t('annPending', { mode: modeName(savedEntry.mode) })),
+          h('button', { type: 'button', disabled: busy, onClick: () => { void withdrawSave(); } }, t('annWithdraw')))
+        : null;
+      const recentText = !recent ? null
+        : recent.status === 'sent'
+          ? t('annRecentSent', { mode: modeName(recent.mode), time: new Date(recent.consumedAt).toLocaleTimeString() })
+          : recent.status === 'released' ? t('annRecentReleased')
+            : recent.status === 'expired' ? t('annRecentExpired')
+              : t('annRecentWaiting', { mode: modeName(recent.mode) });
 
       // ---- controls -------------------------------------------------------
       const stopUi = event => { event.stopPropagation(); };
@@ -2001,6 +2209,7 @@ window.__ModuleLoader__.load({
                 shapes.filter(shape => shape.type !== 'erase' && shape.id !== hiddenText).map(renderShape)))),
           h('div', { className: 'fmg-ann-layer' }, overlays),
           menu === 'draw' && ANN_STROKE_TOOLS.includes(tool) ? slider : null,
+          savedStatus,
           h('div', { className: 'fmg-ann-zoom', onPointerDown: stopUi },
             iconButton('minus', t('annZoomOut'), { onClick: () => zoomTo(zoom => zoom / 1.25) }),
             h('button', {
@@ -2011,6 +2220,7 @@ window.__ModuleLoader__.load({
         : h('div', { ref: stageRef, className: 'fmg-ann-stage' },
           h('div', { className: 'fmg-ann-empty' },
             h('p', null, t('annEmpty')),
+            recentText ? h('p', { className: 'fmg-ann-recent', role: 'status' }, recentText) : null,
             drafts.length
               ? h('div', { className: 'fmg-ann-thumbs' }, drafts.map(item => h('button', {
                 key: item.index, type: 'button', title: item.name,

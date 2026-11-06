@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,27 @@ import unittest
 from PIL import Image
 
 SERVER_PATH = Path(__file__).resolve().parents[1] / "mcp" / "server.mjs"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+
+from image_fingerprint import fingerprint  # noqa: E402
+
+
+def gradient(size: tuple[int, int], flip: bool = False) -> Image.Image:
+    """A picture with structure, so its fingerprint is not flat."""
+    width, height = size
+    image = Image.new("RGB", size)
+    image.putdata([
+        ((x * 255 // width), (y * 255 // height), 255 - (x * 255 // width) if flip else 90)
+        for y in range(height) for x in range(width)
+    ])
+    return image.transpose(Image.Transpose.FLIP_LEFT_RIGHT) if flip else image
+
+
+def binding_of(path: Path) -> dict[str, object]:
+    return {
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "fingerprint": fingerprint(path)["grid"],
+    }
 
 
 class AnnotationSession:
@@ -57,8 +79,15 @@ class AnnotationSession:
         )
         self.next_id = 1
 
-    def add_layer(self, mode: str, size: tuple[int, int] = (64, 64), root: Path | None = None) -> Path:
-        directory = (root or self.data_home / "cache" / "annotations") / "abc123abc123abc1"
+    def add_layer(
+        self,
+        mode: str,
+        size: tuple[int, int] = (64, 64),
+        root: Path | None = None,
+        binding: dict[str, object] | None = None,
+        entry_id: str = "abc123abc123abc1",
+    ) -> Path:
+        directory = (root or self.data_home / "cache" / "annotations") / entry_id
         directory.mkdir(parents=True, exist_ok=True)
         layer = Image.new("RGBA", size, (0, 0, 0, 0))
         layer.putpixel((8, 8), (220, 30, 30, 255))
@@ -76,6 +105,7 @@ class AnnotationSession:
                 __import__("datetime").timezone.utc
             ).isoformat(),
             "consumedAt": None,
+            **({"version": 2, **binding} if binding else {}),
         }
         (directory / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
         return path
@@ -211,6 +241,83 @@ class AnnotationAutoloadTests(unittest.TestCase):
         self.assertNotIn("annotation_applied", content)
         self.assertIsNone(content.get("markup"))
         self.assertIsNone(content.get("flatten_markup"))
+
+
+    def edit(self, session: AnnotationSession, image: Path) -> dict[str, object]:
+        response = session.call("tools/call", {
+            "name": "edit_image",
+            "arguments": {"prompt": "follow the marks", "images": [str(image)], "dry_run": True},
+        })
+        payload = json.dumps(response)
+        self.assertNotIn("error", response, payload)
+        self.assertFalse(response["result"].get("isError"), payload)
+        return response["result"]
+
+    def test_a_layer_bound_by_sha256_attaches_to_that_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = AnnotationSession("gpt-image-2.6")
+            self.addCleanup(session.close)
+            image = Path(directory) / "cat.png"
+            gradient((96, 64)).save(image)
+            layer = session.add_layer("markup", (96, 64), binding={"sha256": hashlib.sha256(image.read_bytes()).hexdigest()})
+            result = self.edit(session, image)
+        content = result["structuredContent"]
+        self.assertEqual(content["annotation_applied"], "markup")
+        self.assertEqual(Path(content["markup"]).resolve(), layer.resolve())
+        text = "\n".join(item.get("text", "") for item in result["content"])
+        self.assertIn("Annotation: the sidebar markup layer was sent with Image 1", text)
+
+    def test_a_bound_layer_recognizes_a_resized_reencoded_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = AnnotationSession("gpt-image-2.6")
+            self.addCleanup(session.close)
+            original = Path(directory) / "original.png"
+            gradient((400, 300)).save(original)
+            layer = session.add_layer("flatten", (400, 300), binding=binding_of(original))
+            copy = Path(directory) / "attachment.jpg"
+            Image.open(original).resize((399, 299), Image.Resampling.LANCZOS).save(copy, format="JPEG", quality=85)
+            result = self.edit(session, copy)
+        content = result["structuredContent"]
+        self.assertEqual(content["annotation_applied"], "flatten")
+        self.assertEqual(Path(content["flatten_markup"]).resolve(), layer.resolve())
+        text = "\n".join(item.get("text", "") for item in result["content"])
+        self.assertIn("Annotation: the sidebar marks were composited into the copy of Image 1", text)
+
+    def test_a_layer_for_another_picture_is_skipped_without_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            # The model has no markup channel: a wrongly matched markup layer
+            # would fail the call, so success proves the layer was skipped.
+            session = AnnotationSession("gpt-image-2")
+            self.addCleanup(session.close)
+            drawn_on = Path(directory) / "drawn.png"
+            gradient((96, 64)).save(drawn_on)
+            layer = session.add_layer("markup", (96, 64), binding=binding_of(drawn_on))
+            other = Path(directory) / "other.png"
+            gradient((96, 64), flip=True).save(other)
+            result = self.edit(session, other)
+            meta = json.loads((layer.parent / "meta.json").read_text(encoding="utf-8"))
+        content = result["structuredContent"]
+        self.assertNotIn("annotation_applied", content)
+        self.assertIsNone(content.get("markup"))
+        self.assertIsNone(content.get("flatten_markup"))
+        text = "\n".join(item.get("text", "") for item in result["content"])
+        self.assertNotIn("Annotation:", text)
+        self.assertIsNone(meta["consumedAt"])
+
+    def test_the_layer_for_the_edited_picture_wins_over_a_newer_one(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = AnnotationSession("gpt-image-2.6")
+            self.addCleanup(session.close)
+            mine = Path(directory) / "mine.png"
+            gradient((96, 64)).save(mine)
+            other = Path(directory) / "other.png"
+            gradient((96, 64), flip=True).save(other)
+            layer = session.add_layer("markup", (96, 64), binding=binding_of(mine), entry_id="aaaaaaaaaaaaaaaa")
+            session.add_layer("flatten", (96, 64), binding=binding_of(other), entry_id="bbbbbbbbbbbbbbbb")
+            result = self.edit(session, mine)
+        content = result["structuredContent"]
+        self.assertEqual(content["annotation_applied"], "markup")
+        self.assertEqual(Path(content["markup"]).resolve(), layer.resolve())
 
 
 if __name__ == "__main__":

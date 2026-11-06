@@ -2,16 +2,20 @@
 // this module owns the file on disk.
 //
 // The model never sees this file's path. `edit_image` looks for the newest
-// unused layer and attaches it itself, so nothing has to be pasted into the
-// conversation. That is why the directory is a cache: every entry is
-// disposable, and an unused one expires.
+// unused layer drawn on its first input image and attaches it itself, so
+// nothing has to be pasted into the conversation. That is why the directory is
+// a cache: every entry is disposable, and an unused one expires.
+//
+// A layer is bound to its picture by `sha256` (the bytes the sidebar read) and
+// `fingerprint` (a 16x16 luma grid, see scripts/image_fingerprint.py), and to
+// the composer upload it came from by `upload` (that upload's object URL).
 //
 // Location, resolved the same way by mcp/server.mjs:
 //   1. <cache_dir>/annotations/   when providers.json sets a usable cache_dir
 //                                 (relative paths resolve against that file's folder)
 //   2. <os temp>/fmage/annotations/  otherwise, or when (1) cannot be written
 // Each entry is <id>/layer.png plus <id>/meta.json
-//   { id, mode, width, height, createdAt, consumedAt, comments }.
+//   { id, mode, width, height, sha256, fingerprint, upload, createdAt, consumedAt, comments }.
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -109,6 +113,32 @@ function normalizeComments(value) {
   });
 }
 
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const FINGERPRINT_CELLS = 16 * 16;
+
+function sha256Of(value) {
+  const digest = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return SHA256_PATTERN.test(digest) ? digest : null;
+}
+
+function fingerprintOf(value) {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value) || value.length !== FINGERPRINT_CELLS) {
+    throw new AnnotationError(`fingerprint must be an array of ${FINGERPRINT_CELLS} numbers.`);
+  }
+  return value.map((cell, index) => {
+    const number = Number(cell);
+    if (!Number.isFinite(number) || number < 0 || number > 255) {
+      throw new AnnotationError(`fingerprint[${index}] must be a number from 0 to 255.`);
+    }
+    return Math.round(number * 10) / 10;
+  });
+}
+
+function uploadOf(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 300 ? value : null;
+}
+
 function metaOf(body) {
   const mode = body.mode === 'flatten' ? 'flatten' : body.mode === 'markup' ? 'markup' : '';
   if (!mode) throw new AnnotationError('mode must be "markup" or "flatten".');
@@ -118,10 +148,13 @@ function metaOf(body) {
     throw new AnnotationError('width and height must be positive integers.');
   }
   return {
-    version: 1,
+    version: 2,
     mode,
     width,
     height,
+    sha256: sha256Of(body.sha256),
+    fingerprint: fingerprintOf(body.fingerprint),
+    upload: uploadOf(body.upload),
     comments: normalizeComments(body.comments),
     sourceName: typeof body.sourceName === 'string' ? body.sourceName.slice(0, 200) : '',
   };
@@ -190,6 +223,40 @@ async function pruneExpired(directory, keep) {
   }));
 }
 
+/** Every readable entry across the candidate directories. */
+async function entriesIn(directories) {
+  const found = [];
+  for (const directory of directories) {
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !ID_PATTERN.test(entry.name)) continue;
+      const target = join(directory, entry.name);
+      try {
+        found.push({ id: entry.name, target, meta: JSON.parse(await readFile(join(target, META_NAME), 'utf8')) });
+      } catch { /* not an annotation entry */ }
+    }
+  }
+  return found;
+}
+
+/** Delete the unused entries `matches` selects; used ones stay for inspection. */
+async function retireUnused(directories, matches) {
+  let retired = 0;
+  for (const entry of await entriesIn(directories)) {
+    if (entry.meta?.consumedAt || !matches(entry)) continue;
+    try {
+      await rm(entry.target, { recursive: true, force: true });
+      retired += 1;
+    } catch { /* already gone */ }
+  }
+  return retired;
+}
+
 /**
  * Persist one annotation layer.
  *
@@ -238,9 +305,37 @@ export function createAnnotationApi(root, { temp } = {}) {
           continue;
         }
         await Promise.all(candidates.map(candidate => pruneExpired(candidate, target)));
+        // Saving again replaces the earlier unsent save of the same picture or
+        // upload, so only the marks on screen can go with the next edit.
+        await retireUnused(candidates, entry => entry.target !== target && (
+          (record.sha256 && entry.meta?.sha256 === record.sha256)
+          || (record.upload && entry.meta?.upload === record.upload)));
         return { ...record, directory: target, layer: join(target, LAYER_NAME) };
       }
       throw new AnnotationError('No writable annotation cache directory.', 500);
+    },
+
+    /** Take back an unsent save. A layer a request already used is kept. */
+    async withdraw(body) {
+      const id = annotationId(body?.id);
+      const entry = (await entriesIn(await directories())).find(item => item.id === id);
+      if (!entry) return { id, withdrawn: false, missing: true };
+      if (entry.meta?.consumedAt) return { id, withdrawn: false, consumedAt: entry.meta.consumedAt };
+      await rm(entry.target, { recursive: true, force: true });
+      return { id, withdrawn: true };
+    },
+
+    /**
+     * A new upload of a picture starts a new task: unsent saves of the same
+     * picture made for uploads no longer in the composer are dropped.
+     */
+    async release(body) {
+      const sha256 = sha256Of(body?.sha256);
+      if (!sha256) throw new AnnotationError('sha256 must be a hex SHA-256 digest.');
+      const keep = new Set(Array.isArray(body?.keep) ? body.keep.filter(item => typeof item === 'string') : []);
+      const released = await retireUnused(await directories(), entry => (
+        entry.meta?.sha256 === sha256 && !keep.has(entry.meta?.upload)));
+      return { released };
     },
   };
 }
@@ -259,6 +354,8 @@ export function registerAnnotationRoutes(ctx, api) {
       const body = await jsonBody(request);
       const size = body === null || typeof body !== 'object' ? 0 : JSON.stringify(body).length;
       if (size > MAX_REQUEST_BYTES) throw new AnnotationError('Annotation payload is too large.', 413);
+      if (body?.action === 'withdraw') return api.withdraw(body);
+      if (body?.action === 'release') return api.release(body);
       return api.save(body);
     }),
   });

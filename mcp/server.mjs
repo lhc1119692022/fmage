@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { readFileSync, readdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { access, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
@@ -62,6 +63,14 @@ const ANNOTATION_DIR_NAME = "annotations";
 const ANNOTATION_TTL_MS = 60 * 60 * 1000;
 const ANNOTATION_USED_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ANNOTATION_ID_PATTERN = /^[a-z0-9]{8,40}$/;
+// A layer binds to the picture it was drawn on: by the SHA-256 of the file the
+// sidebar read, else by a coarse luma grid (scripts/image_fingerprint.py) when
+// the conversation hands the edit a resized or re-encoded copy.
+const ANNOTATION_FINGERPRINT_SCRIPT = join(PLUGIN_ROOT, "scripts", "image_fingerprint.py");
+// Mean absolute luma difference per cell. A host-resized copy measures under
+// 1 and the browser's grid matches PIL's within 0.5; distinct photos measure 20+.
+const ANNOTATION_FINGERPRINT_TOLERANCE = 3;
+const ANNOTATION_ASPECT_TOLERANCE = 0.02;
 const workflowService = createWorkflowService(CONFIG_PATH);
 const TRANSPORT_GEMINI_GENERATE_CONTENT = "gemini-generate-content";
 const TRANSPORT_MIDJOURNEY = "midjourney";
@@ -1274,16 +1283,6 @@ function bananaModelCapability(provider) {
   return { canonicalModel, ...capability };
 }
 
-/**
- * The newest annotation layer the sidebar saved and no request has used yet.
- *
- * Matching is deliberately "newest unused within the TTL" rather than a hash:
- * a conversation attachment reaches this server as a normalized copy, so a
- * byte or pixel hash of the original cannot be compared with it. The panel
- * already refuses to save a markup layer unless the annotated image is the
- * first attachment, and the transport checks the layer's canvas against that
- * image, so a wrong pairing fails loudly instead of editing the wrong picture.
- */
 function annotationDirectories() {
   const fallback = join(tmpdir(), "fmage", ANNOTATION_DIR_NAME);
   const configured = nonEmptyString(readConfigForPaths()?.cache_dir);
@@ -1291,9 +1290,10 @@ function annotationDirectories() {
   return preferred && resolve(preferred) !== resolve(fallback) ? [preferred, fallback] : [fallback];
 }
 
-function pendingAnnotation() {
+/** Unused layers inside their TTL, newest first; expired entries are removed on the way. */
+function waitingAnnotations() {
   const now = Date.now();
-  let newest = null;
+  const waiting = [];
   for (const root of annotationDirectories()) {
     let entries;
     try {
@@ -1323,12 +1323,84 @@ function pendingAnnotation() {
         continue;
       }
       if (meta.consumedAt) continue;
-      if (newest === null || createdAt > newest.createdAt) {
-        newest = { directory, createdAt, layer: join(directory, "layer.png"), mode: meta.mode };
+      waiting.push({ directory, createdAt, layer: join(directory, "layer.png"), meta });
+    }
+  }
+  return waiting.sort((left, right) => right.createdAt - left.createdAt);
+}
+
+function localImageFile(value) {
+  const path = nonEmptyString(value);
+  if (!path || /^[a-z][a-z0-9+.-]*:\/\//i.test(path) || path.startsWith("data:")) return null;
+  try {
+    return statSync(path).isFile() ? path : null;
+  } catch {
+    return null;
+  }
+}
+
+async function imageFingerprint(path) {
+  try {
+    const result = await runProcess(pythonCommand(), [ANNOTATION_FINGERPRINT_SCRIPT, path], {
+      PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8",
+    }, { timeoutSeconds: 60 });
+    return Array.isArray(result?.grid) && result.width > 0 && result.height > 0 ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+function sameCanvasShape(meta, image) {
+  const width = Number(meta.width);
+  const height = Number(meta.height);
+  if (!(width > 0 && height > 0)) return false;
+  return Math.abs(Math.log((width / height) / (image.width / image.height))) <= ANNOTATION_ASPECT_TOLERANCE;
+}
+
+function fingerprintDistance(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length || !left.length) {
+    return Infinity;
+  }
+  let total = 0;
+  for (let index = 0; index < left.length; index += 1) total += Math.abs(Number(left[index]) - Number(right[index]));
+  return total / left.length;
+}
+
+/**
+ * The newest waiting layer drawn on `firstImage`, the edit's first input.
+ *
+ * A layer saved for another picture is left alone, so it can neither attach
+ * itself to an unrelated edit nor fail one. The sidebar records the SHA-256 of
+ * the file it read, which is also the file the conversation hands over when the
+ * host stores the upload as is; a resized or re-encoded copy is recognized by
+ * its luma grid. Layers from builds that recorded neither attach when their
+ * canvas has the image's shape, as before.
+ *
+ * @returns {Promise<object|null>} the layer to use, or null.
+ */
+async function pendingAnnotation(firstImage) {
+  const waiting = waitingAnnotations();
+  const path = waiting.length ? localImageFile(firstImage) : null;
+  if (!path) return null;
+  const toMatch = entry => ({ directory: entry.directory, createdAt: entry.createdAt, layer: entry.layer, mode: entry.meta.mode });
+  let sha256 = null;
+  try {
+    sha256 = createHash("sha256").update(readFileSync(path)).digest("hex");
+  } catch { /* unreadable: the transport reports it */ }
+  const exact = sha256 ? waiting.find(entry => entry.meta.sha256 === sha256) : undefined;
+  if (exact) return toMatch(exact);
+  const comparable = waiting.filter(entry => Array.isArray(entry.meta.fingerprint) || !entry.meta.sha256);
+  const image = comparable.length ? await imageFingerprint(path) : null;
+  if (image) {
+    for (const entry of comparable) {
+      if (!sameCanvasShape(entry.meta, image)) continue;
+      const bound = Array.isArray(entry.meta.fingerprint);
+      if (!bound || fingerprintDistance(entry.meta.fingerprint, image.grid) <= ANNOTATION_FINGERPRINT_TOLERANCE) {
+        return toMatch(entry);
       }
     }
   }
-  return newest;
+  return null;
 }
 
 /** Retire a layer once a request actually used it; a failed call leaves it. */
@@ -2748,7 +2820,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
   // name it. An explicit `markup` argument still wins.
   let annotation = null;
   if (command === "edit" && !nonEmptyString(args.markup)) {
-    annotation = pendingAnnotation();
+    annotation = await pendingAnnotation(imageInputPaths(args.images)[0]);
     if (annotation !== null) {
       if (annotation.mode === "flatten") {
         args = { ...args, _flatten_markup: annotation.layer };
@@ -3574,6 +3646,15 @@ function resultText(result, options = {}) {
     const pendingCount = result.pending_count ? `, ${result.pending_count} pending` : "";
     lines.push(
       `Progress: ${result.completed_count ?? 0}/${result.requested_count ?? "?"} completed${runningCount}${pendingCount}, ${result.failed_count ?? 0} failed`,
+    );
+  }
+  // Facts about what was sent, never instructions: the agent cannot see the
+  // sidebar marks, so this is its only evidence that they went with Image 1.
+  if (result.annotation_applied === "markup") {
+    lines.push("Annotation: the sidebar markup layer was sent with Image 1 as the markup field.");
+  } else if (result.annotation_applied === "flatten") {
+    lines.push(
+      "Annotation: the sidebar marks were composited into the copy of Image 1 sent to the provider; the attachment itself is unchanged.",
     );
   }
   const submittedPrompt = result.prompt_submitted ?? result.revised_prompt_submitted;

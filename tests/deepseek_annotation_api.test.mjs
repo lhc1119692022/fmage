@@ -214,3 +214,91 @@ test('unused layers expire after an hour, used ones after a day; strangers are u
   assert.ok(names.includes('c'.repeat(16)), 'a directory without our meta file is untouched');
   assert.ok(names.includes('Not-An-Id'), 'a directory not named like an id is untouched');
 });
+
+const SHA_A = 'a'.repeat(64);
+const SHA_B = 'b'.repeat(64);
+const grid = value => Array.from({ length: 256 }, () => value);
+
+test('a save records which picture and upload it was drawn on', async t => {
+  const { api, store } = await fixture(t);
+  const saved = await api.save({ ...base(), sha256: SHA_A.toUpperCase(), fingerprint: grid(12.34), upload: 'blob:x/1' });
+  const meta = JSON.parse(await readFile(join(store, saved.id, 'meta.json'), 'utf8'));
+  assert.equal(meta.sha256, SHA_A);
+  assert.equal(meta.fingerprint.length, 256);
+  assert.equal(meta.fingerprint[0], 12.3);
+  assert.equal(meta.upload, 'blob:x/1');
+  const legacy = await api.save(base());
+  assert.equal(legacy.sha256, null);
+  assert.equal(legacy.fingerprint, null);
+  await assert.rejects(api.save({ ...base(), fingerprint: [1, 2, 3] }), /fingerprint must be/);
+  await assert.rejects(api.save({ ...base(), fingerprint: grid(300) }), /from 0 to 255/);
+});
+
+test('saving again replaces the unsent save of the same picture only', async t => {
+  const { api, store } = await fixture(t);
+  const first = await api.save({ ...base(), sha256: SHA_A, upload: 'blob:x/1' });
+  const used = await api.save({ ...base(), sha256: SHA_A, upload: 'blob:x/0' });
+  await rewriteMeta(used.directory, { consumedAt: new Date().toISOString() });
+  const otherPicture = await api.save({ ...base(), sha256: SHA_B, upload: 'blob:x/2' });
+  const unbound = await api.save(base());
+  const second = await api.save({ ...base(), sha256: SHA_A, upload: 'blob:x/1' });
+  const names = await readdir(store);
+  assert.ok(!names.includes(first.id), 'the earlier unsent save is replaced');
+  assert.ok(names.includes(second.id));
+  assert.ok(names.includes(used.id), 'a save a request used is kept');
+  assert.ok(names.includes(otherPicture.id), 'another picture keeps its save');
+  assert.ok(names.includes(unbound.id), 'an unbound save is left alone');
+});
+
+test('a save for the same upload replaces the earlier one even without a hash', async t => {
+  const { api, store } = await fixture(t);
+  const first = await api.save({ ...base(), upload: 'blob:x/1' });
+  const second = await api.save({ ...base(), upload: 'blob:x/1' });
+  const names = await readdir(store);
+  assert.ok(!names.includes(first.id));
+  assert.ok(names.includes(second.id));
+});
+
+test('withdraw deletes an unsent save and keeps a used one', async t => {
+  const { api, store } = await fixture(t);
+  const routes = routesFor(api);
+  const route = routes.get(ANNOTATION_ROUTE);
+  const pending = await api.save(base());
+  const response = await route.fetch(new Request('http://h' + ANNOTATION_ROUTE, {
+    method: 'POST', body: JSON.stringify({ action: 'withdraw', id: pending.id }),
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { id: pending.id, withdrawn: true });
+  assert.ok(!(await readdir(store)).includes(pending.id));
+
+  const used = await api.save(base());
+  const consumedAt = new Date().toISOString();
+  await rewriteMeta(used.directory, { consumedAt });
+  const kept = await api.withdraw({ id: used.id });
+  assert.equal(kept.withdrawn, false);
+  assert.equal(kept.consumedAt, consumedAt);
+  assert.ok((await readdir(store)).includes(used.id));
+
+  assert.equal((await api.withdraw({ id: pending.id })).missing, true);
+  await assert.rejects(api.withdraw({ id: '../x' }), error => error.status === 404);
+});
+
+test('release drops unsent saves of a picture made for uploads that are gone', async t => {
+  const { api, store } = await fixture(t);
+  // Saved under other hashes first, so a save does not replace the others.
+  const sentUpload = await api.save({ ...base(), sha256: 'c'.repeat(64), upload: 'blob:x/old' });
+  const stillOpen = await api.save({ ...base(), sha256: 'd'.repeat(64), upload: 'blob:x/open' });
+  const used = await api.save({ ...base(), sha256: 'e'.repeat(64), upload: 'blob:x/used' });
+  await rewriteMeta(sentUpload.directory, { sha256: SHA_A });
+  await rewriteMeta(stillOpen.directory, { sha256: SHA_A });
+  await rewriteMeta(used.directory, { sha256: SHA_A, consumedAt: new Date().toISOString() });
+  const other = await api.save({ ...base(), sha256: SHA_B, upload: 'blob:x/b' });
+  const result = await api.release({ sha256: SHA_A, keep: ['blob:x/open', 'blob:x/new'] });
+  assert.equal(result.released, 1);
+  const names = await readdir(store);
+  assert.ok(!names.includes(sentUpload.id));
+  assert.ok(names.includes(stillOpen.id));
+  assert.ok(names.includes(used.id));
+  assert.ok(names.includes(other.id));
+  await assert.rejects(api.release({ sha256: 'nope' }), /sha256 must be/);
+});
