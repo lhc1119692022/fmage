@@ -1201,14 +1201,12 @@ window.__ModuleLoader__.load({
       ctx.restore();
     }
 
-    /** Paint every shape, then punch the eraser strokes out of the result. */
+    /** Paint the shapes in order; an eraser stroke removes only what was drawn before it. */
     function drawShapes(ctx, shapes) {
-      shapes.filter(shape => shape.type !== 'erase').forEach(shape => drawShape(ctx, shape));
-      const erase = shapes.filter(shape => shape.type === 'erase');
-      if (!erase.length) return;
-      ctx.save();
-      ctx.globalCompositeOperation = 'destination-out';
-      erase.forEach(shape => {
+      shapes.forEach(shape => {
+        if (shape.type !== 'erase') { drawShape(ctx, shape); return; }
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-out';
         ctx.strokeStyle = '#000';
         ctx.lineWidth = shape.width;
         ctx.lineCap = 'round';
@@ -1220,8 +1218,8 @@ window.__ModuleLoader__.load({
         });
         if (shape.points.length === 1) ctx.lineTo(shape.points[0].x + 0.01, shape.points[0].y);
         ctx.stroke();
+        ctx.restore();
       });
-      ctx.restore();
     }
 
     // Glyphs are Lucide icons (ISC licence, lucide.dev) on their 24px grid with
@@ -2444,20 +2442,26 @@ window.__ModuleLoader__.load({
             h('svg', {
               className: 'fmg-ann-svg', viewBox: `0 0 ${source.width} ${source.height}`, preserveAspectRatio: 'none',
             },
+              // One mask per eraser stroke, wrapped around only the shapes
+              // drawn before it, so later strokes paint over erased spots.
               h('defs', null,
-                h('mask', {
-                  id: 'fmg-ann-erase', maskUnits: 'userSpaceOnUse',
+                shapes.filter(shape => shape.type === 'erase').map(shape => h('mask', {
+                  key: shape.id, id: `fmg-ann-erase-${shape.id}`, maskUnits: 'userSpaceOnUse',
                   x: 0, y: 0, width: source.width, height: source.height,
                 },
                   h('rect', { x: 0, y: 0, width: source.width, height: source.height, fill: '#fff' }),
-                  shapes.filter(shape => shape.type === 'erase').map(shape => h('polyline', {
-                    key: shape.id, points: polyPoints(shape.points.length === 1
+                  h('polyline', {
+                    points: polyPoints(shape.points.length === 1
                       ? [shape.points[0], { x: shape.points[0].x + 0.01, y: shape.points[0].y }]
                       : shape.points),
                     fill: 'none', stroke: '#000', strokeWidth: shape.width, strokeLinecap: 'round', strokeLinejoin: 'round',
                   })))),
-              h('g', { mask: 'url(#fmg-ann-erase)' },
-                shapes.filter(shape => shape.type !== 'erase' && shape.id !== hiddenText).map(renderShape)))),
+              shapes.reduce((painted, shape) => {
+                if (shape.type === 'erase') {
+                  return painted.length ? [h('g', { key: `erase-${shape.id}`, mask: `url(#fmg-ann-erase-${shape.id})` }, painted)] : painted;
+                }
+                return shape.id === hiddenText ? painted : [...painted, renderShape(shape)];
+              }, []))),
           h('div', { className: 'fmg-ann-layer' }, overlays),
           menu === 'draw' && ANN_STROKE_TOOLS.includes(tool) ? slider : null,
           swappedStatus || savedStatus,
