@@ -100,6 +100,10 @@ def skill_text(name: str) -> str:
         "提供商配置位于 DeepSeek 自己的数据目录（默认 `~/.dsh/fmage/providers.json`）；"
         "`FMAGE_CONFIG` 可指定其他文件。\n\n"
     )
+    # Annotations exist only with the Desktop sidebar, so their rules ship here.
+    annotations = ROOT / "adapters/deepseek/skill-annotations" / f"{name}.md"
+    if annotations.is_file():
+        prelude += annotations.read_text(encoding="utf-8") + "\n"
     if name == "fmage-image-regression":
         body = (
             "# Fmage 图片退步\n\n回复“处理中。”，将附件的绝对本地路径作为 image 参数，调用 regress_image 一次。\n"

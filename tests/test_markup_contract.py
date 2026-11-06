@@ -33,7 +33,7 @@ class MarkupContractTests(unittest.TestCase):
         return path
 
     def call(self, config, arguments: dict[str, object], name: str = "edit_image"):
-        return call_server(config, "tools/call", {"name": name, "arguments": arguments})
+        return call_server(config, "tools/call", {"name": name, "arguments": arguments}, sidebar=True)
 
     def assert_rejected(self, response: dict[str, object], pattern: str) -> None:
         payload = json.dumps(response)
@@ -45,10 +45,14 @@ class MarkupContractTests(unittest.TestCase):
         self.assertIn(pattern, payload)
 
     def test_edit_image_exposes_markup(self) -> None:
-        tools = tool_map(call_server(self.config(), "tools/list", {}))
+        tools = tool_map(call_server(self.config(), "tools/list", {}, sidebar=True))
         self.assertIn("markup", tools["edit_image"]["inputSchema"]["properties"])
         self.assertNotIn("markup", tools["edit_image_batch"]["inputSchema"]["properties"])
         self.assertNotIn("markup", tools["generate_image"]["inputSchema"]["properties"])
+
+    def test_a_host_without_the_sidebar_has_no_markup_argument(self) -> None:
+        tools = tool_map(call_server(self.config(), "tools/list", {}))
+        self.assertNotIn("markup", tools["edit_image"]["inputSchema"]["properties"])
 
     def test_markup_is_forwarded_to_the_transport_for_a_supported_model(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

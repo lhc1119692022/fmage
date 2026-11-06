@@ -253,6 +253,17 @@ class HarnessPluginsTests(unittest.TestCase):
         self.assertNotIn("degrade_image.py", regression)
         self.assertNotIn("agents/openai.yaml", "\n".join(files))
 
+    def test_annotation_rules_ship_only_to_deepseek(self):
+        files = hp.payload()
+        for name in ("fmage", "fmage-direct"):
+            shared = (hp.ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+            self.assertNotIn("markup", shared)
+            self.assertNotIn("Annotated references", shared)
+            built = files[f"skills/{name}/SKILL.md"].decode()
+            self.assertIn("Annotated references", built)
+            self.assertIn("you cannot see", built)
+            self.assertIn("right away", built)
+
     def test_archive_allowlist(self):
         with tempfile.TemporaryDirectory() as temp:
             out = Path(temp)
@@ -260,10 +271,12 @@ class HarnessPluginsTests(unittest.TestCase):
             self.assertNotIn("config/providers.json", files)
             self.assertNotIn("scripts/harness_plugins.py", files)
             self.assertIn("config/gpt-image-model-families.json", files)
-            # Every file the MCP server loads from the plugin root must ship.
+            # Every file the MCP server loads from the plugin root must ship,
+            # except the reader only the Codex registration switches on.
             server = (hp.ROOT / "mcp/server.mjs").read_text(encoding="utf-8")
             for directory, name in re.findall(r'join\(PLUGIN_ROOT, "(scripts|config)", "([^"]+)"\)', server):
-                self.assertIn(f"{directory}/{name}", files)
+                if name != "codex_marks.py":
+                    self.assertIn(f"{directory}/{name}", files)
             archive = hp.build_archive(files, out)
             hp.verify_archive(files, out)
             with tarfile.open(archive) as z:

@@ -66,7 +66,7 @@ def provider_config(
 
 
 class ServerSession:
-    def __init__(self, config: dict[str, object]) -> None:
+    def __init__(self, config: dict[str, object], sidebar: bool = False) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         config_path = Path(self.temporary_directory.name) / "providers.json"
         config_path.write_text(json.dumps(config), encoding="utf-8")
@@ -75,6 +75,9 @@ class ServerSession:
             "FMAGE_CONFIG": str(config_path),
             "FMAGE_PYTHON": sys.executable,
         }
+        environment.pop("FMAGE_SIDEBAR", None)
+        if sidebar:
+            environment["FMAGE_SIDEBAR"] = "1"
         self.process = subprocess.Popen(
             ["node", str(SERVER_PATH)],
             stdin=subprocess.PIPE,
@@ -125,11 +128,12 @@ def call_server(
     config: dict[str, object],
     method: str,
     params: dict[str, object],
+    sidebar: bool = False,
 ) -> dict[str, object]:
-    key = json.dumps(config, sort_keys=True)
+    key = json.dumps([config, sidebar], sort_keys=True)
     session = _SERVER_SESSIONS.get(key)
     if session is None:
-        session = ServerSession(config)
+        session = ServerSession(config, sidebar)
         _SERVER_SESSIONS[key] = session
     return session.call(method, params)
 

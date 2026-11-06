@@ -144,6 +144,11 @@ def codex_data_home() -> Path:
     return base / "fmage"
 
 
+def codex_mcp_env() -> dict[str, str]:
+    home = codex_data_home()
+    return {"FMAGE_DATA_HOME": str(home), "FMAGE_CODEX_SESSIONS": str(home.parent / "sessions")}
+
+
 def configure_codex_data_home(cache_path: Path) -> None:
     """Name the data directory in the installed plugin's MCP registration."""
     path = cache_path / ".mcp.json"
@@ -152,8 +157,7 @@ def configure_codex_data_home(cache_path: Path) -> None:
     server.setdefault("command", "node")
     server.setdefault("args", ["./mcp/server.mjs"])
     server.setdefault("cwd", ".")
-    env = server.setdefault("env", {})
-    env["FMAGE_DATA_HOME"] = str(codex_data_home())
+    server.setdefault("env", {}).update(codex_mcp_env())
     normalized = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     if path.read_text(encoding="utf-8") != normalized:
         path.write_text(normalized, encoding="utf-8", newline="\n")
@@ -246,6 +250,7 @@ def verify_cached_plugin(cache_path: Path) -> None:
         cache_path / "config" / "workflows.example.json",
         cache_path / "scripts" / "gemini_generate_content_transport.py",
         cache_path / "scripts" / "midjourney_transport.py",
+        cache_path / "scripts" / "codex_marks.py",
         cache_path / "config" / "midjourney-v8.2-contract.json",
         cache_path / "config" / "gpt-image-model-families.json",
     ]
@@ -280,7 +285,7 @@ def verify_cached_plugin(cache_path: Path) -> None:
         "command": "node",
         "args": ["./mcp/server.mjs"],
         "cwd": ".",
-        "env": {"FMAGE_DATA_HOME": str(codex_data_home())},
+        "env": codex_mcp_env(),
     }
     if server != expected_server:
         raise RuntimeError(
@@ -295,9 +300,7 @@ def verify_cached_plugin(cache_path: Path) -> None:
         if f"allow_implicit_invocation: {expected_value}" not in metadata:
             raise RuntimeError(f"Skill {skill_name} has an unexpected invocation policy: {metadata_path}")
 
-    verify_mcp_handshake(
-        cache_path / "mcp" / "server.mjs", {"FMAGE_DATA_HOME": str(codex_data_home())}
-    )
+    verify_mcp_handshake(cache_path / "mcp" / "server.mjs", codex_mcp_env())
 
 
 def verify_plugin(cli: Path, marketplace: str) -> Path:

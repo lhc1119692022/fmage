@@ -49,7 +49,7 @@ export async function apply(ctx) {
   await ctx.plugin(mcpClient, {
     transport: 'stdio', serverName: 'Fmage', command: 'node',
     args: [join(root, 'mcp', 'launch.mjs')], cwd: root,
-    env: { FMAGE_DATA_HOME: dataHome },
+    env: { FMAGE_DATA_HOME: dataHome, FMAGE_SIDEBAR: '1' },
     toolCallTimeoutMs: 1800000, failOnStartupError: true,
     reconnect: { enabled: false },
   });

@@ -53,6 +53,13 @@ if (!CONFIG_PATH) {
   );
   process.exit(1);
 }
+// Only a host that ships the Fmage sidebar sets this. Elsewhere there is no
+// markup argument, and sidebar layers and originals are never read.
+const SIDEBAR_ENABLED = process.env.FMAGE_SIDEBAR === "1";
+// Only the Codex registration names this: its session log is the one place
+// that keeps the marked preview from Codex's own markup tool.
+const CODEX_SESSIONS = nonEmptyString(process.env.FMAGE_CODEX_SESSIONS);
+const CODEX_MARKS_SCRIPT = join(PLUGIN_ROOT, "scripts", "codex_marks.py");
 const TRANSPORT_OPENAI_IMAGES = "openai-images";
 // Layers saved by the sidebar; the MCP server picks the newest unused one up by
 // itself so no path ever has to enter the conversation. The location contract
@@ -1429,9 +1436,55 @@ async function pendingAnnotation(firstImage) {
   return null;
 }
 
+/**
+ * The layer Codex's own markup tool left for this edit call, recovered once per
+ * call: every job of a batch comes from one user message and shares the layer.
+ * Refuses the edit when marks exist but cannot go with it, so the provider is
+ * never asked to guess; a call the log never shows runs as a plain edit.
+ *
+ * @param {{images: string[], prompt: string}[]} jobs
+ * @returns {Promise<{annotation: object|null, warning: string|null}>}
+ */
+async function codexAnnotation(jobs, provider, tempDir) {
+  const plain = { annotation: null, warning: null };
+  if (!jobs.some((job) => job.images.length)) return plain;
+  const requestPath = join(tempDir, "codex-marks.json");
+  const layer = join(tempDir, "codex-markup.png");
+  await writeFile(requestPath, JSON.stringify({ jobs }), "utf8");
+  const unconfirmed = {
+    annotation: null,
+    warning: "Could not check the Codex session for image marks; the edit ran without any.",
+  };
+  let result;
+  try {
+    result = await runProcess(
+      pythonCommand(),
+      [CODEX_MARKS_SCRIPT, "--sessions", CODEX_SESSIONS, "--request", requestPath, "--output", layer],
+      { PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+      { timeoutSeconds: 60 },
+    );
+  } catch {
+    return unconfirmed;
+  }
+  if (result?.status === "applied") {
+    const capable = provider.transport === TRANSPORT_OPENAI_IMAGES && isMarkupCapableModel(provider.model);
+    return { annotation: { layer, image: result.image, mode: capable ? "markup" : "flatten" }, warning: null };
+  }
+  if (result?.status === "not_first") {
+    throw new Error(
+      `The Codex marks are on Image ${result.image_index}, but only Image 1 can carry marks. ` +
+        "Put the marked image first and send again.",
+    );
+  }
+  if (result?.status === "failed") {
+    throw new Error(`The Codex marks could not be prepared: ${result.error}`);
+  }
+  return result?.status === "none" ? plain : unconfirmed;
+}
+
 /** Retire a layer once a request actually used it; a failed call leaves it. */
 async function consumeAnnotation(annotation) {
-  if (!annotation) return;
+  if (!annotation?.directory) return;
   try {
     const path = join(annotation.directory, "meta.json");
     const meta = JSON.parse(await readFile(path, "utf8"));
@@ -2423,6 +2476,7 @@ function updateTaskProgressFromSettled(task, settledResults) {
           manifest: item.value.manifest,
           timeout_seconds: item.value.timeout_seconds,
           timing: item.value.timing,
+          ...(item.value.annotation_applied ? { annotation_applied: item.value.annotation_applied } : {}),
         };
       }
       return {
@@ -2562,6 +2616,7 @@ async function combineBatchResults({
           manifest: item.value.manifest,
           timeout_seconds: item.value.timeout_seconds,
           timing: item.value.timing,
+          ...(item.value.annotation_applied ? { annotation_applied: item.value.annotation_applied } : {}),
         };
       }
       return {
@@ -2751,6 +2806,26 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     }
     return jobArgs;
   });
+  // Resolved here, while the Codex call is still unanswered; a refusal stops
+  // the whole batch before any job reaches a provider.
+  let jobMarks = null;
+  let marksDir = null;
+  if (command === "edit" && CODEX_SESSIONS && !SIDEBAR_ENABLED) {
+    marksDir = await mkdtemp(join(tmpdir(), "fmage-"));
+    const marks = await codexAnnotation(
+      normalizedJobs.map((job) => ({ images: imageInputPaths(job.images), prompt: job.prompt })),
+      provider,
+      marksDir,
+    ).catch(async (error) => {
+      await rm(marksDir, { recursive: true, force: true });
+      throw error;
+    });
+    jobMarks = normalizedJobs.map((job) =>
+      marks.annotation && imageInputPaths(job.images)[0] !== marks.annotation.image
+        ? { annotation: null, warning: null }
+        : marks,
+    );
+  }
   if (!args.dry_run) {
     await mkdir(batchRoot, { recursive: true });
   }
@@ -2835,6 +2910,7 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
         try {
           const result = await runSingleImageCommand(command, {
             ...normalizedJobs[index],
+            ...(jobMarks ? { _codex_marks: jobMarks[index] } : {}),
             _transport_output_dir: requestOutputDir,
             _pending_fast_window: PENDING_POLL_FAST_WINDOW_SECONDS,
             _pending_fast_interval: PENDING_POLL_FAST_INTERVAL_SECONDS,
@@ -2909,9 +2985,17 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     await writeTaskState(task);
     return task;
   };
+  // The layer outlives the tool's return: jobs may still run in the background.
+  const executeAndClean = async () => {
+    try {
+      return await execute();
+    } finally {
+      if (marksDir) await rm(marksDir, { recursive: true, force: true });
+    }
+  };
 
   if (returnWhen === "completed") {
-    const executePromise = execute().catch(async (error) => {
+    const executePromise = executeAndClean().catch(async (error) => {
       const completedAt = isoNow();
       Object.assign(task, {
         status: "failed",
@@ -2945,7 +3029,7 @@ async function submitBatchJobs(command, args, jobs, legacyPrompt = null) {
     });
   }
 
-  execute().catch(async (error) => {
+  executeAndClean().catch(async (error) => {
     const completedAt = isoNow();
     Object.assign(task, {
       status: "failed",
@@ -2979,7 +3063,7 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     // original the composer uploaded goes instead, before the annotation lookup
     // so a layer bound to the original's bytes matches exactly.
     let originalsRestored = [];
-    if (command === "edit" && provider.transport === TRANSPORT_OPENAI_IMAGES) {
+    if (SIDEBAR_ENABLED && command === "edit" && provider.transport === TRANSPORT_OPENAI_IMAGES) {
       const restoredInputs = await restoreOriginalInputs(imageInputPaths(args.images), tempDir);
       if (restoredInputs.restored.length) {
         args = { ...args, images: restoredInputs.images };
@@ -2990,9 +3074,15 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
     // name it. An explicit `markup` argument still wins.
     let annotation = null;
     let annotationWaiting = false;
+    let annotationWarning = null;
     if (command === "edit" && !nonEmptyString(args.markup)) {
-      annotationWaiting = waitingAnnotations().length > 0;
-      annotation = await pendingAnnotation(imageInputPaths(args.images)[0]);
+      if (SIDEBAR_ENABLED) {
+        annotationWaiting = waitingAnnotations().length > 0;
+        annotation = await pendingAnnotation(imageInputPaths(args.images)[0]);
+      } else if (CODEX_SESSIONS) {
+        ({ annotation, warning: annotationWarning } = args._codex_marks
+          ?? await codexAnnotation([{ images: imageInputPaths(args.images), prompt: args.prompt }], provider, tempDir));
+      }
       if (annotation !== null) {
         if (annotation.mode === "flatten") {
           args = { ...args, _flatten_markup: annotation.layer };
@@ -3107,6 +3197,9 @@ async function runSingleImageCommand(command, args, resolvedProvider = null) {
           ...normalizedStringArray(enriched.warnings),
           args._model_capability_policy_warning,
         ];
+      }
+      if (annotationWarning) {
+        enriched.warnings = [...normalizedStringArray(enriched.warnings), annotationWarning];
       }
       enriched.timing = {
         ...enriched.timing,
@@ -3670,14 +3763,18 @@ function toolDefinitions() {
             type: "boolean",
             description: "Use the latest output when no input image is supplied.",
           },
-          markup: {
-            type: "string",
-            description:
-              "Leave unset: marks saved from the Fmage sidebar are attached automatically and never appear " +
-              "in the attachment itself. Pass a path only for a transparent PNG layer from elsewhere, drawn " +
-              "over the first input image. Requires an openai-images provider on a gpt-image-2.5 or 2.6 " +
-              "model, primary_image_index 0, the same canvas as that image, and no gif/svg output.",
-          },
+          ...(SIDEBAR_ENABLED
+            ? {
+                markup: {
+                  type: "string",
+                  description:
+                    "Leave unset: marks saved from the Fmage sidebar are attached automatically and never appear " +
+                    "in the attachment itself. Pass a path only for a transparent PNG layer from elsewhere, drawn " +
+                    "over the first input image. Requires an openai-images provider on a gpt-image-2.5 or 2.6 " +
+                    "model, primary_image_index 0, the same canvas as that image, and no gif/svg output.",
+                },
+              }
+            : {}),
         },
         required: ["prompt"],
         additionalProperties: false,
@@ -3828,10 +3925,10 @@ function resultText(result, options = {}) {
   // Facts about what was sent, never instructions: the agent cannot see the
   // sidebar marks, so this is its only evidence that they went with Image 1.
   if (result.annotation_applied === "markup") {
-    lines.push("Annotation: the sidebar markup layer was sent with Image 1 as the markup field.");
+    lines.push("Annotation: the markup layer was sent with Image 1 as the markup field.");
   } else if (result.annotation_applied === "flatten") {
     lines.push(
-      "Annotation: the sidebar marks were composited into the copy of Image 1 sent to the provider; the attachment itself is unchanged.",
+      "Annotation: the marks were composited into the copy of Image 1 sent to the provider; the attachment itself is unchanged.",
     );
   }
   for (const item of Array.isArray(result.original_restored) ? result.original_restored : []) {

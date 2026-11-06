@@ -51,7 +51,10 @@ class CodexRegistrationTests(unittest.TestCase):
                  patch.dict(rlr.os.environ, {"CODEX_HOME": ""}):
                 rlr.configure_codex_data_home(cache)
                 rlr.configure_codex_data_home(cache)
-            expected = {"FMAGE_DATA_HOME": str(home / ".codex" / "fmage")}
+            expected = {
+                "FMAGE_DATA_HOME": str(home / ".codex" / "fmage"),
+                "FMAGE_CODEX_SESSIONS": str(home / ".codex" / "sessions"),
+            }
             payload = json.loads((cache / ".mcp.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["mcpServers"]["Fmage"]["env"], expected)
             self.assertEqual(payload["mcpServers"]["Fmage"]["args"], ["./mcp/server.mjs"])

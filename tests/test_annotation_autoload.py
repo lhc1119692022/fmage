@@ -38,7 +38,13 @@ def binding_of(path: Path) -> dict[str, object]:
 class AnnotationSession:
     """Runs the MCP server against a data home that already holds one layer."""
 
-    def __init__(self, model: str, transport: str = "openai-images", cache_dir: bool = True) -> None:
+    def __init__(
+        self,
+        model: str,
+        transport: str = "openai-images",
+        cache_dir: bool = True,
+        sidebar: bool = True,
+    ) -> None:
         self.directory = tempfile.TemporaryDirectory()
         root = Path(self.directory.name)
         self.temp = root / "tmp"
@@ -68,6 +74,9 @@ class AnnotationSession:
             "TMP": str(self.temp),
             "TMPDIR": str(self.temp),
         }
+        self.environment.pop("FMAGE_SIDEBAR", None)
+        if sidebar:
+            self.environment["FMAGE_SIDEBAR"] = "1"
         self.process = subprocess.Popen(
             ["node", str(SERVER_PATH)],
             stdin=subprocess.PIPE,
@@ -265,7 +274,7 @@ class AnnotationAutoloadTests(unittest.TestCase):
         self.assertEqual(content["annotation_applied"], "markup")
         self.assertEqual(Path(content["markup"]).resolve(), layer.resolve())
         text = "\n".join(item.get("text", "") for item in result["content"])
-        self.assertIn("Annotation: the sidebar markup layer was sent with Image 1", text)
+        self.assertIn("Annotation: the markup layer was sent with Image 1", text)
 
     def test_a_bound_layer_recognizes_a_resized_reencoded_copy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -281,7 +290,7 @@ class AnnotationAutoloadTests(unittest.TestCase):
         self.assertEqual(content["annotation_applied"], "flatten")
         self.assertEqual(Path(content["flatten_markup"]).resolve(), layer.resolve())
         text = "\n".join(item.get("text", "") for item in result["content"])
-        self.assertIn("Annotation: the sidebar marks were composited into the copy of Image 1", text)
+        self.assertIn("Annotation: the marks were composited into the copy of Image 1", text)
 
     def test_a_layer_for_another_picture_is_skipped_without_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -318,6 +327,70 @@ class AnnotationAutoloadTests(unittest.TestCase):
         content = result["structuredContent"]
         self.assertEqual(content["annotation_applied"], "markup")
         self.assertEqual(Path(content["markup"]).resolve(), layer.resolve())
+
+    def assert_ran_without_a_layer(self, result: dict[str, object]) -> None:
+        content = result["structuredContent"]
+        self.assertNotIn("annotation_applied", content)
+        self.assertNotIn("annotation_waiting_not_matched", content)
+        self.assertIsNone(content.get("markup"))
+        self.assertIsNone(content.get("flatten_markup"))
+
+    def test_a_marked_copy_swapped_into_the_composer_edits_without_a_layer(self) -> None:
+        # A flatten save that swaps the composer image writes no layer at all.
+        with tempfile.TemporaryDirectory() as directory:
+            session = AnnotationSession("gpt-image-2.6")
+            self.addCleanup(session.close)
+            marked = Path(directory) / "marked.png"
+            gradient((96, 64)).save(marked)
+            result = self.edit(session, marked)
+        self.assert_ran_without_a_layer(result)
+
+    def test_a_comments_only_save_edits_without_a_layer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = AnnotationSession("gpt-image-2.6")
+            self.addCleanup(session.close)
+            image = Path(directory) / "cat.png"
+            gradient((96, 64)).save(image)
+            response = session.call("tools/call", {
+                "name": "edit_image",
+                "arguments": {
+                    "prompt": "图像 1： 1. (x: 22.1%, y: 26%) 改成红色",
+                    "images": [str(image)],
+                    "dry_run": True,
+                },
+            })
+        self.assertFalse(response["result"].get("isError"), json.dumps(response))
+        self.assert_ran_without_a_layer(response["result"])
+
+    def test_an_edit_after_the_layer_was_used_still_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = AnnotationSession("gpt-image-2.6")
+            self.addCleanup(session.close)
+            image = Path(directory) / "cat.png"
+            gradient((96, 64)).save(image)
+            layer = session.add_layer("markup", (96, 64), binding=binding_of(image))
+            meta_path = layer.parent / "meta.json"
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta["consumedAt"] = __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc
+            ).isoformat()
+            meta_path.write_text(json.dumps(meta), encoding="utf-8")
+            result = self.edit(session, image)
+        self.assert_ran_without_a_layer(result)
+
+    def test_a_host_without_the_sidebar_ignores_a_shared_layer(self) -> None:
+        # DeepSeek and Codex may name one cache_dir: Codex must not use or
+        # retire a layer the sidebar saved for the very same picture.
+        with tempfile.TemporaryDirectory() as directory:
+            session = AnnotationSession("gpt-image-2.6", sidebar=False)
+            self.addCleanup(session.close)
+            image = Path(directory) / "cat.png"
+            gradient((96, 64)).save(image)
+            layer = session.add_layer("markup", (96, 64), binding=binding_of(image))
+            result = self.edit(session, image)
+            meta = json.loads((layer.parent / "meta.json").read_text(encoding="utf-8"))
+        self.assert_ran_without_a_layer(result)
+        self.assertIsNone(meta["consumedAt"])
 
 
 if __name__ == "__main__":

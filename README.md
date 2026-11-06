@@ -221,6 +221,17 @@ not typo correction or automatic provider/model switching.
 
 ### Markup annotations (gpt-image-2.5 / 2.6)
 
+The hosts are separate. DeepSeek Desktop sets `FMAGE_SIDEBAR=1` for its annotation workbench below,
+and its skill rules live in `adapters/deepseek/skill-annotations/`.
+
+Codex has no `markup` argument. Its registration sets `FMAGE_CODEX_SESSIONS` instead: when the user
+marks an image with Codex's own markup tool, `edit_image` finds the marked preview in the session
+log and compares it with the original to recover a transparent layer. That layer goes out as
+`markup`, or composited on other models. It needs no model call, and the prompt is sent unchanged.
+A batch from one message, such as "give me 4 options", sends that one layer with every job. Marks on
+a later image are refused before any provider request; move the marked image first. Codex comments arrive as prompt text and need none of this. Codex's own tool refuses images above 20
+megapixels, so shrink those first.
+
 GPT Image 2.5 and 2.6 accept a separate transparent PNG as the `markup` field of
 `/images/edits`. The target image is sent untouched and the annotations arrive as their own
 layer, so the model removes the marks instead of reproducing them. `edit_image` exposes this
@@ -251,8 +262,10 @@ conversation:
 - `edit_image` looks for the newest unused layer drawn on its first input image (by SHA-256, or
   by a coarse luma fingerprint for a resized copy) and attaches it by itself: `--markup` on a
   2.5/2.6 `openai-images` provider, or a local composite (`--flatten-markup`) on any other model.
-  A layer saved for another picture is left alone. A used layer is retired; a failed request
-  leaves it in place.
+  A layer saved for another picture is left alone, and `annotation_waiting_not_matched` then only
+  reports that such a layer exists. A used layer is retired; a failed request leaves it in place.
+- Having no layer is not an error: a swapped flatten, a comments-only save, and an edit after the
+  layer was used all run without one.
 - Comments are inserted into the composer as ordinary prose in the shape the user would type,
   `图像 1： 1. (x: 22.1%, y: 26%) …`, so they reach the prompt without a machine path.
 - The annotated image has to be the first attachment, because that is the image the API treats as
