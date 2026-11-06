@@ -4,6 +4,11 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react');
     const { Button, Switch } = require('@deepseek-ai/dsh-client-ui-primitives');
+    // Menus portal to <body> as the host's own pickers do: the composer sits in
+    // a container that becomes the containing block for position:fixed, which
+    // would shift an inline menu by the width of the left sidebar.
+    let createPortal = null;
+    try { ({ createPortal } = require('react-dom')); } catch { /* render inline */ }
     const h = React.createElement;
     const { useEffect, useState, useCallback, useRef } = React;
     const NS = 'settings.fmage';
@@ -142,7 +147,7 @@ window.__ModuleLoader__.load({
 .fmg-ann-dot i{display:block;width:16px;height:16px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
 /* Narrow sidebars: tighten spacing so every control stays on screen with its icon and label. */
 @container (max-width:420px){.fmg-ann-bar{gap:1px;padding:5px 4px}.fmg-ann-tb{gap:4px;padding:0 6px}.fmg-ann-save{gap:4px;padding:0 9px}.fmg-ann-sep{margin:0 5px}.fmg-ann-ib{width:24px}.fmg-ann-dot{width:26px}}
-@container (max-width:330px){.fmg-ann-tb,.fmg-ann-save,.fmg-ann-prompt{font-size:12px;padding:0 5px}.fmg-ann-tb svg,.fmg-ann-save svg{width:14px;height:14px}.fmg-ann-sep{margin:0 2px}.fmg-ann-ib{width:21px}.fmg-ann-ib svg{width:16px;height:16px}.fmg-ann-dot{width:22px}}
+@container (max-width:360px){.fmg-ann-tb,.fmg-ann-save,.fmg-ann-prompt{font-size:12px;padding:0 5px}.fmg-ann-tb svg,.fmg-ann-save svg{width:14px;height:14px}.fmg-ann-sep{margin:0 2px}.fmg-ann-ib{width:21px}.fmg-ann-ib svg{width:16px;height:16px}.fmg-ann-dot{width:22px}}
 .fmg-ann-palette{position:absolute;top:56px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(4,22px);gap:7px;padding:9px;border-radius:12px;background:var(--dsw-alias-bg-layer-3,#fff);border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.08));box-shadow:0 8px 24px rgba(0,0,0,.16);z-index:9}
 .fmg-ann-palette button{width:22px;height:22px;padding:0;border:0;border-radius:50%;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
 .fmg-ann-palette button[aria-pressed=true]{box-shadow:0 0 0 2px var(--dsw-alias-bg-layer-3,#fff),0 0 0 3.5px #3e63dd}
@@ -978,36 +983,57 @@ window.__ModuleLoader__.load({
       ctx.restore();
     }
 
-    function annGlyph(paths, size) {
+    // Glyphs are Lucide icons (ISC licence, lucide.dev) on their 24px grid with
+    // the 2px round stroke they are drawn for, so the set reads as one family.
+    function annGlyph(paths, size, weight) {
       return h('svg', {
         width: size || 16, height: size || 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
-        strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
+        strokeWidth: weight || 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
       }, (Array.isArray(paths) ? paths : [paths]).map((d, index) => h('path', { key: index, d })));
     }
 
     const ANN_ICONS = {
-      annotate: ['M4 20c3-1 4.5-4 6-7s3-6 6-7', 'M14.5 4.5l5 5', 'M17 7l-9.5 9.5L5 19l2.5-2.5'],
-      comment: ['M20 11.5a7.5 7.5 0 0 1-11 6.6L4 19.5l1.4-4.6A7.5 7.5 0 1 1 20 11.5z', 'M9 11.5h6', 'M12 8.5v6'],
-      layers: ['M12 3 3 8l9 5 9-5-9-5z', 'M3 13l9 5 9-5'],
-      save: ['M5 12.5l4.5 4.5L19 7.5'],
-      select: ['M5 3.5l13 6.2-5.6 1.7-1.7 5.6z', 'M12.4 11.4 18 17'],
-      arrow: ['M5 19 19 5', 'M10 5h9v9'],
-      pen: ['M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z', 'M14.5 6.5l3 3'],
-      rect: ['M4.5 5.5h15v13h-15z'],
-      ellipse: ['M12 5c4.4 0 8 3.1 8 7s-3.6 7-8 7-8-3.1-8-7 3.6-7 8-7z'],
-      text: ['M5 6V4.5h14V6', 'M12 4.5v15', 'M9 19.5h6'],
-      eraser: ['M15.5 4.5l4 4a1.8 1.8 0 0 1 0 2.5L11 19.5H7.2L4.5 16.8a1.8 1.8 0 0 1 0-2.5l8.5-9.8a1.8 1.8 0 0 1 2.5 0z', 'M9 10l5.5 5.5', 'M11 19.5h8.5'],
-      undo: ['M9 14 4.5 9.5 9 5', 'M4.5 9.5h10a5 5 0 0 1 0 10H11'],
-      redo: ['M15 14l4.5-4.5L15 5', 'M19.5 9.5h-10a5 5 0 0 0 0 10H13'],
-      trash: ['M4.5 7h15', 'M9.5 7V4.5h5V7', 'M6.5 7l.9 12.5h9.2L17.5 7', 'M10.2 10.5v6', 'M13.8 10.5v6'],
-      check: ['M5 12.5l4.5 4.5L19 7.5'],
-      close: ['M7 7l10 10', 'M17 7 7 17'],
-      send: ['M12 18.5v-13', 'M6.5 11 12 5.5l5.5 5.5'],
-      rotate: ['M19 12a7 7 0 1 1-2.1-5', 'M19 4.5V9h-4.5'],
-      resize: ['M8 16l8-8', 'M11 8h5v5', 'M13 16H8v-5'],
-      move: ['M12 3.5v17', 'M3.5 12h17', 'M9.5 6 12 3.5 14.5 6', 'M9.5 18l2.5 2.5 2.5-2.5', 'M6 9.5 3.5 12 6 14.5', 'M18 9.5l2.5 2.5-2.5 2.5'],
-      minus: ['M6 12h12'],
-      plus: ['M6 12h12', 'M12 6v12'],
+      // pencil-line
+      annotate: ['M12 20h9', 'M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z', 'm15 5 3 3'],
+      // message-square-plus
+      comment: ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z', 'M12 7v6', 'M9 10h6'],
+      // layers
+      layers: ['M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z', 'M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12', 'M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17'],
+      // check
+      save: ['M20 6 9 17l-5-5'],
+      // mouse-pointer-2
+      select: ['M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z'],
+      // arrow-up-right
+      arrow: ['M7 7h10v10', 'M7 17 17 7'],
+      // pencil
+      pen: ['M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z', 'm15 5 4 4'],
+      // square
+      rect: ['M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z'],
+      // circle
+      ellipse: ['M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z'],
+      // type
+      text: ['M4 7V4h16v3', 'M9 20h6', 'M12 4v16'],
+      // eraser
+      eraser: ['m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21', 'M22 21H7', 'm5 11 9 9'],
+      // undo-2 / redo-2
+      undo: ['M9 14 4 9l5-5', 'M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11'],
+      redo: ['m15 14 5-5-5-5', 'M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13'],
+      // trash-2
+      trash: ['M3 6h18', 'M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6', 'M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2', 'M10 11v6', 'M14 11v6'],
+      check: ['M20 6 9 17l-5-5'],
+      // x
+      close: ['M18 6 6 18', 'm6 6 12 12'],
+      // arrow-up
+      send: ['m5 12 7-7 7 7', 'M12 19V5'],
+      // rotate-cw
+      rotate: ['M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8', 'M21 3v5h-5'],
+      // move-diagonal-2
+      resize: ['M19 13v6h-6', 'M5 11V5h6', 'm5 5 14 14'],
+      // move
+      move: ['M12 2v20', 'm15 19-3 3-3-3', 'm19 9 3 3-3 3', 'M2 12h20', 'm5 9-3 3 3 3', 'm9 5 3-3 3 3'],
+      // minus / plus
+      minus: ['M5 12h14'],
+      plus: ['M5 12h14', 'M12 5v14'],
     };
 
     const ANN_DRAW_TOOLS = [
@@ -1799,7 +1825,7 @@ window.__ModuleLoader__.load({
               h('button', {
                 type: 'button', className: 'fmg-ann-send', title: t('annSend'), 'aria-label': t('annSend'),
                 onClick: commitComment,
-              }, annGlyph(ANN_ICONS.send, 16)))
+              }, annGlyph(ANN_ICONS.send, 16, 2.4)))
             : h('div', { key: 'comment-editor', className: 'fmg-ann-card', style: { left, top, width }, onPointerDown: stopUi },
               h('textarea', {
                 autoFocus: true, value: editing.text, placeholder: t('annCommentPlaceholder'), 'aria-label': t('annComment'),
@@ -1834,20 +1860,20 @@ window.__ModuleLoader__.load({
             h('span', {
               className: 'fmg-ann-handle is-rotate', title: t('annRotate'), 'aria-label': t('annRotate'), role: 'button',
               onPointerDown: startHandle('rotate', selectedShape),
-            }, annGlyph(ANN_ICONS.rotate, 13)),
+            }, annGlyph(ANN_ICONS.rotate, 13, 2.6)),
             h('button', {
               type: 'button', className: 'fmg-ann-handle is-del', title: t('annDeleteText'), 'aria-label': t('annDeleteText'),
               onPointerDown: stopUi,
               onClick: () => { remember(); setShapes(list => list.filter(item => item.id !== selectedShape.id)); setSelected(null); },
-            }, annGlyph(ANN_ICONS.close, 13)),
+            }, annGlyph(ANN_ICONS.close, 13, 2.6)),
             h('span', {
               className: 'fmg-ann-handle is-size', title: t('annResize'), 'aria-label': t('annResize'), role: 'button',
               onPointerDown: startHandle('resize', selectedShape),
-            }, annGlyph(ANN_ICONS.resize, 13)),
+            }, annGlyph(ANN_ICONS.resize, 13, 2.6)),
             h('span', {
               className: 'fmg-ann-handle is-move', title: t('annMove'), 'aria-label': t('annMove'), role: 'button',
               onPointerDown: startHandle('move', selectedShape),
-            }, annGlyph(ANN_ICONS.move, 13))));
+            }, annGlyph(ANN_ICONS.move, 13, 2.6))));
         }
 
         if (textEdit) {
@@ -2004,6 +2030,7 @@ window.__ModuleLoader__.load({
     // Composer pill: reads the same config route as the settings page and writes
     // only `default_provider`, so the two surfaces cannot disagree.
     let pillText = key => key;
+    const portal = node => (createPortal && typeof document !== 'undefined' ? createPortal(node, document.body) : node);
     function ProviderPill() {
       const [view, setView] = useState(null);
       const [open, setOpen] = useState(false);
@@ -2011,6 +2038,7 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState('');
       const [menu, setMenu] = useState(null);
       const buttonRef = useRef(null);
+      const menuRef = useRef(null);
       const load = useCallback(async () => {
         try { setView(await request(ROUTE)); }
         catch (e) { setError(e.message); }
@@ -2021,14 +2049,19 @@ window.__ModuleLoader__.load({
         const place = () => {
           const rect = buttonRef.current && buttonRef.current.getBoundingClientRect();
           if (!rect) return;
-          // Keep the 340px menu inside the viewport, and open downward when the
-          // composer leaves no room above it.
-          const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - 348));
-          setMenu(rect.top >= 372
-            ? { left, bottom: window.innerHeight - rect.top + 6 }
-            : { left, top: rect.bottom + 6 });
+          // Same placement as the host's model picker: above the pill, right
+          // edges aligned, 8px gap, 12px from the window edge; below the pill
+          // only when the menu does not fit above it.
+          const width = menuRef.current ? menuRef.current.offsetWidth : Math.min(350, window.innerWidth - 24);
+          const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - 12 - width));
+          const height = menuRef.current ? menuRef.current.offsetHeight : 360;
+          setMenu(rect.top - 8 - 12 >= height || rect.top > window.innerHeight - rect.bottom
+            ? { left, bottom: window.innerHeight - rect.top + 8 }
+            : { left, top: rect.bottom + 8 });
         };
         place();
+        // Measured again once the list has rendered, so the flip uses its real height.
+        const frame = requestAnimationFrame(place);
         const onDown = event => {
           if (buttonRef.current && buttonRef.current.contains(event.target)) return;
           if (event.target instanceof Element && event.target.closest('.fmg-pill-menu')) return;
@@ -2040,6 +2073,7 @@ window.__ModuleLoader__.load({
         window.addEventListener('resize', place);
         window.addEventListener('scroll', place, true);
         return () => {
+          cancelAnimationFrame(frame);
           document.removeEventListener('mousedown', onDown, true);
           document.removeEventListener('keydown', onKey, true);
           window.removeEventListener('resize', place);
@@ -2077,7 +2111,7 @@ window.__ModuleLoader__.load({
           h('span', { className: 'fmg-pill-caret', 'aria-hidden': true },
             h('svg', { width: 10, height: 10, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
               h('path', { d: 'M4 10l4-4 4 4' })))),
-        open && menu ? h('div', { className: 'fmg-pill-menu', role: 'menu', 'aria-label': t('pillTitle'), style: menu },
+        open && menu ? portal(h('div', { ref: menuRef, className: 'fmg-pill-menu', role: 'menu', 'aria-label': t('pillTitle'), style: menu },
           h('div', { className: 'fmg-pill-list' },
             enabled.map(provider => {
               const active = provider.name === current.name;
@@ -2099,7 +2133,7 @@ window.__ModuleLoader__.load({
                   }, h('path', { d: 'M2.5 8.5l3.5 3.5 7-8' }))
                   : null));
             })),
-          error ? h('div', { className: 'fmg-pill-error', role: 'alert' }, `${t('pillSwitchFailed')}: ${error}`) : null) : null);
+          error ? h('div', { className: 'fmg-pill-error', role: 'alert' }, `${t('pillSwitchFailed')}: ${error}`) : null)) : null);
     }
 
     return {

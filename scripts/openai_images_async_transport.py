@@ -653,6 +653,9 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
             image_paths[primary_index], flatten_layer, run_dir
         )
         size_notes.append("markup_flattened_into_target")
+    if markup_path is not None:
+        markup_path, layer_notes = openai.conform_markup_layer(markup_path, image_paths[primary_index], run_dir)
+        size_notes.extend(layer_notes)
     if not args.size and not args.aspect:
         if markup_path:
             output, markup_output, notes = openai.prepare_edit_pair(

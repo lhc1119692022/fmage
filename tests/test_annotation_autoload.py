@@ -118,6 +118,26 @@ class AnnotationAutoloadTests(unittest.TestCase):
         self.assertEqual(content["annotation_applied"], "markup")
         self.assertEqual(Path(content["markup"]).resolve(), layer.resolve())
 
+    def test_a_layer_drawn_on_the_original_attaches_to_the_hosts_scaled_copy(self) -> None:
+        # The sidebar draws on the original file; the chat hands the model a
+        # normalized copy a few pixels smaller (2368x1776 -> 2364x1773).
+        with tempfile.TemporaryDirectory() as directory:
+            session = AnnotationSession("gpt-image-2.6")
+            self.addCleanup(session.close)
+            layer = session.add_layer("markup", (592, 444))
+            reference = Path(directory) / "attachment.jpg"
+            Image.new("RGB", (591, 443), (40, 70, 100)).save(reference, format="JPEG")
+            response = session.call("tools/call", {
+                "name": "edit_image",
+                "arguments": {"prompt": "follow the marks", "images": [str(reference)], "dry_run": True},
+            })
+        payload = json.dumps(response)
+        self.assertNotIn("error", response, payload)
+        self.assertFalse(response["result"].get("isError"), payload)
+        content = response["result"]["structuredContent"]
+        self.assertEqual(content["annotation_applied"], "markup")
+        self.assertEqual(Path(content["markup"]).resolve(), layer.resolve())
+
     def test_a_flatten_layer_targets_the_compositing_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             session = AnnotationSession("gpt-image-2")

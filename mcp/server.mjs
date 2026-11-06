@@ -3400,9 +3400,10 @@ function toolDefinitions() {
           markup: {
             type: "string",
             description:
-              "Transparent PNG annotation layer drawn over the first input image. Requires an openai-images " +
-              "provider on a gpt-image-2.5 or 2.6 model, primary_image_index 0, identical pixel dimensions, " +
-              "and no gif/svg output. Omit it to send annotations flattened into the image instead.",
+              "Leave unset: marks saved from the Fmage sidebar are attached automatically and never appear " +
+              "in the attachment itself. Pass a path only for a transparent PNG layer from elsewhere, drawn " +
+              "over the first input image. Requires an openai-images provider on a gpt-image-2.5 or 2.6 " +
+              "model, primary_image_index 0, the same canvas as that image, and no gif/svg output.",
           },
         },
         required: ["prompt"],

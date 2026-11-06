@@ -766,7 +766,7 @@ class MarkupTests(unittest.TestCase):
                 "edit", "--prompt", "t", "--model", "gpt-image-2.6-flare",
                 "--image", str(reference), "--markup", str(overlay),
             )
-            with self.assertRaisesRegex(ValueError, "both must have identical width and height"):
+            with self.assertRaisesRegex(ValueError, "same canvas at another scale"):
                 transport.validate_markup(args, [reference], 0)
 
     def test_accepts_a_matching_layer_and_reports_it_in_a_dry_run(self) -> None:
@@ -851,6 +851,61 @@ class MarkupTests(unittest.TestCase):
             self.assertEqual(layer_out, overlay)
             self.assertIn("reference_image_kept_within_canvas_tolerance", notes)
             self.assertEqual(sorted(path.name for path in Path(temp_dir).glob("*.png")), ["layer.png", "ref.png"])
+
+    def test_a_layer_drawn_on_the_original_fits_the_hosts_scaled_copy(self) -> None:
+        # The sidebar draws on the 2368x1776 original; the model receives the
+        # host's 2364x1773 normalized copy of the same attachment.
+        self.assertTrue(transport.layer_fits_image((2368, 1776), (2364, 1773)))
+        self.assertTrue(transport.layer_fits_image((1254, 1254), (1254, 1254)))
+        self.assertTrue(transport.layer_fits_image((4000, 3000), (2048, 1536)))
+        self.assertFalse(transport.layer_fits_image((2368, 1776), (2364, 1700)))
+        self.assertFalse(transport.layer_fits_image((600, 240), (600, 200)))
+
+    def test_the_sent_layer_is_scaled_to_the_first_input_image(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.jpg"
+            overlay = Path(temp_dir) / "layer.png"
+            Image.new("RGB", (591, 443), (200, 200, 200)).save(reference, format="JPEG")
+            layer = Image.new("RGBA", (592, 444), (0, 0, 0, 0))
+            for x in range(100, 300):
+                for y in range(200, 210):
+                    layer.putpixel((x, y), (255, 0, 0, 255))
+            layer.save(overlay)
+            args = self.parse(
+                "edit", "--prompt", "t", "--model", "gpt-image-2.6-flare", "--base-url",
+                "https://api.openai.com/v1", "--image", str(reference),
+                "--markup", str(overlay), "--output-dir", temp_dir,
+            )
+            transport.validate_markup(args, [reference], 0)
+            response = {"data": [{"b64_json": base64.b64encode(self.png_bytes()).decode("ascii")}]}
+            with (mock.patch.object(transport, "api_key", return_value="test-key"),
+                  mock.patch.object(transport, "multipart_request", return_value=response) as submit):
+                transport.run_edit(args)
+            files = submit.call_args.args[2]
+            self.assertEqual([name for name, _ in files], ["image", "markup"])
+            with Image.open(files[0][1]) as sent_image, Image.open(files[1][1]) as sent_layer:
+                self.assertEqual(sent_layer.size, sent_image.size)
+                self.assertEqual(sent_layer.mode, "RGBA")
+                self.assertEqual(sent_layer.getpixel((5, 5))[3], 0)
+                red = sent_layer.getpixel((200, 204))
+                self.assertGreater(red[3], 200)
+                self.assertGreater(red[0], 200)
+
+    def test_flatten_paints_a_layer_drawn_on_the_original_onto_the_scaled_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference = Path(temp_dir) / "ref.png"
+            overlay = Path(temp_dir) / "layer.png"
+            Image.new("RGB", (300, 200), (0, 0, 255)).save(reference)
+            layer = Image.new("RGBA", (600, 400), (0, 0, 0, 0))
+            for x in range(0, 600):
+                for y in range(190, 210):
+                    layer.putpixel((x, y), (255, 255, 0, 255))
+            layer.save(overlay)
+            output = transport.flatten_markup_onto_image(reference, overlay, Path(temp_dir))
+            with Image.open(output) as flat:
+                self.assertEqual(flat.size, (300, 200))
+                self.assertEqual(flat.getpixel((150, 100))[:3], (255, 255, 0))
+                self.assertEqual(flat.getpixel((150, 20))[:3], (0, 0, 255))
 
     @staticmethod
     def png_bytes(size: tuple[int, int] = (32, 32)) -> bytes:

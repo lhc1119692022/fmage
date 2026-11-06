@@ -1288,18 +1288,60 @@ def flatten_markup_argument(args: argparse.Namespace) -> Path | None:
     return Path(value)
 
 
+def layer_fits_image(layer_size: tuple[int, int], image_size: tuple[int, int]) -> bool:
+    """True when the image is the layer's own canvas, possibly rescaled.
+
+    Chat hosts hand the model a normalized copy of an attachment, for example
+    2364x1773 for a 2368x1776 original, while the sidebar draws on the
+    original. A copy is accepted when each side matches the other side's
+    scaled length to within one pixel of rounding; any other shape is a
+    different picture and stays an error.
+    """
+    (lw, lh), (iw, ih) = layer_size, image_size
+    if (lw, lh) == (iw, ih):
+        return True
+    if min(lw, lh, iw, ih) <= 0:
+        return False
+    return abs(round(lh * iw / lw) - ih) <= 1 and abs(round(lw * ih / lh) - iw) <= 1
+
+
+def scaled_layer(layer: Any, size: tuple[int, int]) -> Any:
+    """The layer as RGBA at `size`, resampled with premultiplied alpha."""
+    from PIL import Image
+
+    rgba = layer.convert("RGBA")
+    if rgba.size == size:
+        return rgba
+    # Premultiplying keeps transparent pixels' hidden colour out of stroke edges.
+    return rgba.convert("RGBa").resize(size, Image.Resampling.LANCZOS).convert("RGBA")
+
+
+def conform_markup_layer(layer_path: Path, image_path: Path, output_dir: Path) -> tuple[Path, list[str]]:
+    """Return a layer whose pixels match the first input image exactly."""
+    from PIL import Image
+
+    image_size = image_dimensions(image_path)
+    with Image.open(layer_path) as layer:
+        if image_size is None or layer.size == image_size:
+            return layer_path, []
+        output = output_dir / f"{layer_path.stem}-{image_size[0]}x{image_size[1]}.png"
+        scaled_layer(layer, image_size).save(output, format="PNG")
+    return output, ["markup_layer_scaled_to_input_image"]
+
+
 def flatten_markup_onto_image(image_path: Path, layer_path: Path, output_dir: Path) -> Path:
     """Composite one annotation layer onto one image and return the new file."""
     from PIL import Image
 
     with Image.open(image_path) as base, Image.open(layer_path) as layer:
         canvas = base.convert("RGBA")
-        if layer.size != canvas.size:
+        if not layer_fits_image(layer.size, canvas.size):
             raise ValueError(
                 f"--flatten-markup layer is {layer.size[0]}x{layer.size[1]} but the edited image is "
-                f"{canvas.size[0]}x{canvas.size[1]}; both must have identical width and height."
+                f"{canvas.size[0]}x{canvas.size[1]}; the layer must match the image or be the same "
+                "canvas at another scale."
             )
-        canvas.alpha_composite(layer.convert("RGBA"))
+        canvas.alpha_composite(scaled_layer(layer, canvas.size))
         output = output_dir / f"{image_path.stem}-annotated.png"
         canvas.save(output, format="PNG")
     return output
@@ -1372,10 +1414,11 @@ def validate_markup(
 
     with Image.open(markup_path) as layer:
         layer_size = layer.size
-    if layer_size != image_size:
+    if not layer_fits_image(layer_size, image_size):
         raise ValueError(
             f"--markup layer is {layer_size[0]}x{layer_size[1]} but the first input image is "
-            f"{image_size[0]}x{image_size[1]}; both must have identical width and height."
+            f"{image_size[0]}x{image_size[1]}; the layer must match the image or be the same canvas "
+            "at another scale."
         )
     if image_size[0] * image_size[1] > MARKUP_MAX_PIXELS:
         raise ValueError(
@@ -1517,6 +1560,9 @@ def run_edit(args: argparse.Namespace) -> dict[str, Any]:
             image_paths[primary_index], flatten_layer, run_dir
         )
         size_notes.append("markup_flattened_into_target")
+    if markup_path is not None:
+        markup_path, layer_notes = conform_markup_layer(markup_path, image_paths[primary_index], run_dir)
+        size_notes.extend(layer_notes)
     if not args.size and not args.aspect:
         if markup_path:
             # The layer and the target must share one canvas, so the same fit
