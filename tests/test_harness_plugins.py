@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tarfile
@@ -259,6 +260,10 @@ class HarnessPluginsTests(unittest.TestCase):
             self.assertNotIn("config/providers.json", files)
             self.assertNotIn("scripts/harness_plugins.py", files)
             self.assertIn("config/gpt-image-model-families.json", files)
+            # Every file the MCP server loads from the plugin root must ship.
+            server = (hp.ROOT / "mcp/server.mjs").read_text(encoding="utf-8")
+            for directory, name in re.findall(r'join\(PLUGIN_ROOT, "(scripts|config)", "([^"]+)"\)', server):
+                self.assertIn(f"{directory}/{name}", files)
             archive = hp.build_archive(files, out)
             hp.verify_archive(files, out)
             with tarfile.open(archive) as z:

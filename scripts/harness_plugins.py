@@ -33,6 +33,8 @@ RUNTIME_SCRIPTS = (
     "banana_models.py", "gemini_generate_content_transport.py",
     "midjourney_transport.py", "transport_common.py",
     "openai_images_transport.py", "openai_images_async_transport.py",
+    # Matches sidebar annotations to a host-normalized copy of the upload.
+    "image_fingerprint.py",
 )
 CONFIG_FILES = ("providers.example.json", "workflows.example.json", "midjourney-v8.2-contract.json", "banana-model-capabilities.json", "gpt-image-model-families.json")
 # Harness checks dsh peers with includePrerelease=True. Keep the oldest
