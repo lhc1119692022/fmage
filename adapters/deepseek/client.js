@@ -230,7 +230,7 @@ window.__ModuleLoader__.load({
       annToolEraser: '橡皮', annCancel: '取消', annSaveComment: '保存',
       annTextPrompt: '输入文字',
       annRemoveComment: '删除这条评论',
-      annLoadFailed: '图片读取失败。', annFailed: '操作失败', annRestored: '已恢复上次的标注。',
+      annLoadFailed: '图片读取失败。', annFailed: '操作失败',
       showPill: '在输入栏显示生图胶囊', showPillHint: '关闭后仍可在下方列表切换默认提供商；改动在下一次请求生效。',
       orderHint: '拖动只改变回退顺序；默认提供商由星标决定。',
       advanced: '高级：排序与回退',
@@ -285,7 +285,7 @@ window.__ModuleLoader__.load({
       annExportedSilent: 'Saved; there were no comments to insert.',
       annTextPrompt: 'Type text',
       annRemoveComment: 'Remove this comment',
-      annLoadFailed: 'The image could not be read.', annFailed: 'The operation failed', annRestored: 'Restored the previous annotation.',
+      annLoadFailed: 'The image could not be read.', annFailed: 'The operation failed',
       showPill: 'Show the image provider pill in the composer', showPillHint: 'Turning it off keeps the list below and the saved default; changes apply to the next request.',
       orderHint: 'Dragging only changes the fallback order; the star sets the default provider.',
       advanced: 'Advanced: order and fallback',
@@ -768,8 +768,22 @@ window.__ModuleLoader__.load({
     const ANN_TAB_ID = 'dsh-fmage/annotation';
     const ANN_MODEL = /gpt[-_\s]+image[-_\s]+2\.[56](?:\.[0-9]+)*(?=$|[^a-z0-9.])/i;
     const ANN_COLORS = ['#e5484d', '#f5a524', '#12a594', '#4c78ff'];
-    // v2: comments carry their own position and text boxes are top-left anchored.
-    const ANN_STORE = 'dsh-fmage/annotation/v2';
+    // Marks belong to one composer attachment, not to the picture: a draft is
+    // keyed by the attachment's object URL (new for every upload) and kept in
+    // memory only, so it survives closing the panel or switching thumbnails but
+    // is dropped once the attachment leaves the composer (sent or removed).
+    // Uploading the same image again therefore starts from a blank canvas.
+    const annDrafts = new Map();
+    // Earlier builds kept drafts in localStorage keyed by file name and size,
+    // which brought old marks back on a new task. Clear those once.
+    try {
+      const legacy = [];
+      for (let i = 0; i < window.localStorage.length; i += 1) {
+        const key = window.localStorage.key(i);
+        if (key && key.startsWith('dsh-fmage/annotation/')) legacy.push(key);
+      }
+      legacy.forEach(key => window.localStorage.removeItem(key));
+    } catch { /* storage unavailable */ }
     let annText = key => key;
 
     function isMarkupModel(model) { return ANN_MODEL.test(String(model || '')); }
@@ -806,19 +820,18 @@ window.__ModuleLoader__.load({
       return new Promise(resolve => { canvas.toBlob(blob => resolve(blob), 'image/png'); });
     }
 
-    function annotationKey(source) {
-      return `${ANN_STORE}/${source.name}/${source.width}x${source.height}`;
+    function readAnnotation(url) {
+      return annDrafts.get(url) || null;
     }
 
-    function readAnnotation(key) {
-      try {
-        const raw = window.localStorage.getItem(key);
-        return raw ? JSON.parse(raw) : null;
-      } catch { return null; }
+    function writeAnnotation(url, value) {
+      if (value.shapes.length || value.comments.length) annDrafts.set(url, value);
+      else annDrafts.delete(url);
     }
 
-    function writeAnnotation(key, value) {
-      try { window.localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota or privacy mode */ }
+    /** Forget drafts whose attachment is no longer in the composer. */
+    function pruneAnnotations(live) {
+      for (const url of Array.from(annDrafts.keys())) if (!live.has(url)) annDrafts.delete(url);
     }
 
     function arrowHead(from, to, size) {
@@ -1084,6 +1097,9 @@ window.__ModuleLoader__.load({
       const [spaceHeld, setSpaceHeld] = useState(false);
       const [panning, setPanning] = useState(false);
       const [drafts, setDrafts] = useState([]);
+      // Which attachment the current shapes belong to; writes wait until the
+      // restore for a newly opened attachment has landed.
+      const [owner, setOwner] = useState(null);
       const [dragging, setDragging] = useState(false);
       const rootRef = useRef(null);
       const stageRef = useRef(null);
@@ -1157,29 +1173,23 @@ window.__ModuleLoader__.load({
 
       useEffect(() => {
         if (!source) return;
-        const stored = readAnnotation(annotationKey(source));
-        // localStorage is user-editable; drop entries that would break rendering.
-        const finite = value => Number.isFinite(value);
-        const shapeOk = item => item && typeof item === 'object' && (
-          (item.type === 'pen' || item.type === 'erase') ? Array.isArray(item.points) && item.points.length && item.points.every(p => p && finite(p.x) && finite(p.y))
-            : item.type === 'text' ? typeof item.text === 'string' && finite(item.x) && finite(item.y) && finite(item.size)
-              : ['arrow', 'rect', 'ellipse'].includes(item.type) && [item.x1, item.y1, item.x2, item.y2].every(finite));
-        const commentOk = item => item && typeof item.text === 'string' && finite(item.x) && finite(item.y);
-        setShapes(Array.isArray(stored && stored.shapes) ? stored.shapes.filter(shapeOk) : []);
-        setComments(Array.isArray(stored && stored.comments) ? stored.comments.filter(commentOk) : []);
+        const stored = readAnnotation(source.url);
+        setShapes(stored ? stored.shapes : []);
+        setComments(stored ? stored.comments : []);
+        setOwner(source.url);
         setPast([]);
         setFuture([]);
         setEditing(null);
         setTextEdit(null);
         setSelected(null);
         setView({ zoom: 1, x: 0, y: 0 });
-        if (stored && ((stored.shapes || []).length || (stored.comments || []).length)) notify(t('annRestored'));
-      }, [source, t]);
+      }, [source]);
 
       useEffect(() => {
-        if (!source) return;
-        writeAnnotation(annotationKey(source), { shapes, comments });
-      }, [source, shapes, comments]);
+        if (!source || owner !== source.url) return;
+        writeAnnotation(source.url, { shapes, comments });
+      }, [source, owner, shapes, comments]);
+
 
       const openSource = async candidate => {
         try {
@@ -1197,16 +1207,38 @@ window.__ModuleLoader__.load({
         }
       };
 
+      // Follow the composer. With nothing open, the first attachment opens by
+      // itself; once the open attachment is sent or removed, its draft goes
+      // and the panel moves on, so a later upload of the same picture starts
+      // blank.
+      const opening = useRef(null);
       useEffect(() => {
-        if (source) return undefined;
-        const bind = () => {
+        let frame = 0;
+        const check = () => {
+          frame = 0;
+          // No composer on screen (another view): nothing to compare against.
+          if (!document.querySelector('[data-composer-card]')) return;
           const found = composerImages();
+          const live = new Set(found.map(item => item.url));
+          pruneAnnotations(live);
+          if (source && live.has(source.url)) return;
+          if (source) { setSource(null); setOwner(null); }
           setDrafts(found);
-          if (found.length) void openSource({ ...found[0], draftIndex: 0 });
+          if (found.length && opening.current !== found[0].url) {
+            opening.current = found[0].url;
+            void openSource({ ...found[0], draftIndex: 0 }).finally(() => { opening.current = null; });
+          }
         };
-        bind();
-        window.addEventListener('focus', bind);
-        return () => window.removeEventListener('focus', bind);
+        const schedule = () => { if (!frame) frame = window.requestAnimationFrame(check); };
+        const observer = new MutationObserver(schedule);
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+        window.addEventListener('focus', schedule);
+        check();
+        return () => {
+          observer.disconnect();
+          window.removeEventListener('focus', schedule);
+          if (frame) window.cancelAnimationFrame(frame);
+        };
       }, [source]);
 
       // ---- layout ---------------------------------------------------------
