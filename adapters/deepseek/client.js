@@ -94,7 +94,7 @@ window.__ModuleLoader__.load({
 /* Composer pill: sits in the conversation.input.right seat. */
 .fmg-pill{position:relative;display:inline-flex;align-items:center}
 /* Same ghost trigger as the host's composer model selector. */
-.fmg-pill-button{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 4px 0 8px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,#4b5563);font:inherit;font-size:13px;font-weight:400;line-height:20px;cursor:pointer;transition:background .15s}
+.fmg-pill-button{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 6px 0 9px;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#4b5563);font:inherit;font-size:13px;font-weight:400;line-height:20px;cursor:pointer;transition:background .15s}
 .fmg-pill-button:hover:not(:disabled),.fmg-pill-button.is-open{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}
 .fmg-pill-button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#4c78ff);outline-offset:1px}
 .fmg-pill-button svg{flex:none}
@@ -102,9 +102,10 @@ window.__ModuleLoader__.load({
 .fmg-pill-label{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fmg-pill-caret{display:inline-flex;flex:none;color:var(--dsw-alias-label-caption,#9ca3af);transition:transform .12s}
 .fmg-pill-button.is-open .fmg-pill-caret{transform:rotate(180deg)}
-@container (max-width:700px){.fmg-pill-caret{display:none}.fmg-pill-button{padding:0 4px 0 6px}}
-/* One left-aligned line, "<model> · <provider>", with the selected check on the right. */
-.fmg-pill-menu{position:fixed;z-index:1200;display:flex;flex-direction:column;width:min(340px,calc(100vw - 24px));max-height:min(360px,calc(100vh - 48px));padding:4px;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:12px;background:var(--dsw-alias-bg-layer-3,#fff);box-shadow:0 10px 28px rgba(0,0,0,.16);overflow:hidden;color:var(--dsw-alias-label-primary)}
+@container (max-width:700px){.fmg-pill-caret{display:none}.fmg-pill-button{padding:0 6px 0 8px}}
+/* One left-aligned line, "<provider> · <model>", with the selected check on the right.
+   The line is one run of text, so only its end is truncated with an ellipsis. */
+.fmg-pill-menu{position:fixed;z-index:1200;display:flex;flex-direction:column;width:min(248px,calc(100vw - 24px));max-height:min(360px,calc(100vh - 48px));padding:4px;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:12px;background:var(--dsw-alias-bg-layer-3,#fff);box-shadow:0 10px 28px rgba(0,0,0,.16);overflow:hidden;color:var(--dsw-alias-label-primary)}
 .fmg-pill-list{min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding-right:2px}
 .fmg-pill-list::-webkit-scrollbar{width:8px}
 .fmg-pill-list::-webkit-scrollbar-track{background:transparent}
@@ -2653,11 +2654,10 @@ window.__ModuleLoader__.load({
         const place = () => {
           const rect = buttonRef.current && buttonRef.current.getBoundingClientRect();
           if (!rect) return;
-          // Same placement as the host's model picker: above the pill, right
-          // edges aligned, 8px gap, 12px from the window edge; below the pill
-          // only when the menu does not fit above it.
-          const width = menuRef.current ? menuRef.current.offsetWidth : Math.min(350, window.innerWidth - 24);
-          const left = Math.max(12, Math.min(rect.right - width, window.innerWidth - 12 - width));
+          // Above the pill, left edges aligned, 8px gap, 12px from the window
+          // edge; below the pill only when the menu does not fit above it.
+          const width = menuRef.current ? menuRef.current.offsetWidth : Math.min(248, window.innerWidth - 24);
+          const left = Math.max(12, Math.min(rect.left, window.innerWidth - 12 - width));
           const height = menuRef.current ? menuRef.current.offsetHeight : 360;
           setMenu(rect.top - 8 - 12 >= height || rect.top > window.innerHeight - rect.bottom
             ? { left, bottom: window.innerHeight - rect.top + 8 }
@@ -2723,13 +2723,13 @@ window.__ModuleLoader__.load({
               return h('button', {
                 key: provider.name, type: 'button', role: 'menuitemradio', 'aria-checked': active,
                 className: 'fmg-pill-option', disabled: pending,
-                title: `${provider.model || '—'} · ${provider.name}${ready ? '' : ` · ${t('pillKeyMissing')}`}`,
+                title: `${provider.name} · ${provider.model || '—'}${ready ? '' : ` · ${t('pillKeyMissing')}`}`,
                 onClick: () => { void select(provider.name); },
               },
                 h('span', { className: 'fmg-pill-text' },
-                  provider.model || '—',
+                  h('span', { className: 'fmg-pill-provider' }, provider.name),
                   h('span', { className: 'fmg-pill-sep', 'aria-hidden': true }, '·'),
-                  h('span', { className: 'fmg-pill-provider' }, provider.name)),
+                  h('span', { className: 'fmg-pill-model' }, provider.model || '—')),
                 h('span', { className: 'fmg-pill-check', 'aria-hidden': true }, active
                   ? h('svg', {
                     width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor',
